@@ -35,7 +35,7 @@ dependencies = [
     "umap-learn",
     "llvmlite",
     "boto3",
-    "xarray",
+    "xarray==2025.10.1",
     "h5netcdf",
     "emcee",
     "corner",
