@@ -1,4 +1,6 @@
 # Generic gitignore for now :
+build/
+dist/
 
 # Python
 __pycache__/
