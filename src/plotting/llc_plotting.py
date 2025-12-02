@@ -20,9 +20,7 @@ def plot_log_faces_layout(da, color_map = cmocean.cm.thermal, vmin=None, vmax=No
 
     plot_llc_faces_layout(logvals_xarray, color_map, vmin=vmin, vmax=vmax)
 
-
 def plot_pdf_dask(da_xr, title, bins=200):
-
     vals = np.abs(da_xr.values.ravel())
     vals = vals[(vals > 0) & ~np.isnan(vals)]
 
