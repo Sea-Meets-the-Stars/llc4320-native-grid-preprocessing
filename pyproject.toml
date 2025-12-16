@@ -49,7 +49,8 @@ dependencies = [
     "gsw",
     "cmocean",
     "xgcm",
-    "seawater"
+    "seawater",
+    "ecco_v4_py"
 ]
 
 [project.optional-dependencies]
