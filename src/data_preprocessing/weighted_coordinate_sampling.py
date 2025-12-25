@@ -7,10 +7,15 @@ import data_preprocessing.stats as stats
 
 # SAMPLING ON NATIVE GRID ----------------------------------------
 
+
 # Calculate a weight of all points on the grid based on input xarray
 # Higher values of input xarray will be more liklely to be sampled
+# Uses provided mask to mask out invalid points
 # Returns indices into grid with native coordinates
-def weighted_sample_on_grid(points_to_sample, bias, da):
+def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
+    if (mask is not None):
+        # mask da
+        da = np.where(mask, da, np.nan)
 
     weights = bias * da
 
@@ -44,8 +49,6 @@ def weighted_sample_on_grid(points_to_sample, bias, da):
 
 # x must = da.values
 def sample_linearly_on_pdf(x, points_to_sample, display):
-
-
     # Calculate pdf
     hist, edges, pdf, cdf = stats.compute_pdf(x, nbins=10, eps=0)
 

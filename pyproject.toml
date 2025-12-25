@@ -50,7 +50,9 @@ dependencies = [
     "cmocean",
     "xgcm",
     "seawater",
-    "ecco_v4_py"
+    "ecco_v4_py",
+    "fastparquet",
+    "scikit-fmm"
 ]
 
 [project.optional-dependencies]

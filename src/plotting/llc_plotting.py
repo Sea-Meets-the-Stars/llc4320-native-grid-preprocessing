@@ -79,7 +79,7 @@ def plot_a_face_by_var(ds, face, color_map=cmocean.cm.thermal, vmin=None, vmax=N
     #var_slice.plot() #(vmin=-5.0, vmax=5.0)
     var_slice.plot.pcolormesh(cmap=color_map, vmin=vmin,vmax=vmax)
 
-    plt.title(f"{VARIABLE}")
+    #plt.title(f"{VARIABLE}")
     plt.show()
 
 # plot_a_face_by_var(ds_merge.Theta, 0)
@@ -99,7 +99,8 @@ def plot_a_face_by_two_var(ds0,ds1, ds0_name, ds1_name, face,color_map=cmocean.c
 
     plt.show()
 
-def plot_llc_faces_layout(ds, color_map = cmocean.cm.thermal, vmin=None, vmax=None):
+# todo you we need to generate vmin vmax or it will not be consistent accross faces
+def plot_llc_faces_layout(ds, color_map = cmocean.cm.thermal, vmin=None, vmax=None, is_mask=False):
     # Layout (row, col) positions of the 13 faces
     layout = {
         0:  (4, 0),
@@ -129,7 +130,12 @@ def plot_llc_faces_layout(ds, color_map = cmocean.cm.thermal, vmin=None, vmax=No
     for face, (row, col) in layout.items():
         var = ds[face]
         ax = axes[row * 5 + col]
-        mappable= var.plot(ax=ax, add_colorbar=False, cmap=color_map, vmin=vmin, vmax=vmax)
+
+        if not is_mask:
+            mappable= var.plot(ax=ax, add_colorbar=False, cmap=color_map, vmin=vmin, vmax=vmax)
+        else:
+            mappable = var.plot(ax=ax, add_colorbar=False, cmap=color_map, vmin=vmin, vmax=vmax, shading="nearest", infer_intervals=False)
+
         ax.set_title(f"Face {face}", fontsize=10)
         ax.axis("off")
 

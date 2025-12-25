@@ -28,43 +28,8 @@ def _multi_file_closer(closers):
         closer()
 
 
-# ---------------------------------------------------------------------
-# Load model variables
-# ---------------------------------------------------------------------
-## todo add in temporal inputs
-def get_remote_llc_data(endpoint_url):
-    """
-    Load LLC4320 raw variables for a subset of timesteps and faces
-    from a kerchunk-referenced S3 endpoint.
-
-    Parameters
-    ----------
-    endpoint_url : str
-        S3-compatible endpoint (e.g., OSN / Open Storage Network).
-
-    Returns
-    -------
-    xarray.Dataset
-        Combined dataset containing Theta, U, V, W, Salt, Eta for all
-        selected times and all 13 LLC4320 faces.
-    """
-    # -----------------------------
-    # Configuration parameters
-    # -----------------------------
-    varnames = ["Theta", "U", "V", "W", "Salt", "Eta"]
-    timestep_hours = 12                     # how many hours to load
-    sampling_step = 12                      # stride in timesteps
-    ts_per_hour = 144                       # model cadence: 25 s → 144 steps/hr
-    iter_step = sampling_step * ts_per_hour # iteration Δ between samples
-    face_range = range(13)
-
-    # First valid wind/forcing record begins ~1180
-    start_record = 1180
-
-    # Compute iter numbers
-    start_iter = 10368 + start_record * ts_per_hour
-    end_iter = start_iter + timestep_hours * ts_per_hour
-    iter_range = np.arange(start_iter, end_iter, iter_step)
+## This will fetch a single iteration worth of files. So one time snapshot
+def get_remote_llc_data(endpoint_url, it, face_range):
 
     # Include SSH
     get_eta_files = True
@@ -81,7 +46,7 @@ def get_remote_llc_data(endpoint_url):
     filelist = [
         pattern.format(face=face, it=it)
         for face in face_range
-        for it in iter_range
+        # for it in iter_range
     ]
 
     print(f"Opening {len(filelist)} Kerchunk JSON files...")
