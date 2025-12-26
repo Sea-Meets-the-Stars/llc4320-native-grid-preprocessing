@@ -1,4 +1,5 @@
 from pathlib import Path
+import pandas as pd
 
 class MetadataWriter:
     def __init__(self, path, flush_every=10_000):
