@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 import tqdm
-
+import xarray as xr
 import data_preprocessing.stats as stats
 
 # SAMPLING ON NATIVE GRID ----------------------------------------
@@ -16,6 +16,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     if (mask is not None):
         # mask da
         da = np.where(mask, da, np.nan)
+        da = xr.DataArray(da)
 
     weights = bias * da
 
