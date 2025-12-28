@@ -5,19 +5,49 @@ import tqdm
 import xarray as xr
 import data_preprocessing.stats as stats
 
-# SAMPLING ON NATIVE GRID ----------------------------------------
-
-
-# Calculate a weight of all points on the grid based on input xarray
-# Higher values of input xarray will be more liklely to be sampled
-# Uses provided mask to mask out invalid points
-# Returns indices into grid with native coordinates
 def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
-    if (mask is not None):
-        # mask da
-        da = np.where(mask, da, np.nan)
-        da = xr.DataArray(da)
+    """
+    Draw weighted random samples from an LLC grid based on an input field.
 
+    This function samples grid points with probability proportional to the
+    values of an input xarray DataArray, optionally masked to exclude invalid
+    regions. Higher field values result in higher sampling likelihood. Returned
+    samples are given as native grid indices.
+
+    This function takes a while.
+
+    Parameters
+    ----------
+    points_to_sample : int
+        Number of grid points to sample.
+    bias : float or xarray.DataArray
+        Multiplicative bias applied to the input field before normalization.
+        Can be a scalar or broadcastable to ``da``.
+    da : xarray.DataArray
+        Input field defined on the LLC grid (e.g., with dimensions
+        ``(face, j, i)``) used to define sampling weights.
+    mask : xarray.DataArray or None, optional
+        Boolean mask with the same dimensions as ``da``. Points where
+        ``mask == False`` are excluded from sampling. If None, no masking
+        is applied.
+
+    Returns
+    -------
+    indices : list of tuple
+        List of sampled grid indices as tuples of integers corresponding
+        to ``da.dims`` order (e.g., ``(face, j, i)``).
+
+    Notes
+    -----
+    * Sampling is performed with replacement.
+    * Masked or NaN values are excluded prior to normalization.
+    * Coordinates are preserved through stacking to ensure correct index
+      recovery.
+    """
+
+    if (mask is not None):
+        da = da.where(mask) 
+        
     weights = bias * da
 
     w_stacked = weights.stack(
@@ -25,7 +55,9 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
 
     w_valid = w_stacked.dropna("sample_dim")  # coordinates of xarray are preserved here
     p = w_valid / w_valid.sum()
-
+    
+    p.persist()
+    
     # grab however many samples randomly with higher likelihood for high weights.
     choice = np.random.choice(
         p.sample_dim.size,
@@ -46,7 +78,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
 
     return indices
 
-# SAMPLING ON PDF ---------------------------------
+# The following is for sampling on a pdf and is not being used currently. Can probably be deleted. ---------------------------------
 
 # x must = da.values
 def sample_linearly_on_pdf(x, points_to_sample, display):
