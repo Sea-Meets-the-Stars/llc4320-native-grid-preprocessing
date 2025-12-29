@@ -118,6 +118,11 @@ def plot_llc_faces_layout(ds, color_map = cmocean.cm.thermal, vmin=None, vmax=No
         12: (0, 4),
     }
 
+    if vmin is None:
+        # find vmin and max for plot
+        vmin = ds.min().compute()
+        vmax = ds.max().compute()
+
     fig, axes = plt.subplots(5, 5, figsize=(14, 14))
     axes = axes.flatten()
 

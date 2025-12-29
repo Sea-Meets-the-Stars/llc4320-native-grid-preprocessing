@@ -21,7 +21,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     points_to_sample : int
         Number of grid points to sample.
     bias : float or xarray.DataArray
-        Multiplicative bias applied to the input field before normalization.
+        power bias applied to the input field before normalization.
         Can be a scalar or broadcastable to ``da``.
     da : xarray.DataArray
         Input field defined on the LLC grid (e.g., with dimensions
@@ -47,8 +47,11 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
 
     if (mask is not None):
         da = da.where(mask) 
-        
-    weights = bias * da
+
+    # make positive with lowest value 0
+    da = da - da.min()
+
+    weights = da ** bias # power law
 
     w_stacked = weights.stack(
         sample_dim=da.dims)  # stacks face j i into one dimension but keeps track of indexes

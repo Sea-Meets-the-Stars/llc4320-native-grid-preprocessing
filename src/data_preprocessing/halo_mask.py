@@ -49,7 +49,7 @@ def llc_halo_mask(mask, dxC, dyC, halo_km):
 
     for face in range(nface):
 
-        mask_f = np.asarray(mask[face])
+        mask_f = np.asarray(mask[face]) # todo this is likely causing slowdown
         
         # mask_eroded = binary_erosion(mask_f)
         # boundary = mask_f & ~mask_eroded
