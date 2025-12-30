@@ -39,7 +39,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
 
     Notes
     -----
-    * Sampling is performed with replacement.
+    * Sampling is performed without replacement.
     * Masked or NaN values are excluded prior to normalization.
     * Coordinates are preserved through stacking to ensure correct index
       recovery.
@@ -48,10 +48,13 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     if (mask is not None):
         da = da.where(mask) 
 
-    # make positive with lowest value 0
-    da = da - da.min()
+    # # make positive with lowest value 0
+    # da = da - da.min()
 
-    weights = da ** bias # power law
+    # weights = da ** bias # power law
+
+    # exponential 
+    weights = np.exp(bias * (da - da.min(skipna=True)))
 
     w_stacked = weights.stack(
         sample_dim=da.dims)  # stacks face j i into one dimension but keeps track of indexes
@@ -65,7 +68,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     choice = np.random.choice(
         p.sample_dim.size,
         size=points_to_sample,
-        replace=True,
+        replace=False,
         p=p.values
     )
 

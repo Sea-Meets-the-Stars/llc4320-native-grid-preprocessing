@@ -59,16 +59,16 @@ def llc_halo_mask(mask, dxC, dyC, halo_km):
         # phi[boundary] = 0.0
 
         if (phi==-1).any() and (phi==1).any():
-            dx_max = dxC[face].max() / 1000.0   # (i,) km
-            dy_max = dyC[face].max() / 1000.0   # (j,) km
+            dx_max = dxC[face].mean() / 1000.0   # (i,) km mean is the best approximation we can do here.
+            dy_max = dyC[face].mean() / 1000.0   # (j,) km
 
-            dx_max = dx_max.values.item()
-            dy_max = dy_max.values.item()
+            dx_v = dx_max.values.item()
+            dy_v = dy_max.values.item()
 
             # --- fast marching distance ---
             dist_km = skfmm.distance(
                 phi,
-                dx=(dy_max, dx_max)
+                dx=(dy_v, dx_v)
             )
 
             # --- apply halo ---
