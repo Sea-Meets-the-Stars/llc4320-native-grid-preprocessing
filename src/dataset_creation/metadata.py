@@ -10,6 +10,8 @@ class MetadataWriter:
 
         if fs is None:
             self.fs, _ = fsspec.core.url_to_fs(path)
+        else :
+            self.fs = fs
 
         # if not os.path.exists(meda_data_file_path):
         #     pd.DataFrame(columns=metadata_cols).to_parquet(meda_data_file_path)
