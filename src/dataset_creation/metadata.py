@@ -1,11 +1,15 @@
 from pathlib import Path
 import pandas as pd
+import fsspec
 
 class MetadataWriter:
-    def __init__(self, path, flush_every=10_000):
-        self.path = Path(path)
+    def __init__(self, path, flush_every=10_000, fs=None):
+        self.path = path
         self.flush_every = flush_every
         self.buffer = []
+
+        if fs is None:
+            self.fs, _ = fsspec.core.url_to_fs(path)
 
         # if not os.path.exists(meda_data_file_path):
         #     pd.DataFrame(columns=metadata_cols).to_parquet(meda_data_file_path)
@@ -23,23 +27,17 @@ class MetadataWriter:
             print("NO BUFFER")
             return
 
-
         df = pd.DataFrame(self.buffer)
 
-        if self.path.exists():
-            meta_df = pd.read_parquet("metadata.parquet")
-            appended_df = pd.concat([meta_df, df], ignore_index=True)
+        if self.fs.exists(self.path):
+            old = pd.read_parquet(self.path, filesystem=self.fs)
+            df = pd.concat([old, df], ignore_index=True)
 
-            appended_df.to_parquet(
-                self.path,
-                engine="pyarrow"
-            )
-
-        else:
-            df.to_parquet(
-                self.path,
-                engine="pyarrow"
-            )
+        df.to_parquet(
+            self.path,
+            engine="pyarrow",
+            filesystem=self.fs,
+        )
 
         self.buffer.clear()
 
