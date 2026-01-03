@@ -14,13 +14,13 @@ authors = [
     { name = "J. Tallman", email = "jttallman@ucdavis.deu" }
 ]
 urls = { "Homepage" = "https://github.com/AI-for-Ocean-Science/" }
-requires-python = ">=3.9"
+requires-python = ">=3.12"
 
 dependencies = [
     "numpy",
     "Reader",
     "aiohttp",
-    "torch",
+    "torch==2.8",
     "torchvision",
     "seaborn",
     "smart-open[s3]",
@@ -51,7 +51,6 @@ dependencies = [
     "xgcm",
     "seawater",
     "ecco_v4_py",
-    "fastparquet",
     "scikit-fmm"
 ]
 
