@@ -1,16 +1,3 @@
-"""
-Utilities for loading LLC4320 model output and grid files
-from a remote kerchunk-based S3 endpoint.
-
-Functions
----------
-get_remote_llc_data(endpoint_url)
-    Load raw LLC4320 variables for a selected set of faces/timesteps.
-
-get_remote_gridfile(endpoint_url)
-    Load grid metadata (XC, YC, metrics, CS/SN, etc.) for all 13 LLC faces.
-"""
-
 import s3fs
 import xarray as xr
 import ujson
@@ -27,9 +14,39 @@ def _multi_file_closer(closers):
     for closer in closers:
         closer()
 
-
-## This will fetch a single iteration worth of files. So one time snapshot
 def get_remote_llc_data(endpoint_url, it, face_range):
+    """
+    Load a single-iteration snapshot of LLC4320 model output from a remote
+    kerchunk-backed S3 endpoint. See Accessing_Raw_LLC4320 documentation for details.
+
+    This function opens kerchunk JSON references for a selected set of LLC
+    faces and a single model iteration, constructs lazily-evaluated xarray
+    datasets via Zarr, and combines them into a single dataset using
+    coordinate-based merging. Data access is deferred using Dask until
+    explicitly computed.
+
+    Parameters
+    ----------
+    endpoint_url : str
+        URL of the S3-compatible object store hosting the kerchunk JSON files.
+    it : int
+        LLC model iteration number to load.
+    face_range : iterable of int
+        Iterable of LLC face indices to load (e.g., ``range(13)`` or a subset).
+
+    Returns
+    -------
+    xarray.Dataset
+        Combined LLC4320 dataset for the requested faces and iteration,
+        containing surface-level variables with lazy Dask-backed arrays.
+
+    Notes
+    -----
+    - Data are accessed anonymously over S3 using kerchunk reference files.
+    - Chunking is applied in the horizontal dimensions (``i``, ``j``).
+    - A custom close handler is attached to ensure all underlying datasets
+      are properly closed when the combined dataset is closed.
+    """
 
     # Include SSH
     get_eta_files = True
@@ -127,9 +144,6 @@ def get_remote_llc_data(endpoint_url, it, face_range):
     return ds
 
 
-# ---------------------------------------------------------------------
-# Load grid files (XC, YC, metrics, CS, SN, etc.)
-# ---------------------------------------------------------------------
 def get_remote_gridfile(endpoint_url):
     """
     Load the LLC4320 grid variables for all 13 faces
