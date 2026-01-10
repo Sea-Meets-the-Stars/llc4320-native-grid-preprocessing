@@ -46,6 +46,11 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     """
 
     if (mask is not None):
+        # set dims = for broadcasting
+        mask = mask.rename(
+            dict(zip(mask.dims, da.dims))
+        )
+
         da = da.where(mask) 
 
     # # make positive with lowest value 0
@@ -62,14 +67,14 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     w_valid = w_stacked.dropna("sample_dim")  # coordinates of xarray are preserved here
     p = w_valid / w_valid.sum()
     
-    p.persist()
+    p_np = p.compute().values
     
     # grab however many samples randomly with higher likelihood for high weights.
     choice = np.random.choice(
         p.sample_dim.size,
         size=points_to_sample,
         replace=False,
-        p=p.values
+        p=p_np
     )
 
     sampled =  w_valid.isel(sample_dim=choice)
