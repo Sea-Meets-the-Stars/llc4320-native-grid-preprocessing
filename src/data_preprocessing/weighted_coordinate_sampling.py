@@ -26,7 +26,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     da : xarray.DataArray
         Input field defined on the LLC grid (e.g., with dimensions
         ``(face, j, i)``) used to define sampling weights.
-    mask : xarray.DataArray or None, optional
+    mask : numpy ndarray or None, optional
         Boolean mask with the same dimensions as ``da``. Points where
         ``mask == False`` are excluded from sampling. If None, no masking
         is applied.
@@ -46,12 +46,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     """
 
     if (mask is not None):
-        # set dims = for broadcasting
-        mask = mask.rename(
-            dict(zip(mask.dims, da.dims))
-        )
-
-        da = da.where(mask) 
+        da_m = da.where(mask)
 
     # # make positive with lowest value 0
     # da = da - da.min()
@@ -59,15 +54,15 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     # weights = da ** bias # power law
 
     # exponential 
-    weights = np.exp(bias * (da - da.min(skipna=True)))
+    weights = np.exp(bias * (da_m - da_m.min(skipna=True)))
 
     w_stacked = weights.stack(
-        sample_dim=da.dims)  # stacks face j i into one dimension but keeps track of indexes
+        sample_dim=da_m.dims)  # stacks face j i into one dimension but keeps track of indexes
 
     w_valid = w_stacked.dropna("sample_dim")  # coordinates of xarray are preserved here
     p = w_valid / w_valid.sum()
-    
-    p_np = p.compute().values
+
+    p_np = p.values
     
     # grab however many samples randomly with higher likelihood for high weights.
     choice = np.random.choice(
@@ -80,7 +75,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     sampled =  w_valid.isel(sample_dim=choice)
 
     indices = np.stack(
-        [sampled.coords[dim].values for dim in da.dims],
+        [sampled.coords[dim].values for dim in da_m.dims],
         axis=1
     )
 

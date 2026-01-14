@@ -14,6 +14,7 @@ import xgcm
 import zarr
 
 # distributed / IO
+import dask
 from dask.distributed import Client
 import fsspec
 
@@ -118,101 +119,17 @@ def parse_args(p):
     args = p.parse_args()
     return args
 
-def generate_land_face_masks(ds_grid, target_km_res):
-    """
-    Construct a composite sampling mask for the LLC native grid. These are the unchanging masks, so not ice.
-
-    The mask excludes:
-      - land points (via hFacC)
-      - grid-face perimeter cells
-    and applies a halo buffer based on the target physical resolution to land and face perimeter cells.
-
-    Parameters
-    ----------
-    ds_grid : xarray.Dataset
-        LLC grid dataset containing metric terms.
-    target_km_res : float
-        Target physical resolution (km) used to define halo width.
-
-    Returns
-    -------
-    xarray.DataArray
-        Boolean mask indicating valid sampling locations.
-        True = sample
-        False = mask
-    """
-
-    halo_km = target_km_res  # buffer to account for mean usage
-
-    halo_land_mask = halo_mask.llc_halo_mask(
-        mask=ds_grid.hFacC == 0,
-        dxC=ds_grid["dxC"],
-        dyC=ds_grid["dyC"],
-        halo_km=halo_km
-    )
-
-    faces_perimeter_mask = xr.zeros_like(ds_grid.XC).astype(bool)
-    faces_perimeter_mask.loc[dict(j=0)] = True
-    faces_perimeter_mask.loc[dict(j=(faces_perimeter_mask.coords.sizes["j"] - 1))] = True
-    faces_perimeter_mask.loc[dict(i=0)] = True
-    faces_perimeter_mask.loc[dict(i=(faces_perimeter_mask.coords.sizes["i"] - 1))] = True
-
-    halo_faces_perimeter_mask = halo_mask.llc_halo_mask(
-        mask=faces_perimeter_mask,
-        dxC=ds_grid["dxC"],
-        dyC=ds_grid["dyC"],
-        halo_km=halo_km
-    )
-
-    merged_mask = halo_land_mask & halo_faces_perimeter_mask
-
-    return merged_mask
-
-def generate_ice_masks(ds_merge):
-    """
-    Construct an ice sampling mask for the LLC native grid.
-
-    The mask excludes:
-      - ice-covered regions
-
-    Parameters
-    ----------
-    ds_merge : xarray.Dataset
-        Merged LLC dataset containing tracer fields.
-
-    Returns
-    -------
-    xarray.DataArray
-        Boolean mask indicating valid sampling locations.
-        True = sample
-        False = mask
-    """
-
-    ice_mask = ds_merge.Theta <= 0.0 # todo perhaps add this as an input for the user to decide
-
-    # halo_ice_mask = halo_mask.llc_halo_mask(
-    #     mask=ice_mask,
-    #     dxC=ds_grid["dxC"],
-    #     dyC=ds_grid["dyC"],
-    #     halo_km=halo_km
-    # )
-    halo_ice_mask = ice_mask #ice mask is already very aggressive. No need for halo.
-
-    return halo_ice_mask
-
-def calculate_gradients(ds_merge, ds_grid, grid):
+def calculate_gradients(ds_merge, grid):
     """
     Compute log10 of squared buoyancy gradients on the native LLC grid.
 
-    The resulting log-gradient field is persisted and added to the
+    The resulting log-gradient field is added to the
     merged dataset as a new variable.
 
     Parameters
     ----------
     ds_merge : xarray.Dataset
         Dataset containing fields.
-    ds_grid : xarray.Dataset
-        Grid dataset with metric terms.
     grid : xgcm.Grid
         XGCM grid object.
 
@@ -221,27 +138,29 @@ def calculate_gradients(ds_merge, ds_grid, grid):
     ds_merge : xarray.Dataset
         Dataset augmented with `log_gradb`.
     log_gradb : dask.array.Array
-        Persisted log10(|∇b|^2) field used for weighted sampling.
+        log10(|∇b|^2) field used for weighted sampling.
     """
 
     buoyancy = physical_calculations.buoyancy_of_field(ds_merge)
 
     # gradient of b
-    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_grid, grid=grid)
+    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
 
-    zonal_grad_b = zonal_grad_b.persist()
-    merid_grad_b = merid_grad_b.persist()
+    zonal_grad_b, merid_grad_b = dask.persist(zonal_grad_b, merid_grad_b)
+
+    # zonal_grad_b = zonal_grad_b.persist()
+    # merid_grad_b = merid_grad_b.persist()
 
     gradb2 = physical_calculations.grad_squared(zonal_grad_b, merid_grad_b)
-    gradb2 = gradb2.persist()
+    # gradb2 = gradb2.persist()
 
     log_gradb = da.log10(gradb2)
-    log_gradb.persist()
+    log_gradb = log_gradb.persist()
 
     log_gradb_ds = log_gradb.to_dataset(name="log_gradb")
     ds_merge = xr.merge([ds_merge, log_gradb_ds])
 
-    return ds_merge, log_gradb
+    return ds_merge #, log_gradb
 
 def generate_filesystems(s3_endpoint):
     """
@@ -329,7 +248,7 @@ def worker_task(zarr_ds, metadata_writer, worker_id, down_sample_res,
     metadata_writer : MetadataWriter
         Thread-safe metadata writer.
     worker_id : int
-        Worker identifier (for debugging) todo.
+        Worker identifier (for debugging)
     down_sample_res : int
         Output spatial resolution in pixels.
     indices : iterable
@@ -343,6 +262,7 @@ def worker_task(zarr_ds, metadata_writer, worker_id, down_sample_res,
     for index in indices:
 
         index = tuple(index)
+
         if (index is None):
             continue
 
@@ -426,7 +346,9 @@ def run_parallel_patch_creation(zarr_ds, metadata_writer, down_sample_res,
 
     metadata_writer.close()
 
-def process_time_snapshot(it, args, metadata_writer, zarr_ds, num_workers, ds_merge, ds_grid, land_face_mask):
+    logging.info(f"Finished parallel patch creation of {len(indices)} indices with {num_workers} workers")
+
+def process_time_snapshot(it, args, metadata_writer, zarr_ds, num_workers, ds_merge, grid, land_face_mask):
     """
     Process a single LLC time snapshot.
 
@@ -453,38 +375,117 @@ def process_time_snapshot(it, args, metadata_writer, zarr_ds, num_workers, ds_me
         Number of parallel workers.
     """
 
-    grid = xgcm.Grid(ds_grid, periodic=False)
+    # NOTE The ordering of the following steps matters for dask compute graphs
 
-    # masking
-    ice_mask = generate_ice_masks(ds_merge)
-    merged_mask = ice_mask & land_face_mask
+    # calculate gradients
+    ds_merge = calculate_gradients(ds_merge, grid)
 
-    #gradients
-    ds_merge, log_gradb = calculate_gradients(ds_merge, ds_grid, grid)
+    # Move non tracer values to tracer points. This allows us to stack images for our final patches.
+    U = ds_merge["U"].persist()
+    V = ds_merge["V"].persist()
+    U_interp = grid.interp(U, "X", boundary="fill")
+    V_interp = grid.interp(V, "Y", boundary="fill")
+    ds_merge = ds_merge.assign(
+        U=U_interp,
+        V=V_interp,
+    )
 
-    # find indices
-    merged_mask = xr.DataArray(merged_mask)
+    # Calculate Ice Mask
+    logging.info(f"Calculating ice mask")
+    ice_mask = ds_merge.Theta <= 0.0
+    ice_mask_like = xr.zeros_like(ice_mask).astype(bool) #fresh da to avoid dask graph reuse. This is mandatory even though it slows things down a little.
+    ice_mask_like = ice_mask_like.where(ice_mask, other=True)
+    ice_mask_like_np = ice_mask_like.values
+
+    merged_mask = ice_mask_like_np & land_face_mask # convert ice mask to numpy and merge with land and face numpy masks
+
+    # find indices with mask
+    logging.info(f"Sampling patch center points")
     indices = weighted_coordinate_sampling.weighted_sample_on_grid(args.sample_points_per_snapshot, args.bias_to_high_gradients,
-                                                                   log_gradb, merged_mask)
-    # Move non tracer values to tracer points
-    ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
-    ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
+                                                                   ds_merge["log_gradb"], merged_mask)
 
     # grow zarr ds to fit at most len of indices
     zarr_ds.grow_array(len(indices))
 
+    # lock in ds_merge before patch creation
+    ds_merge.persist()
+
+    # create our patches
     run_parallel_patch_creation(zarr_ds, metadata_writer, args.down_sample_res,
                  indices, ds_merge, args.target_km_res,
                  num_workers)
 
+    # for dask
+    ds_merge = None
+    del ds_merge
+
+    grid = None
+    del grid
+
+    merged_mask = None
+    del merged_mask
+
+def generate_land_face_masks(ds_grid, target_km_res):
+    """
+    Construct a composite sampling mask for the LLC native grid. These are the unchanging masks, so not ice.
+
+    The mask excludes:
+      - land points (via hFacC)
+      - grid-face perimeter cells
+    and applies a halo buffer based on the target physical resolution to land and face perimeter cells.
+
+    Parameters
+    ----------
+    ds_grid : xarray.Dataset
+        LLC grid dataset containing metric terms.
+    target_km_res : float
+        Target physical resolution (km) used to define halo width.
+
+    Returns
+    -------
+    xarray.DataArray
+        Boolean mask indicating valid sampling locations.
+        True = sample
+        False = mask
+    """
+    halo_km = target_km_res  # buffer to account for mean usage
+
+    DXC = ds_grid["dxC"].persist()
+    DYC = ds_grid["dyC"].persist()
+    land_mask = (ds_grid.hFacC == 0).persist()
+
+    halo_land_mask = halo_mask.llc_halo_mask(
+        mask=land_mask,
+        dxC=DXC,
+        dyC=DYC,
+        halo_km=halo_km
+    )
+
+    faces_perimeter_mask = xr.zeros_like(ds_grid.XC).astype(bool)
+    faces_perimeter_mask.loc[dict(j=0)] = True
+    faces_perimeter_mask.loc[dict(j=(faces_perimeter_mask.coords.sizes["j"] - 1))] = True
+    faces_perimeter_mask.loc[dict(i=0)] = True
+    faces_perimeter_mask.loc[dict(i=(faces_perimeter_mask.coords.sizes["i"] - 1))] = True
+
+    halo_faces_perimeter_mask = halo_mask.llc_halo_mask(
+        mask=faces_perimeter_mask,
+        dxC=DXC,
+        dyC=DYC,
+        halo_km=halo_km
+    )
+
+    merged_mask = halo_land_mask & halo_faces_perimeter_mask
+    return merged_mask
+
 def set_up_grid_data_and_masks(args):
     # get the grid file and create grid dataset
     # grid file never changes
+    logging.info("Fetching grid file")
     co = get_raw_data.get_remote_gridfile(endpoint_url)
     ds_grid = preproc_llc_core_data.process_llc4320_grid(co)
 
     # these masks never change
-    print("Calculating data masks")
+    logging.info("Calculating data masks")
     land_face_mask = generate_land_face_masks(ds_grid, args.target_km_res)
 
     return ds_grid, land_face_mask
@@ -501,8 +502,9 @@ def main():
     p = argparse.ArgumentParser()
     args = parse_args(p)
 
-    # Logging
-    base_dir = "dbof_logs" # todo do we want to make this an input option?
+    # Logging -------------
+    BASE = Path(__file__).resolve().parent # Relative to this script
+    base_dir = BASE / "dbof_logs" # todo do we want to make this an input option?
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -524,14 +526,14 @@ def main():
 
     logging.info("Arguments parsed successfully. Logging set up. Running script.")
 
+    # Set concurrency for zarr ds writes
     zarr.config.set({'async.concurrency': 128})
 
     # set up dask distributed client
     dask_client = Client()  # default: uses all local cores
 
+    # Calculate iterations based on input
     iter_step = args.sampling_step * TS_PER_HOUR  # iteration Δ between samples
-
-    # Compute iter numbers
     start_iter = 10368 + args.start_record * TS_PER_HOUR
 
     if (args.timestep_hours is None):
@@ -542,7 +544,7 @@ def main():
     iter_range = np.arange(start_iter, end_iter, iter_step)
     logging.info(f"Processing: {iter_range} time snapshots")
 
-    # Set up data writers
+    # Set up meta and zarr data writers
     fs, fs_synch = generate_filesystems(args.s3_endpoint)
     metadata_writer = generate_metadata_writer(args.bucket, args.folder, args.run_id, fs_synch)
 
@@ -554,16 +556,24 @@ def main():
 
     logging.info(f"Zarr dataset created.")
 
+    # Get data grid once
     ds_grid, land_face_mask = set_up_grid_data_and_masks(args)
+    grid = xgcm.Grid(ds_grid, periodic=False)
 
     for it in tqdm.tqdm(iter_range):
-        # grab raw data
+        # grab raw data for this iteration
         ds = get_raw_data.get_remote_llc_data(endpoint_url, it, LLC_FACES)
         ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
 
         logging.info(f"Data loaded for iteration: {it}")
+        process_time_snapshot(it, args, metadata_writer, zarr_ds, args.num_workers, ds_merge, grid, land_face_mask)
 
-        process_time_snapshot(it, args, metadata_writer, zarr_ds, args.num_workers, ds_merge, ds_grid, land_face_mask)
+        # For dask
+        ds_merge = None
+        del ds_merge
+
+        ds = None
+        del ds
 
 
 if __name__ == "__main__":

@@ -31,7 +31,8 @@ def create_image_patch(ds, channels, patch):
         feature = ds[channel].isel(
             face=patch["face"],
             j=slice(patch["j_start"], patch["j_end"] + 1),
-            i=slice(patch["i_start"], patch["i_end"] + 1))
+            i=slice(patch["i_start"], patch["i_end"] + 1)).compute()
+
         channels_array.append(feature.values)
 
     img = np.stack(channels_array, axis=0)   # (C, H, W)
@@ -112,7 +113,8 @@ def extent_in_i(ds, face, j0, i0, km_x):
         Actual physical width (km) spanned by the selected indices.
     """
     
-    dx_row = ds.dxC.sel(face=face).isel(j=j0).values
+    # dx_row = ds.dxC.sel(face=face).isel(j=j0).values
+    dx_row = ds.dxC.isel(face=face, j=j0).values
 
     dx_row = 0.5 * (dx_row[:-1] + dx_row[1:])  # move from i_g to i, this is sort of interpolating. Average i_g value on left and right of cell center
     dx_row = dx_row.astype(np.float64) / 1000. # meters to km
@@ -166,7 +168,8 @@ def extent_in_j(ds, face, j0, i0, km_y):
         Actual physical height (km) spanned by the selected indices.
     """
     
-    dy_col = ds.dyC.sel(face=face).isel(i=i0).values  # shape (j_g)
+    # dy_col = ds.dyC.sel(face=face).isel(i=i0).values  # shape (j_g)
+    dy_col = ds.dyC.isel(face=face, i=i0).compute().values
 
     dy_col = 0.5 * (dy_col[:-1] + dy_col[1:])         # j_g → j
     dy_col = dy_col.astype(np.float64) / 1000.

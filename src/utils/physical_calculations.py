@@ -4,9 +4,6 @@ import utils.jmd95_xgcm_implementation as jmd95
 # returns merid** + zonal**
 # expects dask arrays
 def grad_squared(zonal_grad, merid_grad):
-    zonal_grad.persist()
-    merid_grad.persist()
-
     return zonal_grad ** 2 + merid_grad ** 2
 
 def buoyancy_of_field(ds):

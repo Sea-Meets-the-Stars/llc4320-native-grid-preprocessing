@@ -28,7 +28,7 @@ def process_llc4320(ds, ds_grid):
     ds_merge = xr.merge([ds, ds_grid])
 
     # Create a land mask
-    ds_merge['maskC'] = xr.where(ds_merge.hFacC > 0, 1, np.nan)
+    # ds_merge['maskC'] = xr.where(ds_merge.hFacC > 0, 1, np.nan)
     # ds_grid['maskC'] = xr.where(ds_merge.hFacC > 0, 1, np.nan)
 
     return ds_merge #, ds_grid
