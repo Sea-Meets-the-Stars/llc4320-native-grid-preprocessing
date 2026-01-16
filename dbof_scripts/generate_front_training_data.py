@@ -29,8 +29,11 @@ import data_preprocessing.halo_mask as halo_mask
 import data_preprocessing.spatial_patches as spatial_patches
 import dataset_creation.metadata as metadata
 import dataset_creation.zarr_dataset as zarr_dataset
-import utils.native_gradient as ng
-import utils.physical_calculations as physical_calculations
+from dataset_creation import dbof_front_training_utils
+
+
+# import utils.native_gradient as ng
+# import utils.physical_calculations as physical_calculations
 
 # Constants --------------------------
 TS_PER_HOUR = 144 # model cadence: 25 s → 144 steps/hr
@@ -41,8 +44,12 @@ LLC_FACES = range(13)
 # url of our raw data - this may need to be an input in the future
 endpoint_url = 'https://mghp.osn.xsede.org'
 
-# input features
-feature_channels = ["Eta", "Salt", "Theta", "U", "V", "W", "log_gradb"]
+# # input features
+# feature_channels = ["Eta", "Salt", "Theta", "U", "V", "W", "log_gradb"]
+
+# todo lets make this more clear
+feature_channels_lazy = ["Eta", "Salt", "Theta", "U", "V", "W"] #,
+feature_channels_computed = ["log_gradb"]
 
 metadata_cols = [
     "id",
@@ -119,48 +126,50 @@ def parse_args(p):
     args = p.parse_args()
     return args
 
-def calculate_gradients(ds_merge, grid):
-    """
-    Compute log10 of squared buoyancy gradients on the native LLC grid.
-
-    The resulting log-gradient field is added to the
-    merged dataset as a new variable.
-
-    Parameters
-    ----------
-    ds_merge : xarray.Dataset
-        Dataset containing fields.
-    grid : xgcm.Grid
-        XGCM grid object.
-
-    Returns
-    -------
-    ds_merge : xarray.Dataset
-        Dataset augmented with `log_gradb`.
-    log_gradb : dask.array.Array
-        log10(|∇b|^2) field used for weighted sampling.
-    """
-
-    buoyancy = physical_calculations.buoyancy_of_field(ds_merge)
-
-    # gradient of b
-    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
-
-    zonal_grad_b, merid_grad_b = dask.persist(zonal_grad_b, merid_grad_b)
-
-    # zonal_grad_b = zonal_grad_b.persist()
-    # merid_grad_b = merid_grad_b.persist()
-
-    gradb2 = physical_calculations.grad_squared(zonal_grad_b, merid_grad_b)
-    # gradb2 = gradb2.persist()
-
-    log_gradb = da.log10(gradb2)
-    log_gradb = log_gradb.persist()
-
-    log_gradb_ds = log_gradb.to_dataset(name="log_gradb")
-    ds_merge = xr.merge([ds_merge, log_gradb_ds])
-
-    return ds_merge #, log_gradb
+# def calculate_gradients(ds_merge, grid):
+#     """
+#     Compute log10 of squared buoyancy gradients on the native LLC grid.
+#
+#     The resulting log-gradient field is added to the
+#     merged dataset as a new variable.
+#
+#     Parameters
+#     ----------
+#     ds_merge : xarray.Dataset
+#         Dataset containing fields.
+#     grid : xgcm.Grid
+#         XGCM grid object.
+#
+#     Returns
+#     -------
+#     ds_merge : xarray.Dataset
+#         Dataset augmented with `log_gradb`.
+#     log_gradb : dask.array.Array
+#         log10(|∇b|^2) field used for weighted sampling.
+#     """
+#
+#     buoyancy = physical_calculations.buoyancy_of_field(ds_merge)
+#
+#     # gradient of b
+#     zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
+#
+#     zonal_grad_b, merid_grad_b = dask.persist(zonal_grad_b, merid_grad_b)
+#
+#     # zonal_grad_b = zonal_grad_b.persist()
+#     # merid_grad_b = merid_grad_b.persist()
+#
+#     gradb2 = physical_calculations.grad_squared(zonal_grad_b, merid_grad_b)
+#     # gradb2 = gradb2.persist()
+#
+#     log_gradb = da.log10(gradb2)
+#     log_gradb = log_gradb.persist()
+#
+#     log_gradb_ds = log_gradb.to_dataset(name="log_gradb")
+#     ds_merge = xr.merge([ds_merge, log_gradb_ds])
+#
+#     ds_merge["log_gradb"] = ds_merge["log_gradb"].persist()
+#
+#     return ds_merge #, log_gradb
 
 def generate_filesystems(s3_endpoint):
     """
@@ -230,123 +239,127 @@ def generate_metadata_writer(bucket, folder, run_id, fs_synch):
     meda_data_folder_path = "s3://" + bucket + folder + run_id + f"metadata/"
     return metadata.MetadataWriter(meda_data_folder_path, flush_every=10000, fs = fs_synch)
 
-def worker_task(zarr_ds, metadata_writer, worker_id, down_sample_res,
-                indices, ds_merge, target_km_res):
-    """
-    Process a subset of sampled grid indices and write patches + metadata.
+# def worker_task(zarr_ds, metadata_writer, down_sample_res,
+#                 indices, ds_merge, target_km_res):
+#     """
+#     Process a subset of sampled grid indices and write patches + metadata.
+#
+#     Each worker:
+#       - extracts spatial patches
+#       - downsamples to target resolution
+#       - appends image data to the Zarr dataset
+#       - records per-patch metadata
+#
+#     Parameters
+#     ----------
+#     zarr_ds : ZarrDataset
+#         Thread-safe Zarr dataset writer.
+#     metadata_writer : MetadataWriter
+#         Thread-safe metadata writer.
+#     down_sample_res : int
+#         Output spatial resolution in pixels.
+#     indices : iterable
+#         Iterable of (face, j, i) grid indices. Center points of our patches.
+#     ds_merge : xarray.Dataset
+#         Dataset containing fields and gradients.
+#     target_km_res : float
+#         Target physical resolution in km.
+#     """
+#
+#     for index in indices:
+#
+#         index = tuple(index)
+#
+#         if (index is None):
+#             continue
+#
+#         patch_metadata = dict.fromkeys(metadata_cols)
+#         patch_metadata["id"] = str(uuid.uuid4())
+#         patch_metadata["native_grid"] = "LLC4320" # todo all supported for now
+#         patch_metadata["center_grid_face"] = index[0]
+#         patch_metadata["center_grid_j"] = index[1]
+#         patch_metadata["center_grid_i"] = index[2]
+#         patch_metadata["target_km_res"] = target_km_res
+#         patch_metadata["center_lat"] = ds_merge.YC[index].values.item()
+#         patch_metadata["center_lon"] = ds_merge.XC[index].values.item()
+#         patch_metadata["log_grad_b_2_center"] = (ds_merge.log_gradb[index].values.item())
+#         patch_metadata["time_snapshot"] = np.datetime64(ds_merge.time.item(), 'ns')
+#
+#         patch = spatial_patches.get_lat_lon_extents_of_patch(index, ds_merge, target_km_res)
+#
+#         if(patch is None):
+#             logging.warning(f"Skipping index {index}")
+#             continue
+#
+#         patch_metadata["real_km_w"] = patch["real_km_w"]
+#         patch_metadata["real_km_h"] = patch["real_km_h"]
+#
+#         img_patch = spatial_patches.create_image_patch(ds_merge, feature_channels, patch)
+#
+#         patch_metadata["pre_interp_res"] = img_patch[0].shape
+#         data_sample = spatial_patches.downsample_image(img_patch, target_dim=down_sample_res)
+#
+#         # add data to zarr
+#         image_id = zarr_ds.append_image(data_sample)
+#         patch_metadata["dataset_index"] = image_id
+#
+#         # add metadata
+#         metadata_writer.add(patch_metadata)
 
-    Each worker:
-      - extracts spatial patches
-      - downsamples to target resolution
-      - appends image data to the Zarr dataset
-      - records per-patch metadata
 
-    Parameters
-    ----------
-    zarr_ds : ZarrDataset
-        Thread-safe Zarr dataset writer.
-    metadata_writer : MetadataWriter
-        Thread-safe metadata writer.
-    worker_id : int
-        Worker identifier (for debugging)
-    down_sample_res : int
-        Output spatial resolution in pixels.
-    indices : iterable
-        Iterable of (face, j, i) grid indices. Center points of our patches.
-    ds_merge : xarray.Dataset
-        Dataset containing fields and gradients.
-    target_km_res : float
-        Target physical resolution in km.
-    """
 
-    for index in indices:
-
-        index = tuple(index)
-
-        if (index is None):
-            continue
-
-        patch_metadata = dict.fromkeys(metadata_cols)
-        patch_metadata["id"] = str(uuid.uuid4())
-        patch_metadata["native_grid"] = "LLC4320" # todo all supported for now
-        patch_metadata["center_grid_face"] = index[0]
-        patch_metadata["center_grid_j"] = index[1]
-        patch_metadata["center_grid_i"] = index[2]
-        patch_metadata["target_km_res"] = target_km_res
-        patch_metadata["center_lat"] = ds_merge.YC[index].values.item()
-        patch_metadata["center_lon"] = ds_merge.XC[index].values.item()
-        patch_metadata["log_grad_b_2_center"] = (ds_merge.log_gradb[index].values.item())
-        patch_metadata["time_snapshot"] = np.datetime64(ds_merge.time.item(), 'ns')
-
-        patch = spatial_patches.get_lat_lon_extents_of_patch(index, ds_merge, target_km_res)
-
-        if(patch is None):
-            logging.warning(f"Skipping index {index} in worker {worker_id}")
-            continue
-
-        patch_metadata["real_km_w"] = patch["real_km_w"]
-        patch_metadata["real_km_h"] = patch["real_km_h"]
-
-        img_patch = spatial_patches.create_image_patch(ds_merge, feature_channels, patch)
-
-        patch_metadata["pre_interp_res"] = img_patch[0].shape
-        data_sample = spatial_patches.downsample_image(img_patch, target_dim=down_sample_res)
-
-        # add data to zarr
-        image_id = zarr_ds.append_image(data_sample)
-        patch_metadata["dataset_index"] = image_id
-
-        # add metadata
-        metadata_writer.add(patch_metadata)
-
-def run_parallel_patch_creation(zarr_ds, metadata_writer, down_sample_res,
-                 indices, ds_merge, target_km_res, num_workers):
-    """
-    Parallelize patch extraction and writing across worker threads.
-
-    Parameters
-    ----------
-    zarr_ds : ZarrDataset
-        Shared Zarr dataset writer.
-    metadata_writer : MetadataWriter
-        Shared metadata writer.
-    down_sample_res : int
-        Output resolution in pixels.
-    indices : array-like
-        Sampled grid indices to process.
-    ds_merge : xarray.Dataset
-        Dataset containing data fields.
-    target_km_res : float
-        Target physical resolution.
-    num_workers : int
-        Number of worker threads.
-    """
-
-    # split indices evenly among workers
-    num_workers = min(num_workers, len(indices)) # ensure no empty splits
-    indices_split = np.array_split(indices, num_workers)
-
-    logging.info(f"Starting parallel patch creation with {num_workers} workers")
-
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = []
-        for wid in range(num_workers):
-            futures.append(
-                executor.submit(
-                    worker_task,
-                    zarr_ds, metadata_writer,
-                    wid, down_sample_res,
-                    indices_split[wid], ds_merge,
-                    target_km_res
-                )
-            )
-        # wait for all workers to finish
-        for f in futures:
-            f.result()
-
-    metadata_writer.close()
-
-    logging.info(f"Finished parallel patch creation of {len(indices)} indices with {num_workers} workers")
+# def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
+#                  indices, ds_merge, target_km_res):
+#     """
+#     Patch extraction
+#
+#     Parameters
+#     ----------
+#     zarr_ds : ZarrDataset
+#         Shared Zarr dataset writer.
+#     metadata_writer : MetadataWriter
+#         Shared metadata writer.
+#     down_sample_res : int
+#         Output resolution in pixels.
+#     indices : array-like
+#         Sampled grid indices to process.
+#     ds_merge : xarray.Dataset
+#         Dataset containing data fields.
+#     target_km_res : float
+#         Target physical resolution.
+#
+#     """
+#
+#     # split indices evenly among workers
+#     # num_workers = min(num_workers, len(indices)) # ensure no empty splits
+#     # indices_split = np.array_split(indices, num_workers)
+#
+#     logging.info(f"Starting  patch creation")
+#
+#     # with ThreadPoolExecutor(max_workers=num_workers) as executor:
+#     #     futures = []
+#     #     for wid in range(num_workers):
+#     #         futures.append(
+#     #             executor.submit(
+#     #                 worker_task,
+#     #                 zarr_ds, metadata_writer,
+#     #                 wid, down_sample_res,
+#     #                 indices_split[wid], ds_merge,
+#     #                 target_km_res
+#     #             )
+#     #         )
+#     #     # wait for all workers to finish
+#     #     for f in futures:
+#     #         f.result()
+#
+#     # 1 worker task for now
+#     worker_task(zarr_ds, metadata_writer, down_sample_res,
+#                     indices, ds_merge,
+#                     target_km_res)
+#
+#     metadata_writer.close()
+#
+#     logging.info(f"Finished patch creation of {len(indices)} indices")
 
 def process_time_snapshot(it, args, metadata_writer, zarr_ds, num_workers, ds_merge, grid, land_face_mask):
     """
@@ -375,45 +388,60 @@ def process_time_snapshot(it, args, metadata_writer, zarr_ds, num_workers, ds_me
         Number of parallel workers.
     """
 
-    # NOTE The ordering of the following steps matters for dask compute graphs
-
-    # calculate gradients
-    ds_merge = calculate_gradients(ds_merge, grid)
-
-    # Move non tracer values to tracer points. This allows us to stack images for our final patches.
-    U = ds_merge["U"].persist()
-    V = ds_merge["V"].persist()
-    U_interp = grid.interp(U, "X", boundary="fill")
-    V_interp = grid.interp(V, "Y", boundary="fill")
-    ds_merge = ds_merge.assign(
-        U=U_interp,
-        V=V_interp,
-    )
+    # NOTE The ordering of the following steps matters
 
     # Calculate Ice Mask
     logging.info(f"Calculating ice mask")
-    ice_mask = ds_merge.Theta <= 0.0
-    ice_mask_like = xr.zeros_like(ice_mask).astype(bool) #fresh da to avoid dask graph reuse. This is mandatory even though it slows things down a little.
-    ice_mask_like = ice_mask_like.where(ice_mask, other=True)
-    ice_mask_like_np = ice_mask_like.values
+    ice_mask = ~(ds_merge.Theta <= 0.0)
+    ice_mask_np = ice_mask.values
+    merged_mask = ice_mask_np & land_face_mask
+    # merged_mask = merged_mask.values
 
-    merged_mask = ice_mask_like_np & land_face_mask # convert ice mask to numpy and merge with land and face numpy masks
+    # calculate gradients
+    # ds_merge = dbof_front_training_utils.calculate_gradients(ds_merge, grid)
+    ds_merge, log_gradb = dbof_front_training_utils.calculate_gradients(ds_merge, grid)
+
+    # U = ds_merge["U"].persist()
+    # V = ds_merge["V"].persist()
+    # U_interp = grid.interp(U, "X", boundary="fill")
+    # V_interp = grid.interp(V, "Y", boundary="fill")
+    # ds_merge = ds_merge.assign(
+    #     U=U_interp,
+    #     V=V_interp,
+    # )
 
     # find indices with mask
     logging.info(f"Sampling patch center points")
+    # indices = weighted_coordinate_sampling.weighted_sample_on_grid(args.sample_points_per_snapshot, args.bias_to_high_gradients,
+    #                                                                ds_merge["log_gradb"], merged_mask)
+
+    # todo this should be updated to take in a numpy array since we compute loggradb later anyway
     indices = weighted_coordinate_sampling.weighted_sample_on_grid(args.sample_points_per_snapshot, args.bias_to_high_gradients,
-                                                                   ds_merge["log_gradb"], merged_mask)
+                                                                   log_gradb, merged_mask)
+
+    # Move non tracer values to tracer points. This allows us to stack images for our final patches.
+    ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
+    ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
 
     # grow zarr ds to fit at most len of indices
     zarr_ds.grow_array(len(indices))
 
-    # lock in ds_merge before patch creation
-    ds_merge.persist()
-
     # create our patches
-    run_parallel_patch_creation(zarr_ds, metadata_writer, args.down_sample_res,
-                 indices, ds_merge, args.target_km_res,
-                 num_workers)
+    # compute gradient into memory
+    log_gradb_np = log_gradb.values
+
+    #process data and write to s3
+    images = dbof_front_training_utils.run_patch_creation(zarr_ds, metadata_writer, args.down_sample_res,
+                                                          indices, ds_merge, log_gradb_np, args.target_km_res,
+                                                          feature_channels_lazy, metadata_cols)
+
+    # flush metada
+    metadata_writer.close()
+
+
+    # run_patch_creation(zarr_ds, metadata_writer, args.down_sample_res,
+    #              indices, ds_merge, args.target_km_res)
+    #
 
     # for dask
     ds_merge = None
@@ -448,6 +476,7 @@ def generate_land_face_masks(ds_grid, target_km_res):
         True = sample
         False = mask
     """
+
     halo_km = target_km_res  # buffer to account for mean usage
 
     DXC = ds_grid["dxC"].persist()
@@ -475,36 +504,23 @@ def generate_land_face_masks(ds_grid, target_km_res):
     )
 
     merged_mask = halo_land_mask & halo_faces_perimeter_mask
+
     return merged_mask
 
 def set_up_grid_data_and_masks(args):
-    # get the grid file and create grid dataset
-    # grid file never changes
     logging.info("Fetching grid file")
     co = get_raw_data.get_remote_gridfile(endpoint_url)
     ds_grid = preproc_llc_core_data.process_llc4320_grid(co)
 
-    # these masks never change
-    logging.info("Calculating data masks")
+    logging.info("Calculating land and face masks")
     land_face_mask = generate_land_face_masks(ds_grid, args.target_km_res)
 
     return ds_grid, land_face_mask
 
-def main():
-    """
-    Entry point for native-grid LLC patch dataset generation.
-
-    Orchestrates argument parsing, Dask setup, filesystem initialization,
-    and iteration over time snapshots.
-    """
-
-    # Script arguments
-    p = argparse.ArgumentParser()
-    args = parse_args(p)
-
+def generate_logging(args):
     # Logging -------------
-    BASE = Path(__file__).resolve().parent # Relative to this script
-    base_dir = BASE / "dbof_logs" # todo do we want to make this an input option?
+    base = Path(__file__).resolve().parent # Relative to this script
+    base_dir = base / "dbof_logs" # todo do we want to make this an input option?
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -524,6 +540,33 @@ def main():
         force=True,
     )
 
+def calculate_iterations_for_llc(args):
+    # Calculate iterations based on input
+    iter_step = args.sampling_step * TS_PER_HOUR  # iteration Δ between samples
+    start_iter = 10368 + args.start_record * TS_PER_HOUR
+
+    if (args.timestep_hours is None):
+        end_iter = 1495008  # to the end of data
+    else:
+        end_iter = start_iter + args.timestep_hours * TS_PER_HOUR
+
+    return np.arange(start_iter, end_iter, iter_step)
+
+
+def main():
+    """
+    Entry point for native-grid LLC patch dataset generation.
+
+    Orchestrates argument parsing, Dask setup, filesystem initialization,
+    and iteration over time snapshots.
+    """
+
+    # Script arguments
+    p = argparse.ArgumentParser()
+    args = parse_args(p)
+
+    generate_logging(args)
+
     logging.info("Arguments parsed successfully. Logging set up. Running script.")
 
     # Set concurrency for zarr ds writes
@@ -531,17 +574,9 @@ def main():
 
     # set up dask distributed client
     dask_client = Client()  # default: uses all local cores
+    logging.info(f"Dask Client {dask_client}")
 
-    # Calculate iterations based on input
-    iter_step = args.sampling_step * TS_PER_HOUR  # iteration Δ between samples
-    start_iter = 10368 + args.start_record * TS_PER_HOUR
-
-    if (args.timestep_hours is None):
-        end_iter = 1495008 #to the end of data
-    else :
-        end_iter = start_iter + args.timestep_hours * TS_PER_HOUR
-
-    iter_range = np.arange(start_iter, end_iter, iter_step)
+    iter_range = calculate_iterations_for_llc(args)
     logging.info(f"Processing: {iter_range} time snapshots")
 
     # Set up meta and zarr data writers
@@ -551,7 +586,7 @@ def main():
     # Zarr Dataset
     dataset_name = f"dataset.zarr"
     zarr_ds = zarr_dataset.ZarrDataset(args.bucket, args.folder, args.run_id, dataset_name, fs=fs,
-                                       feature_channels=feature_channels,
+                                       feature_channels=feature_channels_lazy+feature_channels_computed,
                                        down_sample_res=args.down_sample_res)
 
     logging.info(f"Zarr dataset created.")
