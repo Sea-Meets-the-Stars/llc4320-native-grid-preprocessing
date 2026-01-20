@@ -58,7 +58,7 @@ dependencies = [
 test = ["pytest"]
 
 [tool.setuptools.packages.find]
-where = ["src", "scripts"]
+where = ["src"]
 
 [project.scripts]
 generate-llc-dataset = "dbof_scripts.generate_front_training_data:main"
