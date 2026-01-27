@@ -29,8 +29,8 @@ class ZarrDataset:
             self.root.create_array(
                 "image_ids",
                 shape=(0,),
-                chunks=(1024,),
-                dtype="U32" # fixed len string for uuid
+                chunks=(1,), # 1 string to protect overwrite in parallel writing
+                dtype="S32" #"U32" # fixed len string for uuid
             )
 
         # set starting index. Will be 0 if new array or len of array if appending to an existing array
@@ -57,7 +57,7 @@ class ZarrDataset:
             if i >= self.root["images"].shape[0]:
                 raise RuntimeError("ZarrDataset capacity exceeded; call grow_array first")
 
-        image_id = uuid.uuid4().hex
+        image_id = uuid.uuid4().hex.encode("ascii") #uuid.uuid4().hex
         self.root["images"][i] = np.expand_dims(img, axis=0)
         self.root["image_ids"][i] = image_id
 

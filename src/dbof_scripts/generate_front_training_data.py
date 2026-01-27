@@ -1,3 +1,5 @@
+# TODO METAdata has extra id column unused. Get rid of it.
+
 # stdlib
 import argparse
 import uuid
