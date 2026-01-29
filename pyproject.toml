@@ -11,8 +11,14 @@ license = { text = "BSD" }
 authors = [
     { name = "J. Xavier Prochaska", email = "jxp@ucsc.edu" },
     { name = "P. Cornillon"},
-    { name = "J. Tallman", email = "jttallman@ucdavis.deu" }
+    { name = "J. Tallman", email = "jttallman@ucdavis.edu" }
 ]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Oceanography",
+    "Programming Language :: Python :: 3"
+]
+
 urls = { "Homepage" = "https://github.com/AI-for-Ocean-Science/" }
 requires-python = ">=3.12"
 
@@ -22,16 +28,12 @@ dependencies = [
     "aiohttp",
     "torch==2.8",
     "torchvision",
-    "seaborn",
     "smart-open[s3]",
     "pyarrow",
     "scikit-learn",
     "scikit-image",
     "tqdm",
-    "astropy",
-    "astropy-healpix",
     "cftime",
-    "bokeh",
     "umap-learn",
     "llvmlite",
     "boto3",
@@ -47,18 +49,26 @@ dependencies = [
     "ujson",
     "zarr",
     "gsw",
-    "cmocean",
     "xgcm",
     "seawater",
     "ecco_v4_py",
-    "scikit-fmm"
+    "scikit-fmm",
+    "pyyaml"
 ]
 
 [project.optional-dependencies]
+
+plotting = [
+    "matplotlib",
+    "seaborn",
+    "bokeh",
+    "cmocean",
+]
+
 test = ["pytest"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [project.scripts]
-generate-llc-dataset = "dbof_scripts.generate_front_training_data:main"
+generate-llc-dataset = "dbof.cli.generate_front_training_data:main"

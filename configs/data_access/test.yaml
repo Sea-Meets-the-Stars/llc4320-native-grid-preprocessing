@@ -1,0 +1,5 @@
+data_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "llc"
+  folder: "native_grid_dbof_training_data"
+  run_id: "test00"

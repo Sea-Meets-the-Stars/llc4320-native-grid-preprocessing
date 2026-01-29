@@ -1,8 +1,16 @@
-from pathlib import Path
+from pathlib import PurePosixPath
 import pandas as pd
 import fsspec
 import threading
 import uuid
+
+#Factory
+def create_metadata_writer(bucket: str, folder: str, run_id: str, fs_sync=None, flush_every: int = 10_000):
+    bucket = bucket.strip().strip("/")
+    folder = folder.strip().strip("/")
+
+    base = f"s3://{str(PurePosixPath(bucket, folder, run_id, "metadata"))}"
+    return MetadataWriter(str(base), flush_every=flush_every, fs=fs_sync)
 
 #Multi thread safe writer
 class MetadataWriter:

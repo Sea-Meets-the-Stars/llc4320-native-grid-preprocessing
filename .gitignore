@@ -37,7 +37,7 @@ Thumbs.db
 # Idea
 .idea/
 
-# Generated dataset
+# Generated dataset_creation
 *.zarr
 *.parquet
 

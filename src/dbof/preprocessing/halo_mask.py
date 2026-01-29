@@ -1,5 +1,4 @@
 import skfmm
-from scipy.ndimage import binary_erosion
 import numpy as np
 
 

@@ -4,11 +4,22 @@ import uuid
 import threading
 import torch
 from torch.utils.data import Dataset
+from pathlib import PurePosixPath
+
+# todo zarr and metadata can have empty spaces in the dataset. Shouldn't but can. We should account for this with our readers
+def make_run_prefix(bucket: str, folder: str, run_id: str, dataset_name: str) -> str:
+    bucket = bucket.strip().strip("/")
+    folder = folder.strip().strip("/")
+    return f"s3://{str(PurePosixPath(bucket, folder, run_id, dataset_name))}"
 
 # Multi Thread Safe not Multi Process safe
 class ZarrDataset:
     def __init__(self, bucket, folder, run_id, dataset_name, fs, feature_channels, down_sample_res):
-        self.store = zarr.storage.FsspecStore(path=bucket+folder+run_id+dataset_name, fs=fs)
+        path = make_run_prefix(bucket, folder, run_id, dataset_name)
+
+        self.store = zarr.storage.FsspecStore(path=path, fs=fs)
+
+        # self.store = zarr.storage.FsspecStore(path=bucket+folder+run_id+dataset_name, fs=fs)
         self.root = zarr.open_group(store=self.store, mode="a")
 
         C, H, W = len(feature_channels), down_sample_res, down_sample_res
@@ -57,8 +68,8 @@ class ZarrDataset:
             if i >= self.root["images"].shape[0]:
                 raise RuntimeError("ZarrDataset capacity exceeded; call grow_array first")
 
-        image_id = uuid.uuid4().hex.encode("ascii") #uuid.uuid4().hex
-        self.root["images"][i] = np.expand_dims(img, axis=0)
+        image_id = uuid.uuid4().hex.encode("ascii")
+        self.root["images"][i] = img.numpy() #np.expand_dims(img, axis=0) #todo I dont think we need to expand dims here, double check
         self.root["image_ids"][i] = image_id
 
         return image_id
@@ -72,10 +83,15 @@ class ZarrDatasetReader:
     """
 
     def __init__(self, bucket, folder, run_id, dataset_name, fs):
-        self.store = zarr.storage.FsspecStore(
-            path=bucket + folder + run_id + dataset_name,
-            fs=fs
-        )
+        path = make_run_prefix(bucket, folder, run_id, dataset_name)
+
+        self.store = zarr.storage.FsspecStore(path=path, fs=fs)
+
+        # self.store = zarr.storage.FsspecStore(
+        #     path=bucket + folder + run_id + dataset_name, # todo update to use method above *
+        #     fs=fs
+        # )
+
         self.root = zarr.open_group(store=self.store, mode="r")
 
         self.images = self.root["images"]
@@ -204,7 +220,7 @@ class ZarrDatasetReader:
 
     def iter_images(self, batch_size=1):
         """
-        Iterate over dataset in batches.
+        Iterate over dataset_creation in batches.
 
         Yields
         ------

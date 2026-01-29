@@ -1,5 +1,5 @@
 import xarray as xr
-import utils.jmd95_xgcm_implementation as jmd95
+import dbof.utils.jmd95_xgcm_implementation as jmd95
 
 # returns merid** + zonal**
 # expects dask arrays

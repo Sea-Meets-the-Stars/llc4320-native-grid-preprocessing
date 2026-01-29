@@ -6,8 +6,8 @@ def process_llc4320(ds, ds_grid):
     """
     Merge LLC4320 state variables with grid geometry and construct a land mask.
 
-    This function combines a dataset containing LLC4320 model fields with the
-    corresponding grid dataset. ds_grid should be the product of process_llc4320_grid see bellow
+    This function combines a dataset_creation containing LLC4320 model fields with the
+    corresponding grid dataset_creation. ds_grid should be the product of process_llc4320_grid see bellow
 
     Parameters
     ----------
@@ -20,7 +20,7 @@ def process_llc4320(ds, ds_grid):
     Returns
     -------
     ds_merge : xarray.Dataset
-        Merged dataset containing model state variables, selected grid
+        Merged dataset_creation containing model state variables, selected grid
         geometry variables, and a land/ocean mask.
 
     """
@@ -49,7 +49,7 @@ def process_llc4320_grid (grid_ds):
     Returns
     -------
     ds_grid : xarray.Dataset
-        Grid-only dataset containing selected geometry variables and the
+        Grid-only dataset_creation containing selected geometry variables and the
         land/ocean mask.
 
     """
