@@ -2,4 +2,22 @@ data_access:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "llc"
   folder: "native_grid_dbof_training_data"
+# NOTE:
+# - This is NOT a user-selectable value.
+# - It MUST exactly the run_id used when the dataset was generated.
   run_id: "test00"
+# NOTE:
+# - This is NOT a user-selectable list.
+# - It MUST exactly match the feature channel list used when the dataset was generated.
+# - Ordering matters: channels are stored and read in this order.
+# - Computed features (e.g. gradients) appear after raw data channels.
+#
+# If unsure, refer to the run configuration used to generate this dataset.
+  feature_channels :
+    - "Eta"
+    - "Salt"
+    - "Theta"
+    - "U"
+    - "V"
+    - "W"
+    - "log_gradb"
