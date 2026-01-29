@@ -64,67 +64,6 @@ metadata_cols = [
     "time_snapshot"
 ]
 
-# def parse_args(p):
-#     #data selection-----
-#     p.add_argument("--sampling_step", required=True,
-#                    help="Stride in timesteps", type=int)
-#
-#     p.add_argument("--start_record", default=1180, type=int,
-#                    help="Starting record. Default is first record with wind forcing.")
-#
-#     p.add_argument("--timestep_hours", default=None, type=int,
-#                    help="How many total hours to load between start iteration and end iteration."
-#                         "If not given, the script will proces at provided sampling_step until the end of the data.")
-#
-#     #sampling options--------
-#     p.add_argument("--bias_to_high_gradients", default=2, type=float,
-#                    help="Bias to high B in sampled data")
-#
-#     p.add_argument("--sample_points_per_snapshot", default=100, type=int,
-#                    help="How many points per snapshot to sample")
-#
-#     #s3 config----------
-#     p.add_argument("--s3_endpoint", default="https://s3-west.nrp-nautilus.io",
-#                    help="nrp s3 endpoint. Likely leave default.")
-#
-#     p.add_argument("--bucket", default="llc/",
-#                    help="NRP s3 bucket to save data")
-#
-#     p.add_argument("--folder", default="native_grid_dbof_training_data/",
-#                    help="NRP s3 bucket to save data")
-#
-#     p.add_argument("--run_id", required=True,
-#                    help="Ensure run Id is unique inside s3://bucket/folder/ ")
-#
-#     #logging -------------
-#     p.add_argument("--log_dir", default="./logs",
-#         help="Directory where logs for this run will be written."
-#     )
-#
-#     #return data-------
-#     p.add_argument("--target_km_res", default=150, type=int,
-#                    help="Target physical resolution in km. Default is 150.")
-#
-#     p.add_argument("--down_sample_res", default=64, type=int,
-#                    help="Downsampling resolution of W and H in pixels. Default is 64.")
-#
-#     p.add_argument(
-#         "--model_data_feature_channels",
-#         type=str,
-#         default="Eta,Salt,Theta,U,V,W",
-#         help="Comma-separated list of lazy-loaded feature channels"
-#     )
-#
-#     p.add_argument(
-#         "--compute_features_channels",
-#         type=str,
-#         default="log_gradb",
-#         help="Comma-separated list of computed feature channels"
-#     )
-#
-#     args = p.parse_args()
-#     return args
-
 def generate_logging(cfg: config.JobConfig):
     log_root = Path(cfg.run.log_dir).expanduser().resolve()
     run_dir = log_root / cfg.run.run_id
