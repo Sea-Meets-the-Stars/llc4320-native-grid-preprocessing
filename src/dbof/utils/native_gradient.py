@@ -63,10 +63,6 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
     # print(f'dimensions of ds_dy_haty_M : {ds_dy_haty_M.dims}')
 
 
-
-
-
-    # todo this is different from tutorial. Is it correct
     grad_s_at_cell_center_X = grid.interp(ds_dx_hatx_M, 'X', boundary='fill')
     grad_s_at_cell_center_Y = grid.interp(ds_dy_haty_M, 'Y', boundary='fill')
 
