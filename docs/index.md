@@ -1,0 +1,48 @@
+# DBOF in Native Grid
+
+Documentation for the LLC4320 native grid preprocessing pipeline for detecting fronts in the ocean.
+
+## Overview
+
+This project provides tools for:
+- Accessing raw LLC4320 model output data
+- Preprocessing LLC data for machine learning
+- Weighted sampling strategies
+- Halo masking techniques
+
+## Contents
+
+```{toctree}
+:maxdepth: 2
+:caption: Documentation
+
+Accessing_Raw_LLC4320_Data
+Preprocess_LLC_Data
+Weighted_Sampling
+Sampling_With_GradB2
+Halo_Masking
+Tasks_TODO
+```
+
+```{toctree}
+:maxdepth: 2
+:caption: Infrastructure
+
+nautilus/s3_DBOF
+```
+
+## Installation
+
+```bash
+pip install -e .
+```
+
+## Authors
+
+- J. Xavier Prochaska (jxp@ucsc.edu)
+- P. Cornillon
+- J. Tallman (jttallman@ucdavis.edu)
+
+## License
+
+BSD License
