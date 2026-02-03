@@ -1,6 +1,32 @@
 
 
 def calculate_jacobian(u_x, v_y, ds_merge, grid):
+    """
+       Compute zonal and meridional spatial derivatives of horizontal velocity components on a curvilinear grid.
+       See https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html#Part-2:-calculate-the-zonal-and-meridional-gradients-of-the-zonal-and-meridional-flow-fields
+
+       Parameters
+       ----------
+       u_x : xarray.DataArray
+           Zonal velocity component defined in the model x-direction.
+       v_y : xarray.DataArray
+           Meridional velocity component defined in the model y-direction.
+       ds_merge : xarray.Dataset
+           Dataset containing grid metrics and rotation coefficients.
+       grid : xgcm.Grid
+           Grid object used to compute metric-aware interpolation and derivatives.
+
+       Returns
+       -------
+       du_lambda_dlambda : xarray.DataArray
+           Zonal derivative of the zonal velocity component.
+       du_lambda_dphi : xarray.DataArray
+           Meridional derivative of the zonal velocity component.
+       dv_phi_dlambda : xarray.DataArray
+           Zonal derivative of the meridional velocity component.
+       dv_phi_dphi : xarray.DataArray
+           Meridional derivative of the meridional velocity component.
+       """
     # Move the values to tracer position
     vec_u_to_ij = grid.interp(u_x, 'X', boundary='fill')
     vec_v_to_ij = grid.interp(v_y, 'Y', boundary='fill')

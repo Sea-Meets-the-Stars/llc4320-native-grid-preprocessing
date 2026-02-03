@@ -17,6 +17,21 @@ def log_grad_b(ds_merge, grid):
     return log_gradb
 
 def relative_vorticity(ds_merge, grid):
+    """
+       Compute relative vorticity from horizontal velocity components.
+
+       Parameters
+       ----------
+       ds_merge : xarray.Dataset
+           Dataset containing U and V components on the model grid.
+       grid : xgcm.Grid
+           Grid object relating to ds_merge.
+
+       Returns
+       -------
+       omega : xarray.DataArray
+           Relative vorticity field computed as dv/dλ minus du/dφ.
+       """
     u_x = ds_merge.U.copy(deep=True)
     v_y = ds_merge.V.copy(deep=True)
 
