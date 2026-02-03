@@ -121,8 +121,6 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
 
     if "relative_vorticity" in computed_feature_channels:
         relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
-        # todo do we need?
-        #relative_vorticity = relative_vorticity.values
         calculated_fields["relative_vorticity"] = relative_vorticity
 
     logging.info(f"Sampling patch center points")
