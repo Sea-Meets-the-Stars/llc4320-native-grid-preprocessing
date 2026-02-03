@@ -101,14 +101,25 @@ Ice is determined at each iteration.
 
 [Ice_Masking.md](docs/Ice_Masking.md) gives more info on ice masking. 
 
-Example of each mask : 
+### Example of each mask :
+### Land Mask 
+![land_mask.png](docs/images/land_mask.png)
+
+### Ice mask (freezing point = 0)
+![ice_mask_less_than_0.png](docs/images/ice_mask_less_than_0.png)
+
+### Face Boundary Mask
+![faces_mask.png](docs/images/faces_mask.png)
+
+### Combined Mask
+![merged_mask.png](docs/images/merged_mask.png)
 
 ## Calculated Fields 
 We support the following calculated fields from the raw data :
 - Log of gradient of buoyancy squared log(ΔB^2)
-IMAGE HERE
-- Relative Vorticity 
-IMAGE HERE
+![loggradb2.png](docs/images/loggradb2.png)
+- Relative Vorticity. See below a smoothed image.
+![relative_vorticity_smooth.png](docs/images/relative_vorticity_smooth.png)
 
 These values are calculated lazily globaly over the entire iteration. However, the calculation is not actually done 
 until at the cutout level we call Dask compute. So the calculation is only done for the cutout region. With the exception 
@@ -133,4 +144,4 @@ This process is parallelized with Dask and more information on the pipeline can 
 The resulting dataset is a number of cutouts with fixed km and pixel size with each model layer and calculated layer as 
 channels. The dataset can be accessed using a provided class. See [access_dbof_dataset.ipynb](notebooks/access_dbof_dataset.ipynb).
 
-IMAGE HERE
+![data sample](docs/images/example_data_00.png)
