@@ -103,8 +103,34 @@ Ice is determined at each iteration.
 
 Example of each mask : 
 
+## Calculated Fields 
+We support the following calculated fields from the raw data :
+- Log of gradient of buoyancy squared log(ΔB^2)
+IMAGE HERE
+- Relative Vorticity 
+IMAGE HERE
+
+These values are calculated lazily globaly over the entire iteration. However, the calculation is not actually done 
+until at the cutout level we call Dask compute. So the calculation is only done for the cutout region. With the exception 
+of log(ΔB^2) which is used for sampling. 
+
 ## Sampling 
+We must then choose a number of cutout centers from each iteration. This is referred to as sampling here. 
+We support the following sampling methods :
+- weighted sampling by log(ΔB^2). See [Weighted_Sampling.md](docs/Weighted_Sampling.md) for more information. 
 
 ## Extracting Cutouts and Dask Pipeline
+Once our centers are sampled we can generate our cutouts. This process is as follows:
+1. Determine the required cells in each direction around our sampled center point to make up the requested fixed km size. 
+2. Sample data from these cells which will trigger our lazy calculations.
+3. Downsample our patches into fixed resolution images. 
+4. Write metadata and image data to remote storage. 
+
+This process is parallelized with Dask and more information on the pipeline can be found in 
+[Cutout_Generationg_Pipeline.md](docs/Cutout_Generationg_Pipeline.md).
 
 ## Dataset
+The resulting dataset is a number of cutouts with fixed km and pixel size with each model layer and calculated layer as 
+channels. The dataset can be accessed using a provided class. See [access_dbof_dataset.ipynb](notebooks/access_dbof_dataset.ipynb).
+
+IMAGE HERE
