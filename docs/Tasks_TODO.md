@@ -3,7 +3,10 @@
   - What storage should we support?
     - local file system
     - gcloud
-- We must add wind curl as a calculatable field
-  - We should also make the calculatable fields more modular so others can generated fields of interest.
+- Dataset reader and metadata should be able to handle empty zarr indices
+- Ordering of features needs to be set in stone somewhere
+  - Maybe dont even allow user to pass in features, maybe just the calculated ones. 
+- Weighted sampling should act on a computed array instead of a dask array
+- extract_patch_extents_and_metadata_in_series should be parallizable now
 # List of little fixes
 - Meta has a redundant id column

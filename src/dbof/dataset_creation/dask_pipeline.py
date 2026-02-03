@@ -8,10 +8,8 @@ import logging
 
 import dbof.dataset_creation.spatial_patches as spatial_patches
 
-# todo this file deserves a document to explain
-
 @delayed
-def downsample_image_and_write_image_and_metadata(zarr_ds, metadata_writer, patch_data, image, patch, down_sample_res, target_km_res, metadata_cols):
+def downsample_image_and_write_image_and_metadata_lazy(zarr_ds, metadata_writer, patch_data, image, patch, down_sample_res, target_km_res, metadata_cols):
     index = patch_data["index"]
 
     patch_metadata = dict.fromkeys(metadata_cols)
@@ -43,14 +41,14 @@ def downsample_image_and_write_image_and_metadata(zarr_ds, metadata_writer, patc
 
     return data_sample, patch_metadata
 
-def create_image_patch_lazy(ds, channels, patch):
+def create_image_patch_lazy(ds, model_channels, calculated_fields, patch):
     '''
     This is a lazy function meant to be called by dask.
     dask.compute()
     '''
     channels_array = []
 
-    for channel in channels:
+    for channel in model_channels:
         feature = ds[channel].isel(
             face=patch["face"],
             j=slice(patch["j_start"], patch["j_end"] + 1),
@@ -58,11 +56,19 @@ def create_image_patch_lazy(ds, channels, patch):
         )
         channels_array.append(feature.data)
 
+    # these if statements are to maintain ordering of optional features. User could pass them in, in whatever order.
+    if "relative_vorticity" in calculated_fields:
+        vort_feature = calculated_fields["relative_vorticity"].isel(
+                face=patch["face"],
+                j=slice(patch["j_start"], patch["j_end"] + 1),
+                i=slice(patch["i_start"], patch["i_end"] + 1),
+            )
+        channels_array.append(vort_feature.data)
+
     # Stack lazily (Dask only)
     img = da.stack(channels_array, axis=0).astype("float32")  # (C, H, W)
 
     return img
-
 
 def create_image_patch_numpy(array, patch):
     '''
@@ -76,12 +82,10 @@ def create_image_patch_numpy(array, patch):
 
     return log_slice
 
-# todo future proof for more numpy arrays like loggradb - needed for wind curl in the near future
-# todo the lazy channels thing is really confusing to read. Lets make that clear
-def create_image_patches_batch_as_tensors_dask(ds, log_gradb_np, lazy_channels, patches, scheduler='threads'):
-    # 1. Build lazy dask arrays (DS channels only)
+def create_image_patches_batch_as_tensors_dask(ds, calculated_fields, model_channels, patches, scheduler='threads'):
+    # 1. Build lazy dask arrays.
     patch_arrays = [
-        create_image_patch_lazy(ds, lazy_channels, patch)
+        create_image_patch_lazy(ds, model_channels, calculated_fields, patch)
         for patch in patches
     ]
 
@@ -89,11 +93,10 @@ def create_image_patches_batch_as_tensors_dask(ds, log_gradb_np, lazy_channels, 
     computed_arrays = dask.compute(*patch_arrays, scheduler=scheduler)
 
     tensors = []
-    # 3. Append log_gradb (NumPy) per patch, these are from already computed data
+    # 3. Append log_gradb (NumPy) per patch, these are from already computed data.
+    # This is because we precompute log_gradb for sampling. No reason to recompute
     for arr, patch in zip(computed_arrays, patches):
-
-        log_slice = create_image_patch_numpy(log_gradb_np, patch)
-
+        log_slice = create_image_patch_numpy(calculated_fields["log_gradb_np"], patch)
         log_slice = np.expand_dims(log_slice, axis=0)
         img = np.concatenate((arr, log_slice), axis=0)
         tensors.append(torch.from_numpy(img))
@@ -125,7 +128,7 @@ def extract_patch_extents_and_metadata_in_series(index, ds_merge, log_gradb_np, 
     return patch, patch_meta_data
 
 def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
-                 indices, ds_merge, log_gradb_np, target_km_res, feature_channels_lazy, metadata_cols, logger=None):
+                 indices, ds_merge, target_km_res,  metadata_cols, calculated_fields, model_channels, logger=None):
 
     logger = logger or logging.getLogger(__name__)
 
@@ -134,20 +137,20 @@ def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
 
     logger.info(f"Starting patch extents dataset_creation")
     for index in indices:
-        patch, patch_meta_data = extract_patch_extents_and_metadata_in_series(index, ds_merge, log_gradb_np, target_km_res)
+        patch, patch_meta_data = extract_patch_extents_and_metadata_in_series(index, ds_merge, calculated_fields["log_gradb_np"], target_km_res)
 
         if patch_meta_data is not None:
             patch_meta_data_list.append(patch_meta_data)
             patches.append(patch)
 
     logger.info("Starting batched image dataset_creation")
-    images = create_image_patches_batch_as_tensors_dask(ds_merge, log_gradb_np, feature_channels_lazy, patches, scheduler='threads')
+    images = create_image_patches_batch_as_tensors_dask(ds_merge, calculated_fields, model_channels, patches, scheduler='threads')
 
     # Downsample images and get metadata ----------------------------------------------------
     logger.info("Downsampling Images")
     tasks = []
     for pd, image, patch in zip(patch_meta_data_list, images, patches):
-        tasks.append(downsample_image_and_write_image_and_metadata(zarr_ds, metadata_writer, pd, image, patch, down_sample_res, target_km_res, metadata_cols))
+        tasks.append(downsample_image_and_write_image_and_metadata_lazy(zarr_ds, metadata_writer, pd, image, patch, down_sample_res, target_km_res, metadata_cols))
 
     # Writing data is only thread safe for now. Not processes safe.
     dask.compute(*tasks, scheduler='threads')

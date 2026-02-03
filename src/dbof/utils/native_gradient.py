@@ -1,4 +1,80 @@
 
+
+def calculate_jacobian(u_x, v_y, ds_merge, grid):
+    """
+       Compute zonal and meridional spatial derivatives of horizontal velocity components on a curvilinear grid.
+       See https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html#Part-2:-calculate-the-zonal-and-meridional-gradients-of-the-zonal-and-meridional-flow-fields
+
+       Parameters
+       ----------
+       u_x : xarray.DataArray
+           Zonal velocity component defined in the model x-direction.
+       v_y : xarray.DataArray
+           Meridional velocity component defined in the model y-direction.
+       ds_merge : xarray.Dataset
+           Dataset containing grid metrics and rotation coefficients.
+       grid : xgcm.Grid
+           Grid object used to compute metric-aware interpolation and derivatives.
+
+       Returns
+       -------
+       du_lambda_dlambda : xarray.DataArray
+           Zonal derivative of the zonal velocity component.
+       du_lambda_dphi : xarray.DataArray
+           Meridional derivative of the zonal velocity component.
+       dv_phi_dlambda : xarray.DataArray
+           Zonal derivative of the meridional velocity component.
+       dv_phi_dphi : xarray.DataArray
+           Meridional derivative of the meridional velocity component.
+       """
+    # Move the values to tracer position
+    vec_u_to_ij = grid.interp(u_x, 'X', boundary='fill')
+    vec_v_to_ij = grid.interp(v_y, 'Y', boundary='fill')
+
+    # rotate the interpolated vectors to the zonal (lambda) and meridional (phi) basis (basically just from model direction to real)
+    # Add the zonal components of the 'X' and 'Y' vectors
+    u_lambda = vec_u_to_ij * ds_merge['CS'] - vec_v_to_ij * ds_merge['SN']
+    # Add the meridional components
+    v_phi = vec_u_to_ij * ds_merge['SN'] + vec_v_to_ij * ds_merge['CS']
+
+    # Calculate the zonal and meridional gradients of the zonal field ----------------
+
+    # calculate the gradient in the model 'x' direction
+    du_lambda_dx = grid.diff(u_lambda, 'X') / ds_merge.dxC
+    # calculate the gradient in the model 'y' direction
+    du_lambda_dy = grid.diff(u_lambda, 'Y') / ds_merge.dyC
+
+    # interpolate the gradients from cell boundaries to the cell centers
+    grad_u_lambda_to_ij_X = grid.interp(du_lambda_dx, 'X', boundary='fill')
+    grad_u_lambda_to_ij_Y = grid.interp(du_lambda_dy, 'Y', boundary='fill')
+
+    # rotate to zonal and meridional directions
+    # Add the zonal components of the 'X' and 'Y' vector components
+    du_lambda_dlambda = grad_u_lambda_to_ij_X * ds_merge['CS'] - grad_u_lambda_to_ij_Y * ds_merge['SN']
+    # Add the meridional components
+    du_lambda_dphi = grad_u_lambda_to_ij_X * ds_merge['SN'] + grad_u_lambda_to_ij_Y * ds_merge['CS']
+
+    # Calculate the zonal and meridional gradients of the Meridional field ---------
+
+    # calculate the gradient in the model 'x' direction
+    dv_phi_dx = grid.diff(v_phi, 'X') / ds_merge.dxC
+    # calculate the gradient in the model 'y' direction
+    dv_phi_dy = grid.diff(v_phi, 'Y') / ds_merge.dyC
+
+    # interpolate the gradients from cell boundaries to the cell centers
+    grad_v_phi_to_ij_X = grid.interp(dv_phi_dx, 'X', boundary='fill')
+    grad_v_phi_to_ij_Y = grid.interp(dv_phi_dy, 'Y', boundary='fill')
+
+    # rotate to zonal and meridional directions
+    # Add the zonal components of the 'X' and 'Y' vector components
+    dv_phi_dlambda = grad_v_phi_to_ij_X * ds_merge['CS'] - grad_v_phi_to_ij_Y * ds_merge['SN']
+    # Add the meridional components
+    dv_phi_dphi = grad_v_phi_to_ij_X * ds_merge['SN'] + grad_v_phi_to_ij_Y * ds_merge['CS']
+
+    return du_lambda_dlambda, du_lambda_dphi, dv_phi_dlambda, dv_phi_dphi
+
+
+
 def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
     """
     Calculate the gradient of a tracer variable in native model coordinates
@@ -37,11 +113,7 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
     ds_dx_hatx_M = ds_hatx_M / ds_grid.dxC
 
 
-
-
-
     # gradient in y
-    #print(f'dyC dims: {ds.dyC.dims}')
 
     # calculate the gradient of value in 'Y':
 
@@ -59,26 +131,9 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
     # ... the _M suffix denotes we are working in the model basis
     ds_dy_haty_M = ds_haty_M / ds_grid.dyC
 
-    # print(f'dimensions of ds_haty      : {ds_haty_M.dims}')
-    # print(f'dimensions of ds_dy_haty_M : {ds_dy_haty_M.dims}')
 
-
-
-
-
-    # todo this is different from tutorial. Is it correct
     grad_s_at_cell_center_X = grid.interp(ds_dx_hatx_M, 'X', boundary='fill')
     grad_s_at_cell_center_Y = grid.interp(ds_dy_haty_M, 'Y', boundary='fill')
-
-    # grad_s_at_cell_center = xr.merge([grad_s_at_cell_center_X, grad_s_at_cell_center_Y])
-
-    # grad_s_at_cell_center = grid.interp_2d_vector({'X': ds_dx_hatx_M, 'Y': ds_dy_haty_M}, boundary='fill')
-
-    # print(f'the keys of grad_s_at_cell_center X are {list(grad_s_at_cell_center_X.keys() )}')
-    # print(f'the keys of grad_s_at_cell_center X are {list(grad_s_at_cell_center_Y.keys() )}')
-
-    # print(f"\nds_grad_vec X component {grad_s_at_cell_center_X.dims}")
-    # print(f"ds_grad_vec Y component {grad_s_at_cell_center_Y.dims}")
 
     # The zonal component of the gradient vector:
     # ... the gradient with respect to x in the G basis.
@@ -94,8 +149,8 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
     ds_dx_hatx_G.name = 'ds_dx_hatx_G'
     ds_dy_haty_G.name = 'ds_dy_haty_G'
 
-    ds_dx_hatx_G.attrs.update({'long_name': 'zonal gradient of SSS'})
-    ds_dy_haty_G.attrs.update({'long_name': 'meridional gradient of SSS'})
+    # ds_dx_hatx_G.attrs.update({'long_name': 'zonal gradient of SSS'})
+    # ds_dy_haty_G.attrs.update({'long_name': 'meridional gradient of SSS'})
 
     # The gradients have units ?/m
     ds_dx_hatx_G.attrs.update({'units': '? m-1'})

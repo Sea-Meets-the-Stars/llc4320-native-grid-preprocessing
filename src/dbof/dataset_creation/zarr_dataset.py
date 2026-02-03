@@ -14,7 +14,7 @@ def make_run_prefix(bucket: str, folder: str, run_id: str, dataset_name: str) ->
 
 # Multi Thread Safe not Multi Process safe
 class ZarrDataset:
-    def __init__(self, bucket, folder, run_id, dataset_name, fs, feature_channels, down_sample_res):
+    def __init__(self, bucket, folder, run_id, dataset_name, fs, num_channels, down_sample_res):
         path = make_run_prefix(bucket, folder, run_id, dataset_name)
 
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
@@ -22,7 +22,7 @@ class ZarrDataset:
         # self.store = zarr.storage.FsspecStore(path=bucket+folder+run_id+dataset_name, fs=fs)
         self.root = zarr.open_group(store=self.store, mode="a")
 
-        C, H, W = len(feature_channels), down_sample_res, down_sample_res
+        C, H, W = num_channels, down_sample_res, down_sample_res
         self.C = C
         self.H = H
         self.W = W

@@ -31,7 +31,7 @@ import dbof.dataset_creation.zarr_dataset as zarr_dataset
 import dbof.dataset_creation.metadata as metadata
 import dbof.dataset_creation.dask_pipeline as dask_pipeline
 import dbof.dataset_creation.config as config
-
+from dbof.preprocessing.calculate_additional_fields import relative_vorticity
 
 # Constants --------------------------
 # NOTE these are constants for the LLC 4320 model. If we look to support other models in the future
@@ -45,7 +45,7 @@ LLC_FACES = range(13)
 endpoint_url = 'https://mghp.osn.xsede.org'
 
 # feature_channels_lazy = ["Eta", "Salt", "Theta", "U", "V", "W"] #,
-# feature_channels_computed = ["log_gradb"]
+# feature_channels_computed = []
 
 metadata_cols = [
     "id",
@@ -103,7 +103,7 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig):
 
     return ds_grid, land_face_mask
 
-def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, grid, land_face_mask, non_computed_feature_channels):
+def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, grid, land_face_mask, model_feature_channels, computed_feature_channels):
     # NOTE The ordering of the following steps matters
 
     # Calculate Ice Mask
@@ -112,8 +112,16 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
     ice_mask_np = ice_mask.values
     merged_mask = ice_mask_np & land_face_mask
 
-    # calculate gradients
-    ds_merge, log_gradb = calculate_additional_fields.calculate_gradients(ds_merge, grid)
+    # Calculated Fields
+    calculated_fields = {}
+
+    # This must be included so long as we are sampling using it.
+    # If we support additional sampling methods in the future, this becomes optional.
+    log_gradb = calculate_additional_fields.log_grad_b(ds_merge, grid)
+
+    if "relative_vorticity" in computed_feature_channels:
+        relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
+        calculated_fields["relative_vorticity"] = relative_vorticity
 
     logging.info(f"Sampling patch center points")
     # todo this should be updated to take in a numpy array since we compute loggradb later anyway
@@ -132,14 +140,19 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
     the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake 
     '''
     log_gradb_np = log_gradb.values #protected line do not modify
+    calculated_fields["log_gradb_np"] = log_gradb_np
 
     # grow zarr ds to fit at most len of indices
     zarr_ds.grow_array(len(indices))
 
     #process data and write to s3
-    images = dask_pipeline.run_patch_creation(zarr_ds, metadata_writer, cfg.output.down_sample_res,
-                                                          indices, ds_merge, log_gradb_np, cfg.output.target_km_res,
-                                                          non_computed_feature_channels, metadata_cols)
+    images = dask_pipeline.run_patch_creation(zarr_ds, metadata_writer, cfg.output.down_sample_res, indices,
+                                              ds_merge,
+                                              cfg.output.target_km_res,
+                                              metadata_cols,
+                                              calculated_fields,
+                                              model_feature_channels,
+                                              )
 
     # flush metada
     metadata_writer.close()
@@ -163,10 +176,6 @@ def main():
     and iteration over time snapshots.
     """
 
-    # Script arguments
-    # p = argparse.ArgumentParser()
-    # args = parse_args(p)
-
     cli = config.parse_args()
     cfg = config.load_config(cli.config)
 
@@ -185,8 +194,8 @@ def main():
 
     logging.info("Arguments parsed successfully. Logging set up. Running script.")
 
-    non_computed_feature_channels = [c.strip() for c in cfg.features.model_data_feature_channels if c.strip()]
-    feature_channels_computed = [c.strip() for c in cfg.features.compute_features_channels if c.strip()]
+    model_feature_channels = [c.strip() for c in cfg.features.model_data_feature_channels if c.strip()]
+    computed_feature_channels = [c.strip() for c in cfg.features.compute_features_channels if c.strip()]
 
     # Set concurrency for zarr ds writes
     zarr.config.set({'async.concurrency':  cfg.runtime.zarr_async_concurrency})
@@ -208,19 +217,13 @@ def main():
         flush_every=10_000,
     )
 
-    # # Zarr Dataset
-    # dataset_name = f"dataset_creation.zarr"
-    # zarr_ds = zarr_dataset.ZarrDataset(args.bucket, args.folder, args.run_id, dataset_name, fs=fs,
-    #                                    feature_channels=non_computed_feature_channels+feature_channels_computed,
-    #                                    down_sample_res=args.down_sample_res)
-
     zarr_ds = zarr_dataset.ZarrDataset(
         cfg.output.bucket,
         cfg.output.folder,
         cfg.run.run_id,
         cfg.output.dataset_name,
         fs=fs,
-        feature_channels=non_computed_feature_channels + feature_channels_computed,
+        num_channels=len(model_feature_channels) + len(computed_feature_channels) + 1, # +1 for log_gradb
         down_sample_res=cfg.output.down_sample_res,
     )
 
@@ -237,7 +240,7 @@ def main():
         logging.info(f"Data loaded for iteration: {it}")
 
         # now process this iteration of data
-        process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, grid, land_face_mask, non_computed_feature_channels)
+        process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, grid, land_face_mask, model_feature_channels, computed_feature_channels)
 
         ds_merge = None
         del ds_merge

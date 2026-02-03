@@ -1,6 +1,6 @@
 data_access:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
-  bucket: "llc"
+  bucket: "dbof"
   folder: "native_grid_dbof_training_data"
 # NOTE:
 # - This is NOT a user-selectable value.
@@ -20,4 +20,5 @@ data_access:
     - "U"
     - "V"
     - "W"
+    - "relative_vorticity"
     - "log_gradb"
