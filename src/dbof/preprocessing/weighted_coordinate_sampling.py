@@ -51,7 +51,7 @@ def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
     w_stacked = weights.stack(
         sample_dim=da_m.dims)  # stacks face j i into one dimension but keeps track of indexes
 
-    w_valid = w_stacked.dropna("sample_dim")  # coordinates of xarray are preserved here
+    w_valid = w_stacked.dropna("sample_dim")  # coordinates of xarray are preserved here todo this is causing us to jump into numpy for some reason. This should be changed
     p = w_valid / w_valid.sum()
 
     p_np = p.values

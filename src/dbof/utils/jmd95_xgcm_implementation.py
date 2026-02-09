@@ -2,6 +2,7 @@
 # The package install is super buggy and does not work with windows so the code has been coppied here
 # Credit goes to the authors of mitgcm
 import numpy as np
+import logging
 
 def jmd95(salt,theta,p):
     """
@@ -128,12 +129,13 @@ def _check_dimensions(s,t,p=np.zeros(())):
     return
 
 def _check_salinity(s):
+    logger = logging.getLogger(__name__)
 
     sneg = s<0
     if np.any(sneg):
-        warnings.warn('found negative salinity values')
+        logger.warning('found negative salinity values. resetting them to nan')
         # warnings.warn('found negative salinity values, reset them to nan')
-        # s[sneg] = np.nan
+        s[sneg] = np.nan
 
     return s
 
