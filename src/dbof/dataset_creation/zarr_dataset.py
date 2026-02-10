@@ -87,10 +87,10 @@ class ZarrDatasetReader:
 
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
 
-        # self.store = zarr.storage.FsspecStore(
-        #     path=bucket + folder + run_id + dataset_name, # todo update to use method above *
-        #     fs=fs
-        # )
+        # --- valid physical indices cache (built once) ---
+        self.valid_indices = None          # np.ndarray of physical indices
+        self._iter_pos = 0                 # pointer for get_next()/iteration
+
 
         self.root = zarr.open_group(store=self.store, mode="r")
 
@@ -126,8 +126,46 @@ class ZarrDatasetReader:
     def width(self):
         return self.images.shape[3]
 
+    @property
+    def num_valid_images(self):
+        if self.valid_indices is None:
+            self.build_valid_indices()
+        return int(self.valid_indices.size)
+
+    def reset_iterator(self):
+        self._iter_pos = 0
+
+    def build_valid_indices(self, chunk_size=100_000):
+        """
+        Build and cache an array of *physical* indices that have valid data.
+        This is a one-time scan over image_ids; training then uses only these indices.
+        """
+        valid = []
+        n = self.num_images
+
+        for start in range(0, n, chunk_size):
+            stop = min(start + chunk_size, n)
+            with self.lock:
+                ids = self.image_ids[start:stop]
+
+            # normalize -> python strings (handles bytes/object)
+            ids = np.asarray(ids).astype(str)
+
+            mask = ids != "" # converted to str above so empty bytes are ""
+            idxs = np.nonzero(mask)[0] + start
+            if idxs.size:
+                valid.append(idxs.astype(np.int64))
+
+        self.valid_indices = np.concatenate(valid) if valid else np.array([], dtype=np.int64)
+        self._iter_pos = 0
+        return self.valid_indices
+
     # --------------------------
     # Core accessors
+    # Physical ID-based access
+    # PLEASE NOTE : there can be holes in the zarr data due to failures in the data gen run.
+    # These are not handled in any way by this code.
+    # However, the get next or acessing via metadata indexes are safe methods
     # --------------------------
 
     def get_image(self, index):
@@ -179,10 +217,6 @@ class ZarrDatasetReader:
 
         return imgs, ids
 
-    # --------------------------
-    # ID-based access
-    # --------------------------
-
     def _build_id_index(self):
         """
         Build a mapping from image_id -> index.
@@ -218,62 +252,76 @@ class ZarrDatasetReader:
     # Iteration
     # --------------------------
 
+    def get_next(self):
+        """
+        Return the next valid sample (skipping holes), using physical indices internally.
+        Raises StopIteration when exhausted.
+        """
+        if self.valid_indices is None:
+            self.build_valid_indices()
+
+        if self._iter_pos >= self.valid_indices.size:
+            raise StopIteration
+
+        phys_idx = int(self.valid_indices[self._iter_pos])
+        self._iter_pos += 1
+
+        return self.get_image(phys_idx)
+
     def iter_images(self, batch_size=1):
         """
-        Iterate over dataset_creation in batches.
-
-        Yields
-        ------
-        images : np.ndarray, shape (B, C, H, W)
-        image_ids : list[str]
+        Iterate over *valid* samples only, in batches.
         """
-        n = self.num_images
-        for start in range(0, n, batch_size):
-            stop = min(start + batch_size, n)
-            yield self.get_slice(start, stop)
+        if self.valid_indices is None:
+            self.build_valid_indices()
+
+        v = self.valid_indices
+        for start in range(0, v.size, batch_size):
+            phys = v[start:start + batch_size]
+            yield self.get_images(phys)
 
 
-class ZarrTorchDataset(Dataset):
-    """
-    PyTorch Dataset wrapping ZarrDatasetReader.
-
-    Each worker process gets its own reader instance.
-    """
-
-    def __init__(self, bucket, folder, run_id, dataset_name, fs, transform=None):
-        self.bucket = bucket
-        self.folder = folder
-        self.run_id = run_id
-        self.dataset_name = dataset_name
-        self.fs = fs
-        self.transform = transform
-
-        # opened lazily per worker
-        self._reader = None
-
-    def _get_reader(self):
-        if self._reader is None:
-            self._reader = ZarrDatasetReader(
-                bucket=self.bucket,
-                folder=self.folder,
-                run_id=self.run_id,
-                dataset_name=self.dataset_name,
-                fs=self.fs
-            )
-        return self._reader
-
-    def __len__(self):
-        reader = self._get_reader()
-        return reader.num_images
-
-    def __getitem__(self, idx):
-        reader = self._get_reader()
-        img, image_id = reader.get_image(idx)
-
-        # (C, H, W) -> torch tensor
-        img = torch.from_numpy(img)
-
-        if self.transform is not None:
-            img = self.transform(img)
-
-        return img, image_id
+# class ZarrTorchDataset(Dataset):
+#     """
+#     PyTorch Dataset wrapping ZarrDatasetReader.
+#
+#     Each worker process gets its own reader instance.
+#     """
+#
+#     def __init__(self, bucket, folder, run_id, dataset_name, fs, transform=None):
+#         self.bucket = bucket
+#         self.folder = folder
+#         self.run_id = run_id
+#         self.dataset_name = dataset_name
+#         self.fs = fs
+#         self.transform = transform
+#
+#         # opened lazily per worker
+#         self._reader = None
+#
+#     def _get_reader(self):
+#         if self._reader is None:
+#             self._reader = ZarrDatasetReader(
+#                 bucket=self.bucket,
+#                 folder=self.folder,
+#                 run_id=self.run_id,
+#                 dataset_name=self.dataset_name,
+#                 fs=self.fs
+#             )
+#         return self._reader
+#
+#     def __len__(self):
+#         reader = self._get_reader()
+#         return reader.num_images
+#
+#     def __getitem__(self, idx):
+#         reader = self._get_reader()
+#         img, image_id = reader.get_image(idx)
+#
+#         # (C, H, W) -> torch tensor
+#         img = torch.from_numpy(img)
+#
+#         if self.transform is not None:
+#             img = self.transform(img)
+#
+#         return img, image_id
