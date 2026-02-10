@@ -281,47 +281,47 @@ class ZarrDatasetReader:
             yield self.get_images(phys)
 
 
-class ZarrTorchDataset(Dataset):
-    """
-    PyTorch Dataset wrapping ZarrDatasetReader.
-
-    Each worker process gets its own reader instance.
-    """
-
-    def __init__(self, bucket, folder, run_id, dataset_name, fs, transform=None):
-        self.bucket = bucket
-        self.folder = folder
-        self.run_id = run_id
-        self.dataset_name = dataset_name
-        self.fs = fs
-        self.transform = transform
-
-        # opened lazily per worker
-        self._reader = None
-
-    def _get_reader(self):
-        if self._reader is None:
-            self._reader = ZarrDatasetReader(
-                bucket=self.bucket,
-                folder=self.folder,
-                run_id=self.run_id,
-                dataset_name=self.dataset_name,
-                fs=self.fs
-            )
-        return self._reader
-
-    def __len__(self):
-        reader = self._get_reader()
-        return reader.num_images
-
-    def __getitem__(self, idx):
-        reader = self._get_reader()
-        img, image_id = reader.get_image(idx)
-
-        # (C, H, W) -> torch tensor
-        img = torch.from_numpy(img)
-
-        if self.transform is not None:
-            img = self.transform(img)
-
-        return img, image_id
+# class ZarrTorchDataset(Dataset):
+#     """
+#     PyTorch Dataset wrapping ZarrDatasetReader.
+#
+#     Each worker process gets its own reader instance.
+#     """
+#
+#     def __init__(self, bucket, folder, run_id, dataset_name, fs, transform=None):
+#         self.bucket = bucket
+#         self.folder = folder
+#         self.run_id = run_id
+#         self.dataset_name = dataset_name
+#         self.fs = fs
+#         self.transform = transform
+#
+#         # opened lazily per worker
+#         self._reader = None
+#
+#     def _get_reader(self):
+#         if self._reader is None:
+#             self._reader = ZarrDatasetReader(
+#                 bucket=self.bucket,
+#                 folder=self.folder,
+#                 run_id=self.run_id,
+#                 dataset_name=self.dataset_name,
+#                 fs=self.fs
+#             )
+#         return self._reader
+#
+#     def __len__(self):
+#         reader = self._get_reader()
+#         return reader.num_images
+#
+#     def __getitem__(self, idx):
+#         reader = self._get_reader()
+#         img, image_id = reader.get_image(idx)
+#
+#         # (C, H, W) -> torch tensor
+#         img = torch.from_numpy(img)
+#
+#         if self.transform is not None:
+#             img = self.transform(img)
+#
+#         return img, image_id
