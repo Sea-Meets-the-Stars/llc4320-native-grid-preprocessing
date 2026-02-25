@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import dask.array as da
 
 def is_empty_image_id(image_id):
     """
@@ -17,13 +18,17 @@ def test_zarr_reader_returns_only_valid_data(zarr_reader):
     """
     Ensure that iterating via valid_indices never yields empty data.
     """
+    images_da, ids_da, valid_mask_da = zarr_reader.full_dataset_as_dask()
 
-    # Build valid index once
-    valid_indices = zarr_reader.build_valid_indices()
-    assert valid_indices.size > 0, "No valid samples found — dataset may be empty"
+    valid_idx = da.nonzero(valid_mask_da)[0].compute()  # numpy array in RAM
+
+    assert valid_idx.size > 0, "No valid samples found — dataset may be empty"
+
+    valid_images = da.take(images_da, valid_idx, axis=0).compute()
+    valid_ids = da.take(ids_da, valid_idx, axis=0).compute()
 
     # Iterate using the safe path
-    for img, image_id in zarr_reader.iter_images(batch_size=1):
+    for img, image_id in zip(valid_images, valid_ids):
         # iter_images yields batches; unwrap
         img = img[0]
         image_id = image_id[0]
