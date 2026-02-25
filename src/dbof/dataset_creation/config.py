@@ -15,6 +15,7 @@ class DataConfig:
     sampling_step: int = 168
     start_record: int = 1180
     timestep_hours: Optional[int] = None
+    date_iterations: Optional[List[str]] = None  # explicit timestamps as 'DDMMYYYY-HH:MM:SS'; overrides range logic
 
 @dataclass(frozen=True)
 class SamplingConfig:

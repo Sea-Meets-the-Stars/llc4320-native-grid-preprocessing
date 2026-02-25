@@ -1,34 +1,27 @@
 """
 zarr_dataset_global.py
 ----------------------
-Zarr writer/reader for global LLC4320 snapshots in the LLC compact format.
-
-The LLC4320 model output lives on 13 curvilinear faces (the "tiled" format).
-ecco_v4_py.llc_tiles_to_compact() stitches those 13 faces into a single coherent
-2D array (the "compact" format) without any geographic interpolation. Values are
-pixel-shifted and some faces are rotated so they tile correctly, but you remain on
-the native LLC grid. This is distinct from resample_to_latlon, which would
-interpolate to an equal-degree geographic grid.
+Zarr writer/reader for global LLC4320 snapshots in rectangular lat/lon format.
 
 This writer:
-  - Stores full global snapshots in LLC compact format
+  - Stores full global snapshots in rectangular lat/lon format
   - Writes sequentially, one timestep at a time
   - Uses the LLC4320 iteration number as the natural time coordinate
   - Stores compact grid shape and channel names as Zarr attributes
 
 Storage layout
 --------------
-  data  : float32, shape (T, C, compact_h, compact_w)  — all channels, all timesteps
+  data  : float32, shape (T, C, rectangular_h, rectangular_w)  — all channels, all timesteps
   time  : int64,   shape (T,)                           — LLC4320 iteration numbers
 
 Root group attributes
 ---------------------
   channel_names : list[str]        — ordered channel labels, matching axis C
-  compact_shape : [compact_h, compact_w]  — 2D shape of each compact global field
+  compact_shape : [rectangular_h, rectangular_w]  — 2D shape of each rectangular global field
 
 Chunk strategy
 --------------
-  data chunks are (1, 1, compact_h, compact_w): one channel-slice of one timestep
+  data chunks are (1, 1, rectangular_h, rectangular_w): one channel-slice of one timestep
   per chunk. This matches the expected access pattern (reading one full global
   field at a time).
 
@@ -73,16 +66,17 @@ class GlobalZarrDataset:
     folder : str
     run_id : str
     dataset_name : str
-        S3 path components — same convention as the patch ZarrDataset.
+        S3 path components
     fs : fsspec AbstractFileSystem
         Async S3 filesystem returned by create_s3_filesystems().
     channel_names : list[str]
         Ordered channel names, e.g. ["Eta", "Salt", "Theta", "U", "V", "W", "log_gradb"].
         Length must match axis C of every array passed to write_snapshot().
-    compact_shape : tuple[int, int]
-        (compact_h, compact_w) — the 2D shape of a single compact global field
-        as returned by ecco_v4_py.llc_tiles_to_compact(). Determined once via a
-        dry-run in main() before the writer is constructed.
+    rectangular_shape : tuple[int, int]
+        (rectangular_h, rectangular_w) — the 2D shape of a single rectangular global field
+        as returned by xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon().
+        Typically (12960, 17280). Determined once via a dry-run in main() before
+        the writer is constructed.
     """
 
     def __init__(
@@ -93,7 +87,7 @@ class GlobalZarrDataset:
         dataset_name: str,
         fs,
         channel_names: list,
-        compact_shape: tuple,
+        rectangular_shape: tuple,
     ):
         path = make_run_prefix(bucket, folder, run_id, dataset_name)
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
@@ -101,16 +95,17 @@ class GlobalZarrDataset:
 
         self.channel_names = list(channel_names)
         self.n_channels = len(self.channel_names)
-        self.compact_h, self.compact_w = compact_shape
+        self.rectangular_h, self.rectangular_w = rectangular_shape
+        self.rectangular_shape = (self.rectangular_h, self.rectangular_w)
 
         # ---- create arrays once on first run; idempotent on resume ----
 
         if "data" not in self.root:
             self.root.create_array(
                 "data",
-                shape=(0, self.n_channels, self.compact_h, self.compact_w),
+                shape=(0, self.n_channels, self.rectangular_h, self.rectangular_w),
                 # (1, 1, h, w): one channel-slice per chunk — efficient for field-level reads
-                chunks=(1, 1, self.compact_h, self.compact_w),
+                chunks=(1, 1, self.rectangular_h, self.rectangular_w),
                 dtype="float32",
             )
 
@@ -124,7 +119,7 @@ class GlobalZarrDataset:
 
         # Root-level metadata (safe to overwrite on resume).
         self.root.attrs["channel_names"] = self.channel_names
-        self.root.attrs["compact_shape"] = list(compact_shape)
+        self.root.attrs["rectangular_shape"] = list(self.rectangular_shape)
 
         # Resume from wherever the last run finished.
         self.t_index = int(self.root["data"].shape[0])
@@ -137,10 +132,10 @@ class GlobalZarrDataset:
 
         Parameters
         ----------
-        data : np.ndarray, shape (C, compact_h, compact_w), dtype float32
-            All channels for this timestep, already compacted via
-            ecco_v4_py.llc_tiles_to_compact(). Channel order must match
-            channel_names passed to __init__.
+        data : np.ndarray, shape (C, rectangular_h, rectangular_w), dtype float32
+            All channels for this timestep, already converted to rectangular
+            lat/lon format via faces_dataset_to_latlon(). Channel order must
+            match channel_names passed to __init__.
         iteration : int
             LLC4320 model iteration number for this snapshot. Stored as
             the time coordinate so snapshots can be looked up later.
@@ -148,18 +143,18 @@ class GlobalZarrDataset:
         Raises
         ------
         AssertionError
-            If data.shape does not match (n_channels, compact_h, compact_w).
+            If data.shape does not match (n_channels, rectangular_h, rectangular_w).
         """
-        expected = (self.n_channels, self.compact_h, self.compact_w)
+        expected = (self.n_channels, self.rectangular_h, self.rectangular_w)
         assert data.shape == expected, (
             f"write_snapshot: expected shape {expected}, got {data.shape}. "
-            f"Check that all channels were compacted and stacked correctly."
+            f"Check that all channels were converted to rectangular lat/lon correctly."
         )
 
         t = self.t_index
 
         # Grow the time axis by one slot.
-        self.root["data"].resize((t + 1, self.n_channels, self.compact_h, self.compact_w))
+        self.root["data"].resize((t + 1, self.n_channels, self.rectangular_h, self.rectangular_w))
         self.root["time"].resize((t + 1,))
 
         # Write. dtype cast here ensures float32 regardless of interpolation output.
@@ -183,11 +178,11 @@ class GlobalZarrDatasetReader:
 
     Access patterns
     ---------------
-    reader.get_snapshot(t)          -> np.ndarray (C, compact_h, compact_w)
-    reader.get_channel(c)           -> np.ndarray (T, compact_h, compact_w)
-    reader.get_channel("Theta")     -> np.ndarray (T, compact_h, compact_w)  # by name
+    reader.get_snapshot(t)          -> np.ndarray (C, rectangular_h, rectangular_w)
+    reader.get_channel(c)           -> np.ndarray (T, rectangular_h, rectangular_w)
+    reader.get_channel("Theta")     -> np.ndarray (T, rectangular_h, rectangular_w)  # by name
     reader.iteration_to_index(it)   -> int t
-    reader[t]                       -> np.ndarray (C, compact_h, compact_w)
+    reader[t]                       -> np.ndarray (C, rectangular_h, rectangular_w)
     len(reader)                     -> int T
     """
 
@@ -196,9 +191,9 @@ class GlobalZarrDatasetReader:
         store = zarr.storage.FsspecStore(path=path, fs=fs)
         self.root = zarr.open_group(store=store, mode="r")
 
-        self.data = self.root["data"]           # (T, C, compact_h, compact_w)
+        self.data = self.root["data"]           # (T, C, rectangular_h, rectangular_w)
         self.time = self.root["time"]           # (T,)
-        self.compact_shape = tuple(self.root.attrs["compact_shape"])
+        self.rectangular_shape = tuple(self.root.attrs["rectangular_shape"])
         self.channel_names = list(self.root.attrs["channel_names"])
 
         # Built lazily by iteration_to_index().

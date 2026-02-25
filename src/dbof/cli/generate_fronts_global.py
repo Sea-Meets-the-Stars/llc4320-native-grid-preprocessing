@@ -3,6 +3,7 @@
 # stdlib
 import sys
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 # numerical / compute
@@ -10,8 +11,9 @@ import numpy as np
 import xgcm
 import zarr
 
-# grid
-import ecco_v4_py as ecco
+# grid / face-to-latlon stitching
+import xarray as xr
+from xmitgcm.llcreader import llcmodel
 
 # distributed / IO
 from dask.distributed import Client
@@ -42,11 +44,15 @@ FIRST_WIND_RECORD_OFFSET = 10_368
 LLC_FACES = range(13)
 # LLC_NATIVE_GRID_DEG = 1 / 48   # only needed if using resample_to_latlon; not used here
 
+# LLC4320 calendar reference.
+# Iteration 0 corresponds to 2011-09-13 00:00:00 UTC; each step is 25 seconds.
+# Used to convert human-readable dates ('DDMMYYYY-HH:MM:SS') → iteration numbers.
+LLC4320_START_DATE      = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
+LLC4320_TIMESTEP_SECS   = 25          # seconds per model step
+DATE_FMT                = '%d%m%Y-%H:%M:%S'   # expected format: DDMMYYYY-HH:MM:SS
+
 # url of our raw data - this may need to be an input in the future
 endpoint_url = 'https://mghp.osn.xsede.org'
-
-# feature_channels_lazy = ["Eta", "Salt", "Theta", "U", "V", "W"] #,
-# feature_channels_computed = []
 
 def generate_logging(cfg: config.JobConfig):
     log_root = Path(cfg.run.log_dir).expanduser().resolve()
@@ -65,15 +71,56 @@ def generate_logging(cfg: config.JobConfig):
         force=True,
     )
 
-def calculate_iterations_for_llc(cfg: config.JobConfig):
-    # Calculate iterations based on input
-    iter_step = cfg.data.sampling_step * TS_PER_HOUR  # iteration Δ between samples
-    start_iter = FIRST_WIND_RECORD_OFFSET + cfg.data.start_record * TS_PER_HOUR
+def _date_to_iteration(date_str: str) -> int:
+    """
+    Convert a date string in 'DDMMYYYY-HH:MM:SS' format to an LLC4320 iteration number.
 
-    if (cfg.data.timestep_hours is None):
-        end_iter = MAX_ITER  # to the end of data
-    else:
-        end_iter = start_iter + cfg.data.timestep_hours * TS_PER_HOUR
+    The LLC4320 model starts at 2011-09-13 00:00:00 UTC (iteration 0) with a
+    25-second timestep. The returned iteration is rounded to the nearest step.
+
+    Examples
+    --------
+    _date_to_iteration('13092011-00:00:00')  ->  0
+    _date_to_iteration('01012012-00:00:00')  ->  ~1,011,456
+    """
+    dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
+    delta = dt - LLC4320_START_DATE
+    if delta.total_seconds() < 0:
+        raise ValueError(
+            f"Date '{date_str}' is before LLC4320 start ({LLC4320_START_DATE.date()}). "
+            "Check your DDMMYYYY-HH:MM:SS format — e.g. '13092011-00:00:00'."
+        )
+    return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
+
+
+def calculate_iterations_for_llc(cfg: config.JobConfig):
+    """
+    Return the list of LLC4320 iteration numbers to process.
+
+    Three modes, in priority order:
+
+    1. Date list  (cfg.data.date_iterations is set in YAML, e.g.
+       ``date_iterations: ['01012012-00:00:00', '01042012-00:00:00']``):
+       Each date string is converted to the nearest LLC4320 iteration number
+       using the model's 25-second timestep and start date (2011-09-13 00:00 UTC).
+
+    2. Range mode (default, backwards-compatible):
+       A uniformly-spaced range is derived from start_record, sampling_step, and
+       timestep_hours.  If timestep_hours is None the range runs to MAX_ITER.
+    """
+    if cfg.data.date_iterations is not None:
+        iterations = [_date_to_iteration(d) for d in cfg.data.date_iterations]
+        logging.info(
+            f"Using date-derived iteration list: "
+            + ", ".join(f"'{d}' → {it}" for d, it in zip(cfg.data.date_iterations, iterations))
+        )
+        return np.array(iterations, dtype=int)
+
+    # Range mode: convert hours → model iteration numbers
+    iter_step  = cfg.data.sampling_step * TS_PER_HOUR
+    start_iter = FIRST_WIND_RECORD_OFFSET + cfg.data.start_record * TS_PER_HOUR
+    end_iter   = MAX_ITER if cfg.data.timestep_hours is None \
+                 else start_iter + cfg.data.timestep_hours * TS_PER_HOUR
 
     return np.arange(start_iter, end_iter, iter_step)
 
@@ -150,41 +197,52 @@ def process_time_snapshot(
     log_gradb_np = log_gradb.values #protected line do not modify
     calculated_fields["log_gradb_np"] = log_gradb_np
 
-    # --- Compact each channel from LLC faces (13, j, i) → 2D (compact_h, compact_w) ---
+    # --- Convert from LLC faces (face, j, i) → rectangular lat/lon (lat, lon) ---
     #
-    # ecco.llc_tiles_to_compact() stitches the 13 LLC faces into a single coherent
-    # 2D array. This is NOT interpolation — values are pixel-shifted and some faces
-    # are rotated to tile correctly, but we stay on the native LLC grid.
-    # Input shape:  (13, 4320, 4320)  — one value per native grid cell per face
-    # Output shape: (12960, 17280)  — 3×4320 × 4×4320, same values rearranged into 2D
-    #
-    # .values calls here are intentional — we are in a sequential Python for-loop,
-    # NOT inside a dask.delayed task. This is the correct place to materialise data.
+    # xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon() stitches the 13 LLC
+    # faces into a single coherent 2D rectangular image. This is NOT interpolation
+    # — values are pixel-shifted and some faces are rotated to tile correctly, but
+    # we remain on the native LLC grid.
+    # Input:  xr.Dataset with (face, j, i) dimensions, shape (13, 4320, 4320) per var
+    # Output: xr.Dataset with (lat, lon) dimensions, shape (12960, 17280) per var
 
-    channel_arrays = []
+    # log_gradb is already a numpy array (materialised above via the protected
+    # .values call). Wrap it back as a DataArray so it can be passed to
+    # faces_dataset_to_latlon alongside the other xarray variables.
+    log_gradb_da = xr.DataArray(
+        log_gradb_np,
+        dims=ds_merge['Theta'].dims,
+        coords=ds_merge['Theta'].coords,
+        name='log_gradb',
+    )
 
-    for ch in model_feature_channels:
-        logging.info(f"Compacting channel {ch} to LLC compact format")
-        field = ecco.llc_tiles_to_compact(ds_merge[ch].values)
-        channel_arrays.append(field)   # shape: (compact_h, compact_w)
+    # Assemble all channels into a single Dataset for a single conversion pass.
+    all_channels_ds = xr.Dataset(
+        {ch: ds_merge[ch] for ch in model_feature_channels}
+        | {ch: calculated_fields[ch] for ch in computed_feature_channels}
+        | {'log_gradb': log_gradb_da}
+    )
 
-    # Computed features (e.g. relative_vorticity) — computed on native face grid,
-    # compacted the same way as model channels.
-    for ch in computed_feature_channels:
-        logging.info(f"Compacting computed channel {ch}")
-        # calculated_fields values are xarray DataArrays; materialise before compacting
-        field = ecco.llc_tiles_to_compact(calculated_fields[ch].values)
-        channel_arrays.append(field)
+    # metric_vector_pairs tells faces_dataset_to_latlon to also rotate the
+    # direction of vector fields (U, V) when Arctic-cap faces are transposed.
+    # This is needed in addition to the staggered --> tracer interpolation above,
+    # which only co-locates U/V on cell centres but does not correct directions.
+    has_uv = ('U' in model_feature_channels and 'V' in model_feature_channels)
+    metric_vector_pairs = [('U', 'V')] if has_uv else []
 
-    # log_gradb is already numpy (materialised above via the protected .values call)
-    log_gradb_field = ecco.llc_tiles_to_compact(log_gradb_np)
-    channel_arrays.append(log_gradb_field)
+    logging.info("Converting from LLC faces to rectangular lat/lon...")
+    ds_rect = llcmodel.faces_dataset_to_latlon(
+        all_channels_ds,
+        metric_vector_pairs=metric_vector_pairs,
+    )
 
-    # stack channels into single array (C, n_lat, n_lon) for zarr dataset_creation
-    data = np.stack(channel_arrays, axis=0)
+    # Extract channels in a consistent order and stack into (C, H, W).
+    channel_order = model_feature_channels + computed_feature_channels + ['log_gradb']
+    channel_arrays = [ds_rect[ch].values for ch in channel_order]
+    data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
 
-    # write to zarr ds 
-    zarr_ds.write_snapshot(data,it)
+    # write to zarr ds
+    zarr_ds.write_snapshot(data, it)
 
     # for dask
     ds_merge = None
@@ -240,19 +298,18 @@ def main():
     fs, fs_synch = create_s3_filesystems(cfg.output.s3_endpoint)
 
     # Get our grid and static masks once ever. These never change.
-    # use_halo=False: global output doesn't need the coastal buffer used by the cutout pipeline.
+    # use_halo=False for global 
     ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
     grid = xgcm.Grid(ds_grid, periodic=False)
 
-    # Determine compact output shape BEFORE constructing the Zarr writer.
-    # We do a dry-run with a zero array to find out what shape llc_tiles_to_compact
-    # produces for this grid. This runs once at startup and is cheap.
-    logging.info("Computing compact output shape via dry-run ecco compact...")
-    dummy_compact = ecco.llc_tiles_to_compact(
-        np.zeros_like(ds_grid.XC.values, dtype=np.float32)
-    )
-    compact_shape = dummy_compact.shape   # (compact_h, compact_w)
-    logging.info(f"LLC compact output shape: {compact_shape}")
+    # Determine the rectangular output shape BEFORE constructing the Zarr writer.
+    # Dry-run on a single dummy channel to find out what shape
+    # faces_dataset_to_latlon produces for this grid. Runs once at startup.
+    logging.info("Computing rectangular output shape via dry-run...")
+    _dummy_ds = xr.Dataset({'_dummy': ds_grid.XC.astype(np.float32)})
+    _dummy_rect = llcmodel.faces_dataset_to_latlon(_dummy_ds, metric_vector_pairs=[])
+    rectangular_shape = tuple(_dummy_rect['_dummy'].shape)   # (12960, 17280)
+    logging.info(f"LLC rectangular output shape: {rectangular_shape}")
 
     # Construct GlobalZarrDataset.
     zarr_ds = zarr_dataset.GlobalZarrDataset(
@@ -262,7 +319,7 @@ def main():
         cfg.output.dataset_name,
         fs=fs,
         channel_names=model_feature_channels + computed_feature_channels + ["log_gradb"],
-        compact_shape=compact_shape,
+        rectangular_shape=rectangular_shape,
     )
 
     logging.info(f"Zarr dataset created.")

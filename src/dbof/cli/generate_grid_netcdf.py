@@ -22,13 +22,36 @@ hFacC note
   hFacC is 3-D in the raw grid file (face, j, i, k); only the surface level
   (k=0) is saved here. hFacC == 0 means land; hFacC > 0 means ocean.
 
+Two separate S3 endpoints
+--------------------------
+  This script interacts with two distinct storage systems:
+
+  1. OSN (input) — raw LLC4320 model data:
+       https://mghp.osn.xsede.org
+       This is a public read-only endpoint. No credentials required.
+       The raw LLC4320 kerchunk grid file lives here.
+
+  2. NRP S3 (optional output) — processed dataset storage:
+       https://s3-west.nrp-nautilus.io
+       This is the same bucket where generate_fronts_global.py writes Zarr data.
+       Requires AWS credentials (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY).
+       Pass --s3-endpoint / --bucket / --folder to enable upload after local write.
+
 Usage
 -----
-  generate-global-grid --output /path/to/llc4320_grid.nc [--endpoint-url URL]
+  # Write to local HPC path only:
+  generate-global-grid --output /scratch/llc4320_grid.nc
 
-  Or from Python:
-      from dbof.cli.generate_grid_netcdf import generate_grid_netcdf
-      generate_grid_netcdf(output_path="/scratch/llc4320_grid.nc")
+  # Write to local HPC path AND upload to NRP S3:
+  generate-global-grid \\
+      --output /scratch/llc4320_grid.nc \\
+      --s3-endpoint https://s3-west.nrp-nautilus.io \\
+      --bucket dbof \\
+      --folder native_grid_dbof_training_data
+
+  # Override the OSN source endpoint (rarely needed):
+  generate-global-grid --output /scratch/llc4320_grid.nc \\
+      --osn-endpoint https://mghp.osn.xsede.org
 """
 
 import argparse
@@ -41,8 +64,10 @@ from xmitgcm.llcreader import llcmodel
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
+from dbof.io.filesystems import create_s3_filesystems
 
-DEFAULT_ENDPOINT = "https://mghp.osn.xsede.org"
+# Source: raw LLC4320 kerchunk files on OSN (public, read-only, no credentials needed)
+DEFAULT_OSN_ENDPOINT = "https://mghp.osn.xsede.org"
 
 # Variables grouped by their native staggered grid.
 # faces_dataset_to_latlon needs homogeneous stagger per call when mixing
@@ -71,7 +96,10 @@ def _convert_group(ds_grid: xr.Dataset, var_names: list) -> xr.Dataset:
 
 def generate_grid_netcdf(
     output_path: str,
-    endpoint_url: str = DEFAULT_ENDPOINT,
+    osn_endpoint: str = DEFAULT_OSN_ENDPOINT,
+    s3_endpoint: str = None,
+    bucket: str = None,
+    folder: str = None,
 ) -> None:
     """
     Load the LLC4320 grid, convert to rectangular lat/lon, and write to NetCDF.
@@ -79,9 +107,18 @@ def generate_grid_netcdf(
     Parameters
     ----------
     output_path : str
-        Local file path for the output NetCDF (e.g. '/scratch/llc4320_grid.nc').
-    endpoint_url : str
-        OSN/S3 endpoint for the raw LLC4320 kerchunk grid file.
+        Local HPC file path for the output NetCDF (e.g. '/scratch/llc4320_grid.nc').
+    osn_endpoint : str
+        OSN endpoint for reading the raw LLC4320 kerchunk grid file.
+        Default: https://mghp.osn.xsede.org  (public, no credentials needed).
+    s3_endpoint : str, optional
+        NRP S3 endpoint for optional upload after local write
+        (e.g. 'https://s3-west.nrp-nautilus.io'). Requires AWS credentials.
+        If None, no S3 upload is performed.
+    bucket : str, optional
+        S3 bucket name for optional upload (e.g. 'dbof').
+    folder : str, optional
+        S3 folder for optional upload (e.g. 'native_grid_dbof_training_data').
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -91,10 +128,10 @@ def generate_grid_netcdf(
     )
 
     # ------------------------------------------------------------------
-    # 1. Load grid
+    # 1. Load grid from OSN (raw LLC4320 source, public read-only)
     # ------------------------------------------------------------------
-    logging.info("Fetching LLC4320 grid file...")
-    co = get_raw_data.get_remote_gridfile(endpoint_url)
+    logging.info(f"Fetching LLC4320 grid file from OSN: {osn_endpoint}")
+    co = get_raw_data.get_remote_gridfile(osn_endpoint)
     ds_grid_raw = preproc_llc_core_data.process_llc4320_grid(co)
     logging.info(f"Grid variables loaded: {list(ds_grid_raw.data_vars)}")
 
@@ -167,10 +204,30 @@ def generate_grid_netcdf(
     )
 
     # ------------------------------------------------------------------
-    # 5. Write to NetCDF
+    # 5. Write to local HPC path
     # ------------------------------------------------------------------
     logging.info(f"Writing grid NetCDF to {output_path} ...")
     ds_rect.to_netcdf(output_path)
+    logging.info(f"Local write complete: {output_path}")
+
+    # ------------------------------------------------------------------
+    # 6. Optional: upload to NRP S3 (same bucket as processed Zarr data)
+    # ------------------------------------------------------------------
+    if s3_endpoint is not None:
+        if bucket is None or folder is None:
+            raise ValueError(
+                "--bucket and --folder are required when --s3-endpoint is set."
+            )
+        import fsspec
+        bucket  = bucket.strip().strip('/')
+        folder  = folder.strip().strip('/')
+        fname   = output_path.rsplit('/', 1)[-1]  # basename of local file
+        s3_path = f"s3://{bucket}/{folder}/{fname}"
+        logging.info(f"Uploading grid file to NRP S3: {s3_path}")
+        _, fs_synch = create_s3_filesystems(s3_endpoint)
+        fs_synch.put(output_path, s3_path)
+        logging.info(f"S3 upload complete: {s3_path}")
+
     logging.info("Done.")
 
 
@@ -178,16 +235,40 @@ def main():
     p = argparse.ArgumentParser(
         description="Extract LLC4320 static grid and save as rectangular NetCDF."
     )
+
     p.add_argument(
         "--output", required=True,
-        help="Local output path, e.g. /scratch/llc4320_grid.nc",
+        help="Local HPC output path, e.g. /scratch/llc4320_grid.nc",
     )
     p.add_argument(
-        "--endpoint-url", default=DEFAULT_ENDPOINT,
-        help=f"OSN/S3 endpoint URL for LLC4320 grid file (default: {DEFAULT_ENDPOINT})",
+        "--osn-endpoint", default=DEFAULT_OSN_ENDPOINT,
+        help=(
+            f"OSN endpoint for reading raw LLC4320 grid data "
+            f"(default: {DEFAULT_OSN_ENDPOINT}). Public read-only, no credentials needed."
+        ),
     )
+
+    # Optional NRP S3 upload
+    s3_group = p.add_argument_group(
+        "NRP S3 upload (optional)",
+        "If --s3-endpoint is given, the NetCDF will also be uploaded to the NRP S3 "
+        "bucket after the local write. Requires AWS credentials in environment."
+    )
+    s3_group.add_argument('--s3-endpoint', default=None,
+                          help="NRP S3 endpoint, e.g. https://s3-west.nrp-nautilus.io")
+    s3_group.add_argument('--bucket',      default=None,
+                          help="S3 bucket name, e.g. dbof")
+    s3_group.add_argument('--folder',      default=None,
+                          help="S3 folder, e.g. native_grid_dbof_training_data")
+
     args = p.parse_args()
-    generate_grid_netcdf(output_path=args.output, endpoint_url=args.endpoint_url)
+    generate_grid_netcdf(
+        output_path=args.output,
+        osn_endpoint=args.osn_endpoint,
+        s3_endpoint=args.s3_endpoint,
+        bucket=args.bucket,
+        folder=args.folder,
+    )
 
 
 if __name__ == "__main__":
