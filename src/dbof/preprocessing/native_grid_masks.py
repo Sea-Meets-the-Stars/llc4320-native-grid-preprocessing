@@ -29,7 +29,6 @@ def generate_static_land_face_masks_for_sampling(ds_grid, target_km_res):
 
     DXC = ds_grid["dxC"].persist()
     DYC = ds_grid["dyC"].persist()
-    land_mask = (ds_grid.hFacC == 0).persist()
 
     halo_land_mask = generate_static_land_mask_for_sampling(ds_grid, target_km_res, DXC=DXC, DYC=DYC)
     halo_faces_perimeter_mask = generate_static_face_mask_for_sampling(ds_grid, target_km_res, DXC=DXC, DYC=DYC)
