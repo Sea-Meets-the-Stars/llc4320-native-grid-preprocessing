@@ -72,3 +72,4 @@ where = ["src"]
 
 [project.scripts]
 generate-llc-dataset = "dbof.cli.generate_front_training_data:main"
+generate-global-llc-dataset = "dbof.cli.generate_fronts_global:main"
