@@ -61,6 +61,12 @@ import sys
 import numpy as np
 import xarray as xr
 from xmitgcm.llcreader import llcmodel
+from xmitgcm.llcreader.llcmodel import (
+    _faces_coords_to_latlon,
+    _faces_to_latlon_scalar,
+    _faces_to_latlon_vector,
+    _drop_facedim,
+)
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
@@ -68,6 +74,76 @@ from dbof.io.filesystems import create_s3_filesystems
 
 # Source: raw LLC4320 kerchunk files on OSN (public, read-only, no credentials needed)
 DEFAULT_OSN_ENDPOINT = "https://mghp.osn.xsede.org"
+
+def _faces_dataset_to_latlon(ds, metric_vector_pairs):
+    """
+    Xarray-version-safe replacement for llcmodel.faces_dataset_to_latlon.
+    See generate_fronts_global.py for full explanation. The upstream function
+    uses `ds_new = ds_new.update(data_vars)` which returns None in xarray < 0.17.
+    """
+    coord_vars = list(ds.coords)
+    ds_new = _faces_coords_to_latlon(ds)
+    nfaces = len(ds['face'])
+
+    vector_pairs = []
+    vnames = list(ds.reset_coords().variables)
+    for vname in list(vnames):
+        try:
+            mate = ds[vname].attrs['mate']
+        except KeyError:
+            mate = None
+        if mate is not None:
+            vector_pairs.append((vname, mate))
+            try:
+                vnames.remove(mate)
+            except ValueError:
+                raise ValueError(
+                    f"If '{vname}' in varnames, '{mate}' must also be in varnames"
+                )
+
+    all_vector_components = [
+        inner for outer in (vector_pairs + metric_vector_pairs) for inner in outer
+    ]
+    scalars = [v for v in vnames if v not in all_vector_components]
+    data_vars = {}
+
+    for vname in scalars:
+        if vname == 'face' or vname in ds_new:
+            continue
+        if 'face' in ds[vname].dims:
+            data = _faces_to_latlon_scalar(ds[vname].data, nfaces=nfaces)
+            dims = _drop_facedim(ds[vname].dims)
+        else:
+            data = ds[vname].data
+            dims = ds[vname].dims
+        data_vars[vname] = xr.Variable(dims, data, ds[vname].attrs)
+
+    for vname_u, vname_v in vector_pairs:
+        u_data, v_data = _faces_to_latlon_vector(
+            ds[vname_u].data, ds[vname_v].data, nfaces=nfaces
+        )
+        data_vars[vname_u] = xr.Variable(
+            _drop_facedim(ds[vname_u].dims), u_data, ds[vname_u].attrs
+        )
+        data_vars[vname_v] = xr.Variable(
+            _drop_facedim(ds[vname_v].dims), v_data, ds[vname_v].attrs
+        )
+
+    for vname_u, vname_v in metric_vector_pairs:
+        u_data, v_data = _faces_to_latlon_vector(
+            ds[vname_u].data, ds[vname_v].data, nfaces=nfaces, metric=True
+        )
+        data_vars[vname_u] = xr.Variable(
+            _drop_facedim(ds[vname_u].dims), u_data, ds[vname_u].attrs
+        )
+        data_vars[vname_v] = xr.Variable(
+            _drop_facedim(ds[vname_v].dims), v_data, ds[vname_v].attrs
+        )
+
+    ds_out = xr.merge([ds_new, xr.Dataset(data_vars)])
+    ds_out = ds_out.set_coords([c for c in coord_vars if c in ds_out])
+    return ds_out
+
 
 # Variables grouped by their native staggered grid.
 # faces_dataset_to_latlon needs homogeneous stagger per call when mixing
@@ -91,7 +167,7 @@ def _convert_group(ds_grid: xr.Dataset, var_names: list) -> xr.Dataset:
     if not present:
         return xr.Dataset()
     sub = ds_grid[present]
-    return llcmodel.faces_dataset_to_latlon(sub, metric_vector_pairs=[])
+    return _faces_dataset_to_latlon(sub, metric_vector_pairs=[])
 
 
 def generate_grid_netcdf(
@@ -130,34 +206,48 @@ def generate_grid_netcdf(
     # ------------------------------------------------------------------
     # 1. Load grid from OSN (raw LLC4320 source, public read-only)
     # ------------------------------------------------------------------
+    # IMPORTANT: we use co (the raw consolidated kerchunk dataset) directly for
+    # faces_dataset_to_latlon, NOT the output of process_llc4320_grid().
+    # process_llc4320_grid() calls reset_coords() which strips face/i/j as proper
+    # coordinate variables, leaving them as bare dimension names.
+    # faces_dataset_to_latlon needs those coordinate values to detect the LLC4320
+    # topology and stitch faces correctly; without them it silently returns None.
     logging.info(f"Fetching LLC4320 grid file from OSN: {osn_endpoint}")
     co = get_raw_data.get_remote_gridfile(osn_endpoint)
+    # co is the raw xarray Dataset with full coordinate structure from the kerchunk reader.
+    # ds_grid_raw is kept only for the variable name list and hFacC k-selection.
     ds_grid_raw = preproc_llc_core_data.process_llc4320_grid(co)
-    logging.info(f"Grid variables loaded: {list(ds_grid_raw.data_vars)}")
+    logging.info(f"Grid variables to extract: {list(ds_grid_raw.data_vars)}")
 
     # ------------------------------------------------------------------
     # 2. Handle hFacC — select surface level if k dimension is present
     # ------------------------------------------------------------------
-    hfacc = ds_grid_raw[_HFACC_VAR]
+    # Use co (raw) for hFacC since it retains proper coordinate structure.
+    hfacc = co[_HFACC_VAR]
     if 'k' in hfacc.dims:
         logging.info("hFacC has k dimension; selecting surface level k=0")
         hfacc = hfacc.isel(k=0, drop=True)
-    ds_hfacc = xr.Dataset({_HFACC_VAR: hfacc})
+    # Build a single-variable dataset that still carries all the original coords
+    # (face, i, j) so faces_dataset_to_latlon can detect the LLC4320 topology.
+    ds_hfacc = co[[_HFACC_VAR]].isel(k=0, drop=True) if 'k' in co[_HFACC_VAR].dims \
+               else co[[_HFACC_VAR]]
 
     # ------------------------------------------------------------------
     # 3. Convert each staggered-grid group to rectangular lat/lon
     # ------------------------------------------------------------------
+    # All _convert_group calls use co (raw dataset) so that face/i/j coordinate
+    # values are present and faces_dataset_to_latlon can stitch correctly.
     logging.info("Converting T-grid variables to rectangular lat/lon...")
-    ds_t = _convert_group(ds_grid_raw, _T_GRID_VARS)
+    ds_t = _convert_group(co, _T_GRID_VARS)
 
     logging.info("Converting U-grid variables to rectangular lat/lon...")
-    ds_u = _convert_group(ds_grid_raw, _U_GRID_VARS)
+    ds_u = _convert_group(co, _U_GRID_VARS)
 
     logging.info("Converting V-grid variables to rectangular lat/lon...")
-    ds_v = _convert_group(ds_grid_raw, _V_GRID_VARS)
+    ds_v = _convert_group(co, _V_GRID_VARS)
 
     logging.info("Converting Z-grid (vorticity) variables to rectangular lat/lon...")
-    ds_z = _convert_group(ds_grid_raw, _Z_GRID_VARS)
+    ds_z = _convert_group(co, _Z_GRID_VARS)
 
     logging.info("Converting hFacC to rectangular lat/lon...")
     ds_h = _convert_group(ds_hfacc, [_HFACC_VAR])
