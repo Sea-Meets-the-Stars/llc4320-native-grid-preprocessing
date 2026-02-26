@@ -14,6 +14,12 @@ import zarr
 # grid / face-to-latlon stitching
 import xarray as xr
 from xmitgcm.llcreader import llcmodel
+from xmitgcm.llcreader.llcmodel import (
+    _faces_coords_to_latlon,
+    _faces_to_latlon_scalar,
+    _faces_to_latlon_vector,
+    _drop_facedim,
+)
 
 # distributed / IO
 from dask.distributed import Client
@@ -53,6 +59,87 @@ DATE_FMT                = '%d%m%Y-%H:%M:%S'   # expected format: DDMMYYYY-HH:MM:
 
 # url of our raw data - this may need to be an input in the future
 endpoint_url = 'https://mghp.osn.xsede.org'
+
+
+def _faces_dataset_to_latlon(ds, metric_vector_pairs):
+    """
+    This function is based on xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon
+    but has been updated to be compatible with all xarray versions.
+
+    The upstream function contains:
+        ds_new = ds_new.update(data_vars)      # reassigns to None in xarray < 0.17
+        ds_new = ds_new.set_coords(...)        # AttributeError: 'NoneType'...
+    because Dataset.update() was in-place (returning None) in xarray < 0.17.
+    This version uses xr.merge() instead, which has stable semantics across all
+    xarray versions.
+    """
+    coord_vars = list(ds.coords)
+    ds_new = _faces_coords_to_latlon(ds)    # skeleton Dataset with expanded coords
+    nfaces = len(ds['face'])
+
+    # Classify variables as scalars or vector pairs (same logic as upstream).
+    vector_pairs = []
+    vnames = list(ds.reset_coords().variables)
+    for vname in list(vnames):
+        try:
+            mate = ds[vname].attrs['mate']
+        except KeyError:
+            mate = None
+        if mate is not None:
+            vector_pairs.append((vname, mate))
+            try:
+                vnames.remove(mate)
+            except ValueError:
+                raise ValueError(
+                    f"If '{vname}' in varnames, '{mate}' must also be in varnames"
+                )
+
+    all_vector_components = [
+        inner for outer in (vector_pairs + metric_vector_pairs) for inner in outer
+    ]
+    scalars = [v for v in vnames if v not in all_vector_components]
+
+    data_vars = {}
+
+    for vname in scalars:
+        if vname == 'face' or vname in ds_new:
+            continue
+        if 'face' in ds[vname].dims:
+            data = _faces_to_latlon_scalar(ds[vname].data, nfaces=nfaces)
+            dims = _drop_facedim(ds[vname].dims)
+        else:
+            data = ds[vname].data
+            dims = ds[vname].dims
+        data_vars[vname] = xr.Variable(dims, data, ds[vname].attrs)
+
+    for vname_u, vname_v in vector_pairs:
+        u_data, v_data = _faces_to_latlon_vector(
+            ds[vname_u].data, ds[vname_v].data, nfaces=nfaces
+        )
+        data_vars[vname_u] = xr.Variable(
+            _drop_facedim(ds[vname_u].dims), u_data, ds[vname_u].attrs
+        )
+        data_vars[vname_v] = xr.Variable(
+            _drop_facedim(ds[vname_v].dims), v_data, ds[vname_v].attrs
+        )
+
+    for vname_u, vname_v in metric_vector_pairs:
+        u_data, v_data = _faces_to_latlon_vector(
+            ds[vname_u].data, ds[vname_v].data, nfaces=nfaces, metric=True
+        )
+        data_vars[vname_u] = xr.Variable(
+            _drop_facedim(ds[vname_u].dims), u_data, ds[vname_u].attrs
+        )
+        data_vars[vname_v] = xr.Variable(
+            _drop_facedim(ds[vname_v].dims), v_data, ds[vname_v].attrs
+        )
+
+    # Use xr.merge instead of ds_new.update() to avoid the xarray < 0.17 issue
+    # where Dataset.update() returned None rather than the modified dataset.
+    ds_out = xr.merge([ds_new, xr.Dataset(data_vars)])
+    ds_out = ds_out.set_coords([c for c in coord_vars if c in ds_out])
+    return ds_out
+
 
 def generate_logging(cfg: config.JobConfig):
     log_root = Path(cfg.run.log_dir).expanduser().resolve()
@@ -153,12 +240,13 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig, use_halo: bool = False):
     return ds_grid, land_mask
 
 def process_time_snapshot(
-    cfg: config.JobConfig, 
-    zarr_ds, 
-    ds_merge, 
-    grid, 
-    land_mask, 
-    model_feature_channels, 
+    cfg: config.JobConfig,
+    zarr_ds,
+    ds,
+    ds_merge,
+    grid,
+    land_mask,
+    model_feature_channels,
     computed_feature_channels,
     it,
 ):
@@ -217,11 +305,20 @@ def process_time_snapshot(
     )
 
     # Assemble all channels into a single Dataset for a single conversion pass.
-    all_channels_ds = xr.Dataset(
+    #
+    # IMPORTANT: we use ds.assign() rather than xr.Dataset({...}) so that the
+    # LLC4320 topology attributes (face coordinate values, grid attributes) are
+    # preserved from the original kerchunk-loaded ds. faces_dataset_to_latlon
+    # silently returns None when those attributes are absent, which is what
+    # caused the earlier AttributeError. xr.Dataset({DataArray, ...}) creates a
+    # fresh Dataset that strips those topology attrs; ds.assign() keeps them.
+    channels_to_convert = model_feature_channels + computed_feature_channels + ['log_gradb']
+    update_vars = (
         {ch: ds_merge[ch] for ch in model_feature_channels}
         | {ch: calculated_fields[ch] for ch in computed_feature_channels}
         | {'log_gradb': log_gradb_da}
     )
+    ds_to_convert = ds.assign(update_vars)[channels_to_convert]
 
     # metric_vector_pairs tells faces_dataset_to_latlon to also rotate the
     # direction of vector fields (U, V) when Arctic-cap faces are transposed.
@@ -231,14 +328,14 @@ def process_time_snapshot(
     metric_vector_pairs = [('U', 'V')] if has_uv else []
 
     logging.info("Converting from LLC faces to rectangular lat/lon...")
-    ds_rect = llcmodel.faces_dataset_to_latlon(
-        all_channels_ds,
+    ds_rect = _faces_dataset_to_latlon(
+        ds_to_convert,
         metric_vector_pairs=metric_vector_pairs,
     )
 
     # Extract channels in a consistent order and stack into (C, H, W).
-    channel_order = model_feature_channels + computed_feature_channels + ['log_gradb']
-    channel_arrays = [ds_rect[ch].values for ch in channel_order]
+    # channels_to_convert was built above in the same order, so reuse it here.
+    channel_arrays = [ds_rect[ch].values for ch in channels_to_convert]
     data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
 
     # write to zarr ds
@@ -302,13 +399,13 @@ def main():
     ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
     grid = xgcm.Grid(ds_grid, periodic=False)
 
-    # Determine the rectangular output shape BEFORE constructing the Zarr writer.
-    # Dry-run on a single dummy channel to find out what shape
-    # faces_dataset_to_latlon produces for this grid. Runs once at startup.
-    logging.info("Computing rectangular output shape via dry-run...")
-    _dummy_ds = xr.Dataset({'_dummy': ds_grid.XC.astype(np.float32)})
-    _dummy_rect = llcmodel.faces_dataset_to_latlon(_dummy_ds, metric_vector_pairs=[])
-    rectangular_shape = tuple(_dummy_rect['_dummy'].shape)   # (12960, 17280)
+    # LLC4320 rectangular output shape is a model constant: 3×4320 rows, 4×4320 cols.
+    # faces_dataset_to_latlon requires the face/i/j dimensions to be proper xarray
+    # *coordinate* variables (with attached values) to detect the LLC topology.
+    # ds_grid has gone through reset_coords() which strips those coordinate values,
+    # so a dry-run on ds_grid variables would silently return None. Since the shape
+    # is fixed for LLC4320, we just hardcode it.
+    rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
     logging.info(f"LLC rectangular output shape: {rectangular_shape}")
 
     # Construct GlobalZarrDataset.
@@ -334,12 +431,13 @@ def main():
 
         # now process this iteration of data
         process_time_snapshot(
-            cfg, 
-            zarr_ds, 
-            ds_merge, 
-            grid, 
-            land_mask, 
-            model_feature_channels, 
+            cfg,
+            zarr_ds,
+            ds,        # raw kerchunk dataset — preserves LLC4320 topology for faces_dataset_to_latlon
+            ds_merge,
+            grid,
+            land_mask,
+            model_feature_channels,
             computed_feature_channels,
             it,
         )

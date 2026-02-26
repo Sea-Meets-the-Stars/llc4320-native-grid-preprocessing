@@ -84,7 +84,7 @@ class GlobalGridZarrWriter:
     ):
         path = _make_grid_store_path(bucket, folder, dataset_name)
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
-        self.root = zarr.open_group(store=self.store, mode="w")   # always overwrite
+        self.root = zarr.open_group(store=self.store, mode="w", use_consolidated=False)
 
     # ------------------------------------------------------------------
 
@@ -171,7 +171,9 @@ class GlobalGridZarrReader:
     ):
         path = _make_grid_store_path(bucket, folder, dataset_name)
         store = zarr.storage.FsspecStore(path=path, fs=fs)
-        self.root = zarr.open_group(store=store, mode="r")
+        # use_consolidated=False: zarr v3 defaults to looking for consolidated
+        # metadata and raises GroupNotFoundError when absent.
+        self.root = zarr.open_group(store=store, mode="r", use_consolidated=False)
 
         self.grid_shape = tuple(self.root.attrs["grid_shape"])
         self.variables  = list(self.root.attrs["variables"])

@@ -91,7 +91,7 @@ class GlobalZarrDataset:
     ):
         path = make_run_prefix(bucket, folder, run_id, dataset_name)
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
-        self.root = zarr.open_group(store=self.store, mode="a")
+        self.root = zarr.open_group(store=self.store, mode="a", use_consolidated=False)
 
         self.channel_names = list(channel_names)
         self.n_channels = len(self.channel_names)
@@ -189,7 +189,10 @@ class GlobalZarrDatasetReader:
     def __init__(self, bucket: str, folder: str, run_id: str, dataset_name: str, fs):
         path = make_run_prefix(bucket, folder, run_id, dataset_name)
         store = zarr.storage.FsspecStore(path=path, fs=fs)
-        self.root = zarr.open_group(store=store, mode="r")
+        # use_consolidated=False: zarr v3 defaults to looking for consolidated
+        # metadata and raises GroupNotFoundError when absent. Our stores don't
+        # consolidate metadata, so we disable that lookup explicitly.
+        self.root = zarr.open_group(store=store, mode="r", use_consolidated=False)
 
         self.data = self.root["data"]           # (T, C, rectangular_h, rectangular_w)
         self.time = self.root["time"]           # (T,)
