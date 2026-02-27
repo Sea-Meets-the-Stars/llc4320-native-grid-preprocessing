@@ -107,6 +107,11 @@ class GlobalGridZarrWriter:
         if 'XC' in ds_rect and 'lon' not in ds_rect:
             ds_rect = ds_rect.assign(lon=ds_rect['XC'])
 
+        # reset_coords() promotes coordinate variables (e.g. XC, YC, which
+        # _faces_dataset_to_latlon sets as coords rather than data_vars) back
+        # to data variables so they are captured by the data_vars loop below.
+        ds_rect = ds_rect.reset_coords()
+
         stored = []
         H, W = None, None
 
@@ -207,29 +212,59 @@ class GlobalGridZarrReader:
     # ------------------------------------------------------------------
     # Convenience properties for the most-used fields
 
+    def _get_lon(self) -> np.ndarray:
+        """Return longitude array — checks XC then lon."""
+        if 'XC' in self.root:
+            return self['XC']
+        if 'lon' in self.root:
+            return self['lon']
+        raise KeyError(
+            "No longitude variable found in grid store. "
+            f"Available: {self.variables}"
+        )
+
+    def _get_lat(self) -> np.ndarray:
+        """Return latitude array — checks YC then lat."""
+        if 'YC' in self.root:
+            return self['YC']
+        if 'lat' in self.root:
+            return self['lat']
+        raise KeyError(
+            "No latitude variable found in grid store. "
+            f"Available: {self.variables}"
+        )
+
     @property
     def XC(self) -> np.ndarray:
         """Longitude of T-cell centre, shape (H, W), degrees east."""
-        return self['XC']
+        return self._get_lon()
 
     @property
     def YC(self) -> np.ndarray:
         """Latitude of T-cell centre, shape (H, W), degrees north."""
-        return self['YC']
+        return self._get_lat()
 
     @property
     def lat(self) -> np.ndarray:
-        """Alias for YC."""
-        return self['YC']
+        """Latitude (degrees north), shape (H, W)."""
+        return self._get_lat()
 
     @property
     def lon(self) -> np.ndarray:
-        """Alias for XC."""
-        return self['XC']
+        """Longitude (degrees east), shape (H, W)."""
+        return self._get_lon()
 
     @property
     def land_mask(self) -> np.ndarray:
-        """Boolean mask: True where hFacC == 0 (land), shape (H, W)."""
+        """
+        Boolean mask: True where hFacC == 0 (land), shape (H, W).
+
+        Returns None if hFacC was not stored (e.g. store written before the
+        reset_coords() fix was applied — re-run generate-global-grid-zarr to
+        populate the full variable set).
+        """
+        if 'hFacC' not in self.root:
+            return None
         return self['hFacC'] == 0
 
     def __repr__(self) -> str:
