@@ -110,6 +110,8 @@ class GlobalGridZarrWriter:
         # reset_coords() promotes coordinate variables (e.g. XC, YC, which
         # _faces_dataset_to_latlon sets as coords rather than data_vars) back
         # to data variables so they are captured by the data_vars loop below.
+        # Side-effect: 1-D index coords (face, i, j, i_g, j_g) are also
+        # promoted; we skip those by only writing exactly 2-D (H, W) arrays.
         ds_rect = ds_rect.reset_coords()
 
         stored = []
@@ -117,8 +119,17 @@ class GlobalGridZarrWriter:
 
         for vname in ds_rect.data_vars:
             arr = ds_rect[vname].values.astype(np.float32)
+
+            # Skip 1-D and higher-than-2-D coordinate artefacts
+            if arr.ndim != 2:
+                continue
+
             if H is None:
-                H, W = arr.shape[-2], arr.shape[-1]
+                H, W = arr.shape
+            elif arr.shape != (H, W):
+                # Different stagger size — shouldn't happen for LLC4320 but skip
+                continue
+
             self.root.create_array(
                 vname,
                 data=arr,

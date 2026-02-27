@@ -44,6 +44,29 @@ Usage — snapshots
       --folder native_grid_dbof_training_data \\
       --run-id year_1xglobal_20260226_043824 \\
       --output-dir /scratch/llc4320_netcdf/
+    
+      #all channels
+  zarr-to-netcdf \
+    --mode snapshots \
+    --s3-endpoint https://s3-west.nrp-nautilus.io \
+    --bucket dbof \
+    --folder native_grid_dbof_training_data \
+    --run-id year_1xglobal_20260226_043824 \
+    --dates 09112012-12:00:00 \
+    --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/DBOF_v1_test \
+    --output-filename LLC4320_2012-11-09T12_00_00_props.nc
+
+    #single channel
+  zarr-to-netcdf \
+    --mode snapshots \
+    --s3-endpoint https://s3-west.nrp-nautilus.io \
+    --bucket dbof \
+    --folder native_grid_dbof_training_data \
+    --run-id year_1xglobal_20260226_043824 \
+    --dates 09112012-12:00:00 \
+    --channel log_gradb \
+    --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/DBOF_v1_test \
+    --output-filename LLC4320_2012-11-09T12_00_00_Divb2.nc
 
   Optional: convert only specific timesteps:
       --iterations 184320 328320
@@ -59,6 +82,14 @@ Usage — grid
       --folder native_grid_dbof_training_data \\
       --grid-dataset-name llc4320_grid.zarr \\
       --output-dir /scratch/llc4320_netcdf/
+
+zarr-to-netcdf \
+    --mode grid \
+    --s3-endpoint https://s3-west.nrp-nautilus.io \
+    --bucket dbof \
+    --folder native_grid_dbof_training_data \
+    --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/DBOF_v1_test \
+    --grid-output-filename LLC4320_grid.nc
 """
 
 import argparse
