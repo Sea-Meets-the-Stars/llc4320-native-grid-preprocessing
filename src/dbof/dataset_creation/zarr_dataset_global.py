@@ -224,6 +224,24 @@ class GlobalZarrDatasetReader:
         """Return all channels for timestep index t. Shape: (C, lat, lon)."""
         return self.data[t]
 
+    def get_channel_snapshot(self, t: int, channel) -> np.ndarray:
+        """
+        Return a single channel for one timestep. Shape: (H, W).
+
+        Loads only 1 out of C chunks — much cheaper than get_snapshot()
+        when you only need one channel.
+
+        Parameters
+        ----------
+        t : int
+            Timestep index.
+        channel : int or str
+            Channel index, or name as found in channel_names.
+        """
+        if isinstance(channel, str):
+            channel = self.channel_names.index(channel)
+        return self.data[t, channel]
+
     def get_channel(self, channel) -> np.ndarray:
         """
         Return all timesteps for a single channel. Shape: (T, lat, lon).
