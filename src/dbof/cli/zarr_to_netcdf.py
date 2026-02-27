@@ -112,7 +112,9 @@ def zarr_to_netcdf(
     run_id: str,
     dataset_name: str,
     output_dir: str,
-    target_indices: list = None,   # list of t-axis indices, or None for all
+    target_indices: list = None,    # list of t-axis indices, or None for all
+    output_filename: str = None,    # override auto-generated name (single timestep)
+    channels: list = None,          # subset of channel names to save; None = all
 ) -> None:
     """
     Convert a GlobalZarrDataset on S3 to per-timestep NetCDF files locally.
@@ -135,6 +137,13 @@ def zarr_to_netcdf(
         Created if it does not exist.
     target_indices : list of int, optional
         Which t-axis indices to convert. If None, all timesteps are converted.
+    output_filename : str, optional
+        Fixed output filename (stem + extension, e.g. 'myfile.nc').
+        Only valid when exactly one timestep is being written; raises an error
+        if multiple timesteps are requested with a single filename.
+    channels : list of str, optional
+        Subset of channel names to include in the output file.
+        If None, all channels are written.  Unknown names raise ValueError.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -161,12 +170,25 @@ def zarr_to_netcdf(
     )
 
     n_total = len(reader)
-    channel_names = reader.channel_names
+    all_channel_names = reader.channel_names
     H, W = reader.rectangular_shape
     logging.info(
-        f"Store contains {n_total} timestep(s), {len(channel_names)} channel(s): "
-        f"{channel_names}  |  spatial shape: {H} × {W}"
+        f"Store contains {n_total} timestep(s), {len(all_channel_names)} channel(s): "
+        f"{all_channel_names}  |  spatial shape: {H} × {W}"
     )
+
+    # Resolve channel subset
+    if channels is None:
+        channel_names = all_channel_names
+    else:
+        unknown = [c for c in channels if c not in all_channel_names]
+        if unknown:
+            raise ValueError(
+                f"Requested channel(s) {unknown} not found in store. "
+                f"Available: {all_channel_names}"
+            )
+        channel_names = channels
+        logging.info(f"Writing subset of channels: {channel_names}")
 
     if target_indices is None:
         target_indices = list(range(n_total))
@@ -177,12 +199,17 @@ def zarr_to_netcdf(
                 f"Requested t-indices {bad} are out of range [0, {n_total - 1}]."
             )
 
+    if output_filename is not None and len(target_indices) > 1:
+        raise ValueError(
+            f"--output-filename can only be used when converting a single timestep, "
+            f"but {len(target_indices)} timesteps were requested."
+        )
+
     # ------------------------------------------------------------------
     # 2. Convert each selected timestep
     # ------------------------------------------------------------------
     for t in target_indices:
         iteration = int(reader.time[t])
-        snapshot  = reader.get_snapshot(t)   # (C, H, W), numpy float32
 
         logging.info(
             f"[{t + 1}/{len(target_indices)}] "
@@ -190,18 +217,18 @@ def zarr_to_netcdf(
             f"({_iteration_to_datetime(iteration).strftime('%Y-%m-%d %H:%M UTC')})"
         )
 
-        # Build xarray Dataset — one variable per channel, dims (y, x)
-        n_y, n_x = snapshot.shape[1], snapshot.shape[2]
+        # Load only the required channels one at a time to limit peak RAM
+        n_y, n_x = H, W
         y_coord = np.arange(n_y, dtype=np.int32)
         x_coord = np.arange(n_x, dtype=np.int32)
 
         data_vars = {
             ch: xr.DataArray(
-                snapshot[c].astype(np.float32),
+                reader.get_channel_snapshot(t, ch).astype(np.float32),
                 dims=['y', 'x'],
                 coords={'y': y_coord, 'x': x_coord},
             )
-            for c, ch in enumerate(channel_names)
+            for ch in channel_names
         }
 
         ds = xr.Dataset(
@@ -221,7 +248,10 @@ def zarr_to_netcdf(
             },
         )
 
-        nc_filename = out_path / f"{run_id}_it{iteration:07d}.nc"
+        if output_filename is not None:
+            nc_filename = out_path / output_filename
+        else:
+            nc_filename = out_path / f"{run_id}_it{iteration:07d}.nc"
         ds.to_netcdf(nc_filename)
         logging.info(f"  → written: {nc_filename}")
 
@@ -385,6 +415,14 @@ def main():
     sel.add_argument('--dates', nargs='+', metavar='DDMMYYYY-HH:MM:SS',
                      help="[snapshots] Model dates to convert, e.g. 01012012-00:00:00")
 
+    p.add_argument('--output-filename',
+                   help=("[snapshots] Override the auto-generated output filename "
+                         "(e.g. 'LLC4320_2012-01-01_props.nc'). "
+                         "Only valid when converting a single timestep."))
+    p.add_argument('--channel', nargs='+', metavar='NAME',
+                   help=("[snapshots] Save only the named channel(s) "
+                         "(e.g. --channel log_gradb). Default: all channels."))
+
     # --- grid-mode args ---
     p.add_argument('--grid-dataset-name', default='llc4320_grid.zarr',
                    help="[grid] Zarr store name in --folder (default: llc4320_grid.zarr)")
@@ -435,6 +473,8 @@ def main():
             dataset_name=args.dataset_name,
             output_dir=args.output_dir,
             target_indices=target_indices,
+            output_filename=args.output_filename,
+            channels=args.channel,
         )
 
 
