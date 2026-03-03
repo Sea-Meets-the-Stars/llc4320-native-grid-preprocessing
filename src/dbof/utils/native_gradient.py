@@ -76,21 +76,30 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
 
 
 def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
-    """
-    Calculate the gradient of a tracer variable in native model coordinates
+    """Compute zonal and meridional gradients of a tracer on the native LLC grid.
+
+    Calculates finite-difference gradients in model (x, y) directions,
+    interpolates them to cell centers, then rotates from model coordinates
+    to geographic (zonal/meridional) coordinates using the grid rotation
+    coefficients CS and SN.
 
     Parameters
-   ----------
-    ds : Xarray Dataset with value to calculate gradient
-    must have been merged with grid file.
-
-    value : String
-
-    grid : Xgcm grid
+    ----------
+    ds_value : xarray.DataArray
+        Tracer field to differentiate, defined at cell centers with
+        dimensions (face, j, i).
+    ds_grid : xarray.Dataset
+        Grid metrics dataset containing 'dxC', 'dyC' (cell-center
+        distances) and 'CS', 'SN' (rotation coefficients).
+    grid : xgcm.Grid
+        Grid object used for metric-aware differencing and interpolation.
 
     Returns
     -------
-
+    ds_dx_hatx_G : xarray.DataArray
+        Zonal component of the tracer gradient [field_units m^-1].
+    ds_dy_haty_G : xarray.DataArray
+        Meridional component of the tracer gradient [field_units m^-1].
     """
 
     # gradient in X
