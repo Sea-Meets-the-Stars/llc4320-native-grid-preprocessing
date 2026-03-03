@@ -8,10 +8,10 @@ import pandas
 fields_dmodel = {
     "gradb2": {
         "desc": "gradb2 (gradient of buoyancy, squared)",
-        "units": "(km/s/m)^2",
+        "units": "(km/s^2/m)^2",
     },
     "log_gradb": {
-        "desc": "log_gradb (log of gradient of buoyancy, squared)",
-        "units": "log10((km/s/m)^2)",
+        "desc": "log_gradb (log10 of gradient of buoyancy, squared)",
+        "units": "log10((km/s^2/m)^2)",
     },
 }

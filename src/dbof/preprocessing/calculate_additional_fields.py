@@ -4,7 +4,26 @@ import dask.array as da
 
 
 def log_grad_b(ds_merge, grid):
+    """Compute log10 of the squared buoyancy gradient magnitude.
 
+    Derives surface buoyancy from Theta and Salt, computes zonal and
+    meridional gradients on the native LLC grid, squares and sums them,
+    then returns the base-10 logarithm (i.e., log10(|grad b|^2)).
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Theta', 'Salt', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dask.array.Array
+        log10 of the squared buoyancy gradient magnitude.
+        Units are log10((km/s^2/m)^2)
+    """
     buoyancy = physical_calculations.buoyancy_of_field(ds_merge)
 
     # gradient of b
