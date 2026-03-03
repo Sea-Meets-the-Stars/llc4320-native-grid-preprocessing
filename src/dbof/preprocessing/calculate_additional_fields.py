@@ -8,6 +8,7 @@ def log_grad_b(ds_merge, grid):
     buoyancy = physical_calculations.buoyancy_of_field(ds_merge)
 
     # gradient of b
+    #  buoyancy m^-1
     zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
 
     gradb2 = physical_calculations.grad_squared(zonal_grad_b, merid_grad_b)
@@ -18,20 +19,20 @@ def log_grad_b(ds_merge, grid):
 
 def relative_vorticity(ds_merge, grid):
     """
-       Compute relative vorticity from horizontal velocity components.
+    Compute relative vorticity from horizontal velocity components.
 
-       Parameters
-       ----------
-       ds_merge : xarray.Dataset
-           Dataset containing U and V components on the model grid.
-       grid : xgcm.Grid
-           Grid object relating to ds_merge.
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Dataset containing U and V components on the model grid.
+    grid : xgcm.Grid
+        Grid object relating to ds_merge.
 
-       Returns
-       -------
-       omega : xarray.DataArray
-           Relative vorticity field computed as dv/dλ minus du/dφ.
-       """
+    Returns
+    -------
+    omega : xarray.DataArray
+        Relative vorticity field computed as dv/dλ minus du/dφ.
+    """
     u_x = ds_merge.U.copy(deep=True)
     v_y = ds_merge.V.copy(deep=True)
 

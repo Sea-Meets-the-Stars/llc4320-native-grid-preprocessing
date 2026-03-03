@@ -33,7 +33,7 @@ def buoyancy_of_field(ds):
     Returns
     -------
     xarray.DataArray
-        Surface buoyancy field [km/s^2 * kg/m^3 / (kg/m^3)] with dask
+        Surface buoyancy field [km/s^2] with dask
         backing, persisted into memory.
     """
     g = 0.0098 # km/s^2
