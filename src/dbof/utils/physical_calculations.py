@@ -1,15 +1,42 @@
 import xarray as xr
 import dbof.utils.jmd95_xgcm_implementation as jmd95
 
-# returns merid** + zonal**
-# expects dask arrays
 def grad_squared(zonal_grad, merid_grad):
+    """Compute the squared magnitude of a 2D gradient vector.
+
+    Parameters
+    ----------
+    zonal_grad : xarray.DataArray or dask array
+        Zonal (east-west) component of the gradient.
+    merid_grad : xarray.DataArray or dask array
+        Meridional (north-south) component of the gradient.
+
+    Returns
+    -------
+    xarray.DataArray or dask array
+        Sum of the squared zonal and meridional gradient components.
+    """
     return zonal_grad ** 2 + merid_grad ** 2
 
 def buoyancy_of_field(ds):
-    #ds must have Theta and Salt
+    """Compute surface buoyancy from potential temperature and salinity.
 
-    g = 0.0098
+    Uses the JMD95 equation of state to compute in-situ density at the
+    surface (p=0), then converts to buoyancy as b = g * rho / rho_ref.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset containing 'Theta' (potential temperature in deg C) and
+        'Salt' (salinity in PSU) variables with dimensions (face, j, i).
+
+    Returns
+    -------
+    xarray.DataArray
+        Surface buoyancy field [km/s^2] with dask
+        backing, persisted into memory.
+    """
+    g = 0.0098 # km/s^2
     ref_rho: float = 1025.
 
     # chunk data

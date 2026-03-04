@@ -1,8 +1,23 @@
 import tqdm
 import numpy as np
 
-# this function will give us an idea of download times
 def estimate_xarray_size(ds):
+    """Estimate the in-memory size of an xarray Dataset.
+
+    Iterates over all coordinates and data variables, computing the total
+    number of bytes based on array shapes and dtypes. Useful for gauging
+    download or compute costs before calling ``.compute()`` on lazy data.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        The dataset whose memory footprint is to be estimated.
+
+    Returns
+    -------
+    int
+        Estimated total size in bytes.
+    """
     total_bytes = 0
     for name, var in tqdm(ds.coords.items(), desc="Estimating memory"):
         if all(dim in ds.dims for dim in var.dims):
