@@ -146,7 +146,7 @@ def _faces_dataset_to_latlon(ds, metric_vector_pairs):
 def generate_logging(cfg: config.JobConfig):
     log_root = Path(cfg.run.log_dir).expanduser().resolve()
     run_dir = log_root / cfg.run.run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     log_file = run_dir / "generate_front_training.log"
 
