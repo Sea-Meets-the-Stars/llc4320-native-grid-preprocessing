@@ -275,21 +275,29 @@ def process_time_snapshot(
     del merged_mask
 
 
-def main():
+def main(config_file: str = None, run_id: str = None):
     """
     Entry point for native-grid LLC dataset_creation generation.
 
     Orchestrates argument parsing, Dask setup, filesystem initialization,
     and iteration over time snapshots.
-    """
-    
-    cli = config.parse_args()
-    cfg = config.load_config(cli.config)
 
-    # override run_id if passed in through cli
-    if cli.run_id is not None:
+    Can be called from the CLI (no arguments; reads --config and --run_id from
+    sys.argv via parse_args) or directly from Python by passing config_file and
+    optionally run_id.
+    """
+
+    if config_file is None:
+        cli = config.parse_args()
+        config_file = cli.config
+        run_id = run_id or cli.run_id
+
+    cfg = config.load_config(config_file)
+
+    # override run_id if passed in through cli or Python call
+    if run_id is not None:
         cfg = config.JobConfig(
-            run=config.RunConfig(run_id=cli.run_id, log_dir=cfg.run.log_dir),
+            run=config.RunConfig(run_id=run_id, log_dir=cfg.run.log_dir),
             data=cfg.data,
             sampling=cfg.sampling,
             output=cfg.output,
