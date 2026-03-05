@@ -4,7 +4,7 @@ import numpy as np
 
 def process_llc4320(ds, ds_grid):
     """
-    Merge LLC4320 state variables with grid geometry and construct a land mask.
+    Merge LLC4320 state variables with grid geometry 
 
     This function combines a dataset_creation containing LLC4320 model fields with the
     corresponding grid dataset_creation. ds_grid should be the product of process_llc4320_grid see bellow

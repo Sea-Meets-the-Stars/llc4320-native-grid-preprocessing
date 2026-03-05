@@ -261,9 +261,8 @@ def process_time_snapshot(
     # --- Calculated Fields ---
     calculated_fields = {}
 
-    # This must be included so long as we are sampling using it.
-    # If we support additional sampling methods in the future, this becomes optional.
-    log_gradb = calculate_additional_fields.log_grad_b(ds_merge, grid)
+    # This must be included for the front finding
+    gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
 
     if "relative_vorticity" in computed_feature_channels:
         relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
@@ -281,9 +280,12 @@ def process_time_snapshot(
     the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake 
     '''
 
-    # Materialize log_gradb into memory before we lose the ds_merge reference. 
-    log_gradb_np = log_gradb.values #protected line do not modify
-    calculated_fields["log_gradb_np"] = log_gradb_np
+    # Materialize gradb2 into memory before we lose the ds_merge reference. 
+    gradb2_np = gradb2.values #protected line do not modify
+    calculated_fields["gradb2_np"] = gradb2_np
+
+    from IPython import embed
+    embed(header='288 of process_time_snapshot')
 
     # --- Convert from LLC faces (face, j, i) → rectangular lat/lon (lat, lon) ---
     #
@@ -294,14 +296,14 @@ def process_time_snapshot(
     # Input:  xr.Dataset with (face, j, i) dimensions, shape (13, 4320, 4320) per var
     # Output: xr.Dataset with (lat, lon) dimensions, shape (12960, 17280) per var
 
-    # log_gradb is already a numpy array (materialised above via the protected
+    # gradb2 is already a numpy array (materialised above via the protected
     # .values call). Wrap it back as a DataArray so it can be passed to
     # faces_dataset_to_latlon alongside the other xarray variables.
-    log_gradb_da = xr.DataArray(
-        log_gradb_np,
+    gradb2_da = xr.DataArray(
+        gradb2_np,
         dims=ds_merge['Theta'].dims,
         coords=ds_merge['Theta'].coords,
-        name='log_gradb',
+        name='gradb2',
     )
 
     # Assemble all channels into a single Dataset for a single conversion pass.
@@ -312,11 +314,11 @@ def process_time_snapshot(
     # silently returns None when those attributes are absent, which is what
     # caused the earlier AttributeError. xr.Dataset({DataArray, ...}) creates a
     # fresh Dataset that strips those topology attrs; ds.assign() keeps them.
-    channels_to_convert = model_feature_channels + computed_feature_channels + ['log_gradb']
+    channels_to_convert = model_feature_channels + computed_feature_channels + ['gradb2']
     update_vars = (
         {ch: ds_merge[ch] for ch in model_feature_channels}
         | {ch: calculated_fields[ch] for ch in computed_feature_channels}
-        | {'log_gradb': log_gradb_da}
+        | {'gradb2': gradb2_da}
     )
     ds_to_convert = ds.assign(update_vars)[channels_to_convert]
 

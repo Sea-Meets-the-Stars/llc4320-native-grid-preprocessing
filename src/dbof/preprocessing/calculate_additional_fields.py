@@ -3,6 +3,34 @@ import dbof.utils.native_gradient as ng
 import dask.array as da
 
 
+def grad_b2(ds_merge, grid):
+    """Compute log10 of the squared buoyancy gradient magnitude.
+
+    Derives surface buoyancy from Theta and Salt, computes zonal and
+    meridional gradients on the native LLC grid, squares and sums them
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Theta', 'Salt', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dask.array.Array
+        squared buoyancy gradient magnitude.
+        Units are s^4
+    """
+    buoyancy = physical_calculations.buoyancy_of_field(ds_merge)*1e3
+
+    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
+
+    gradb2 = physical_calculations.grad_squared(zonal_grad_b, merid_grad_b)
+
+    return gradb2
+
 def log_grad_b(ds_merge, grid):
     """Compute log10 of the squared buoyancy gradient magnitude.
 
@@ -22,16 +50,11 @@ def log_grad_b(ds_merge, grid):
     -------
     dask.array.Array
         log10 of the squared buoyancy gradient magnitude.
-        Units are log10((km/s^2/m)^2)
+        Units are log10((s^4)
     """
-    buoyancy = physical_calculations.buoyancy_of_field(ds_merge)
-
-    # gradient of b
-    #  buoyancy m^-1
-    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
-
-    gradb2 = physical_calculations.grad_squared(zonal_grad_b, merid_grad_b)
-
+    # Gradient of buoyancy^2
+    gradb2 = grad_b2(ds_merge, grid)
+    # Take the log10 of the squared buoyancy gradient magnitude
     log_gradb = da.log10(gradb2)
 
     return log_gradb
