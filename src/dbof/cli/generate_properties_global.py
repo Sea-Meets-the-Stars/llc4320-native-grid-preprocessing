@@ -179,11 +179,19 @@ def process_time_snapshot(
     # This must be included for the front finding
     gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
 
-    # Compute all velocity-derived properties from a single Jacobian pass
+    # Compute all velocity-derived properties from a single Jacobian pass.
+    # Materialise all requested fields together in one dask compute call so the
+    # Jacobian is evaluated exactly once. Without this, the lazy dask arrays share
+    # Jacobian graph nodes but each subsequent .values call (during channel extraction
+    # below) would recompute the full Jacobian independently — once per property.
     velocity_props = calculate_additional_fields.all_velocity_properties(ds_merge, grid)
-    for name, field in velocity_props.items():
-        if name in computed_feature_channels:
-            calculated_fields[name] = field
+    fields_to_materialise = {name: field for name, field in velocity_props.items()
+                             if name in computed_feature_channels}
+    logging.info(f"Materialising {len(fields_to_materialise)} velocity properties to memory...")
+    materialised = xr.Dataset(fields_to_materialise).compute()
+    for name in materialised:
+        calculated_fields[name] = materialised[name]
+    logging.info("Velocity properties materialised.")
 
     # Move non tracer values to tracer points. This allows us to stack images for our final patches.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
@@ -267,27 +275,27 @@ def process_time_snapshot(
     del merged_mask
 
 
-def main(config_file: str):
+def main():
     """
     Entry point for native-grid LLC dataset_creation generation.
 
     Orchestrates argument parsing, Dask setup, filesystem initialization,
     and iteration over time snapshots.
     """
-
-    #cli = config.parse_args()
-    cfg = config.load_config(config_file) #cli.config)
+    
+    cli = config.parse_args()
+    cfg = config.load_config(cli.config)
 
     # override run_id if passed in through cli
-    #if cli.run_id is not None:
-    #    cfg = config.JobConfig(
-    #        run=config.RunConfig(run_id=cli.run_id, log_dir=cfg.run.log_dir),
-    #        data=cfg.data,
-    #        sampling=cfg.sampling,
-    #        output=cfg.output,
-    #        features=cfg.features,
-    #        runtime=cfg.runtime,
-    #    )
+    if cli.run_id is not None:
+        cfg = config.JobConfig(
+            run=config.RunConfig(run_id=cli.run_id, log_dir=cfg.run.log_dir),
+            data=cfg.data,
+            sampling=cfg.sampling,
+            output=cfg.output,
+            features=cfg.features,
+            runtime=cfg.runtime,
+        )
 
     generate_logging(cfg)
 
