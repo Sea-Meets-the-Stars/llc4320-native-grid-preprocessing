@@ -33,7 +33,7 @@ from dbof.io.filesystems import create_s3_filesystems
 import dbof.preprocessing.native_grid_masks as native_grid_masks
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
-import dbof.preprocessing import ice_mask as ice_masking
+from dbof.preprocessing import ice_mask as ice_masking
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 
