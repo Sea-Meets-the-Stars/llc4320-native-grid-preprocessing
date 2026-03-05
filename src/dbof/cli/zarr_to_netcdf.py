@@ -89,7 +89,7 @@ zarr-to-netcdf \
     --bucket dbof \
     --folder native_grid_dbof_training_data \
     --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/DBOF_v1_test \
-    --grid-output-filename LLC4320_grid.nc
+    --output-filename LLC4320_grid.nc
 """
 
 import argparse
@@ -404,7 +404,102 @@ def grid_zarr_to_netcdf(
 # CLI
 # ---------------------------------------------------------------------------
 
-def main():
+def main(
+    output_dir: str,
+    output_filename: str = None,
+    mode: str = 'snapshots',
+    s3_endpoint: str = 'https://s3-west.nrp-nautilus.io',
+    bucket: str = 'dbof',
+    folder: str = None,
+    run_id: str = None,
+    dataset_name: str = 'dataset_creation.zarr',
+    indices: list = None,
+    iterations: list = None,
+    dates: list = None,
+    channel: list = None,
+    grid_dataset_name: str = 'llc4320_grid.zarr',
+    grid_output_filename: str = 'llc4320_grid.nc',
+) -> None:
+    """Entry point callable from other modules or the CLI.
+
+    Parameters
+    ----------
+    mode : str
+        'snapshots' or 'grid'.
+    s3_endpoint : str
+        NRP S3 endpoint, e.g. 'https://s3-west.nrp-nautilus.io'.
+    bucket : str
+        S3 bucket name.
+    folder : str
+        S3 folder path.
+    output_dir : str
+        Local directory to write NetCDF file(s) into.
+    run_id : str
+        [snapshots] run_id used when writing the Zarr store.
+    dataset_name : str
+        [snapshots] Zarr dataset name (default: 'dataset_creation.zarr').
+    indices : list of int, optional
+        [snapshots] t-axis indices to convert (0-based). Default: all.
+    iterations : list of int, optional
+        [snapshots] LLC4320 iteration numbers to convert.
+    dates : list of str, optional
+        [snapshots] Model dates in 'DDMMYYYY-HH:MM:SS' format.
+    output_filename : str, optional
+        [snapshots] Override auto-generated output filename (single timestep only).
+    channel : list of str, optional
+        [snapshots] Channel name(s) to save. Default: all.
+    grid_dataset_name : str
+        [grid] Zarr store name within folder (default: 'llc4320_grid.zarr').
+    grid_output_filename : str
+        [grid] Output NetCDF filename (default: 'llc4320_grid.nc').
+    """
+    if mode == 'grid':
+        grid_zarr_to_netcdf(
+            s3_endpoint=s3_endpoint,
+            bucket=bucket,
+            folder=folder,
+            grid_dataset_name=grid_dataset_name,
+            output_dir=output_dir,
+            output_filename=grid_output_filename,
+        )
+
+    else:  # snapshots
+        if not run_id:
+            raise ValueError("run_id is required when mode='snapshots'")
+
+        target_indices = None
+
+        if iterations is not None or dates is not None:
+            _, fs_synch = create_s3_filesystems(s3_endpoint)
+            reader = zarr_dataset_global.GlobalZarrDatasetReader(
+                bucket=bucket,
+                folder=folder,
+                run_id=run_id,
+                dataset_name=dataset_name,
+                fs=fs_synch,
+            )
+            if dates is not None:
+                iters = [_date_to_iteration(d) for d in dates]
+            else:
+                iters = iterations
+            target_indices = [reader.iteration_to_index(it) for it in iters]
+        elif indices is not None:
+            target_indices = indices
+
+        zarr_to_netcdf(
+            s3_endpoint=s3_endpoint,
+            bucket=bucket,
+            folder=folder,
+            run_id=run_id,
+            dataset_name=dataset_name,
+            output_dir=output_dir,
+            target_indices=target_indices,
+            output_filename=output_filename,
+            channels=channel,
+        )
+
+
+if __name__ == '__main__':
     p = argparse.ArgumentParser(
         description=(
             "Convert S3 Zarr global LLC4320 stores to NetCDF.\n\n"
@@ -462,52 +557,22 @@ def main():
 
     args = p.parse_args()
 
-    # ------------------------------------------------------------------
-    if args.mode == 'grid':
-        grid_zarr_to_netcdf(
-            s3_endpoint=args.s3_endpoint,
-            bucket=args.bucket,
-            folder=args.folder,
-            grid_dataset_name=args.grid_dataset_name,
-            output_dir=args.output_dir,
-            output_filename=args.grid_output_filename,
-        )
+    if args.mode == 'snapshots' and not args.run_id:
+        p.error("--run-id is required when --mode snapshots")
 
-    else:  # snapshots
-        if not args.run_id:
-            p.error("--run-id is required when --mode snapshots")
-
-        target_indices = None
-
-        if args.iterations is not None or args.dates is not None:
-            _, fs_synch = create_s3_filesystems(args.s3_endpoint)
-            reader = zarr_dataset_global.GlobalZarrDatasetReader(
-                bucket=args.bucket,
-                folder=args.folder,
-                run_id=args.run_id,
-                dataset_name=args.dataset_name,
-                fs=fs_synch,
-            )
-            if args.dates is not None:
-                iters = [_date_to_iteration(d) for d in args.dates]
-            else:
-                iters = args.iterations
-            target_indices = [reader.iteration_to_index(it) for it in iters]
-        elif args.indices is not None:
-            target_indices = args.indices
-
-        zarr_to_netcdf(
-            s3_endpoint=args.s3_endpoint,
-            bucket=args.bucket,
-            folder=args.folder,
-            run_id=args.run_id,
-            dataset_name=args.dataset_name,
-            output_dir=args.output_dir,
-            target_indices=target_indices,
-            output_filename=args.output_filename,
-            channels=args.channel,
-        )
-
-
-if __name__ == '__main__':
-    main()
+    main(
+        args.output_dir,
+        output_filename=args.output_filename,
+        mode=args.mode,
+        s3_endpoint=args.s3_endpoint,
+        bucket=args.bucket,
+        folder=args.folder,
+        run_id=args.run_id,
+        dataset_name=args.dataset_name,
+        indices=args.indices,
+        iterations=args.iterations,
+        dates=args.dates,
+        channel=args.channel,
+        grid_dataset_name=args.grid_dataset_name,
+        grid_output_filename=args.grid_output_filename,
+    )

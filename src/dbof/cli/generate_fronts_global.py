@@ -288,6 +288,7 @@ def process_time_snapshot(
 
     # Mask the edges as -999. where finite
     mask_val = -999.
+    logging.info(f"Masking edges of gradb2 on each face with {mask_val} values")
     for face in range(gradb2_np.shape[0]):
         isf = np.isfinite(gradb2_np[face, 0, :])
         gradb2_np[face, 0, isf] = mask_val
@@ -355,6 +356,7 @@ def process_time_snapshot(
     data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
 
     # write to zarr ds
+    logging.info("Writing snapshot to zarr dataset")
     zarr_ds.write_snapshot(data, it)
 
     # for dask
