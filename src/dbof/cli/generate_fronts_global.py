@@ -433,7 +433,7 @@ def main(config_file: str):
         cfg.run.run_id,
         cfg.output.dataset_name,
         fs=fs,
-        channel_names=model_feature_channels + computed_feature_channels + ["log_gradb"],
+        channel_names=model_feature_channels + computed_feature_channels + ["gradb2"],
         rectangular_shape=rectangular_shape,
     )
 
