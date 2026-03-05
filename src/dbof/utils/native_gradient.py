@@ -141,6 +141,7 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
     ds_dy_haty_M = ds_haty_M / ds_grid.dyC
 
 
+    # Interpolate the gradients to the cell centers
     grad_s_at_cell_center_X = grid.interp(ds_dx_hatx_M, 'X', boundary='fill')
     grad_s_at_cell_center_Y = grid.interp(ds_dy_haty_M, 'Y', boundary='fill')
 

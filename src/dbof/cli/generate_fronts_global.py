@@ -33,6 +33,7 @@ from dbof.io.filesystems import create_s3_filesystems
 import dbof.preprocessing.native_grid_masks as native_grid_masks
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
+import dbof.preprocessing import ice_mask as ice_masking
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 
@@ -255,7 +256,8 @@ def process_time_snapshot(
 
     # --- Calculate Ice Mask ---
     logging.info(f"Calculating ice mask")
-    ice_mask = ~(ds_merge.Theta <= 0.0)
+    #ice_mask = ~(ds_merge.Theta <= 0.0)
+    ice_mask = ice_masking.mask_by_theta(ds_merge)
     ice_mask_np = ice_mask.values
     merged_mask = ice_mask_np & land_mask
 
@@ -283,10 +285,21 @@ def process_time_snapshot(
 
     # Materialize gradb2 into memory before we lose the ds_merge reference. 
     gradb2_np = gradb2.values #protected line do not modify
+
+    # Mask the edges as -999. where finite
+    mask_val = -999.
+    for face in range(gradb2_np.shape[0]):
+        isf = np.isfinite(gradb2_np[face, 0, :])
+        gradb2_np[face, 0, isf] = mask_val
+        #
+        isf = np.isfinite(gradb2_np[face, :, 0])
+        gradb2_np[face, isf, 0] = mask_val
+
     calculated_fields["gradb2_np"] = gradb2_np
 
-    from IPython import embed
-    embed(header='288 of process_time_snapshot')
+
+    #from IPython import embed
+    #embed(header='288 of process_time_snapshot')
 
     # --- Convert from LLC faces (face, j, i) → rectangular lat/lon (lat, lon) ---
     #
