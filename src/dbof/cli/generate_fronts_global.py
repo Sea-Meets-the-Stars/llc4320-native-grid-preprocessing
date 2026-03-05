@@ -221,10 +221,9 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig, use_halo: bool = False):
     ----------
     cfg : JobConfig
     use_halo : bool, default False
-        If True, expand the land mask outward by a halo of cfg.output.target_km_res km
-        using the fast-marching method. This is useful for the cutout pipeline where
-        patch centres must be far from land, but is generally not needed for global output
-        (it would unnecessarily NaN out coastal ocean in the compact image).
+        If True, expand the land mask outward by a halo.
+            This is useful for the cutout pipeline where patch centres must be far from land, 
+            but is generally not needed for global output (it would NaN out coastal ocean in the image).
         If False, the raw land mask (hFacC == 0) is used with no expansion.
     """
     logging.info("Fetching grid file")
@@ -302,7 +301,7 @@ def process_time_snapshot(
     #from IPython import embed
     #embed(header='288 of process_time_snapshot')
 
-    # --- Convert from LLC faces (face, j, i) → rectangular lat/lon (lat, lon) ---
+    # --- Stitch LLC faces (face, j, i) → 2D lat/lon (lat, lon) ---
     #
     # xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon() stitches the 13 LLC
     # faces into a single coherent 2D rectangular image. This is NOT interpolation
@@ -322,13 +321,6 @@ def process_time_snapshot(
     )
 
     # Assemble all channels into a single Dataset for a single conversion pass.
-    #
-    # IMPORTANT: we use ds.assign() rather than xr.Dataset({...}) so that the
-    # LLC4320 topology attributes (face coordinate values, grid attributes) are
-    # preserved from the original kerchunk-loaded ds. faces_dataset_to_latlon
-    # silently returns None when those attributes are absent, which is what
-    # caused the earlier AttributeError. xr.Dataset({DataArray, ...}) creates a
-    # fresh Dataset that strips those topology attrs; ds.assign() keeps them.
     channels_to_convert = model_feature_channels + computed_feature_channels + ['gradb2']
     update_vars = (
         {ch: ds_merge[ch] for ch in model_feature_channels}
@@ -339,8 +331,6 @@ def process_time_snapshot(
 
     # metric_vector_pairs tells faces_dataset_to_latlon to also rotate the
     # direction of vector fields (U, V) when Arctic-cap faces are transposed.
-    # This is needed in addition to the staggered --> tracer interpolation above,
-    # which only co-locates U/V on cell centres but does not correct directions.
     has_uv = ('U' in model_feature_channels and 'V' in model_feature_channels)
     metric_vector_pairs = [('U', 'V')] if has_uv else []
 
@@ -351,7 +341,6 @@ def process_time_snapshot(
     )
 
     # Extract channels in a consistent order and stack into (C, H, W).
-    # channels_to_convert was built above in the same order, so reuse it here.
     channel_arrays = [ds_rect[ch].values for ch in channels_to_convert]
     data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
 
@@ -418,11 +407,10 @@ def main(config_file: str):
     grid = xgcm.Grid(ds_grid, periodic=False)
 
     # LLC4320 rectangular output shape is a model constant: 3×4320 rows, 4×4320 cols.
-    # faces_dataset_to_latlon requires the face/i/j dimensions to be proper xarray
-    # *coordinate* variables (with attached values) to detect the LLC topology.
-    # ds_grid has gone through reset_coords() which strips those coordinate values,
-    # so a dry-run on ds_grid variables would silently return None. Since the shape
-    # is fixed for LLC4320, we just hardcode it.
+    # Because reset_coords() removed the face, i, and j coordinate values that 
+    # faces_dataset_to_latlon needs to detect the LLC grid topology, 
+    # the code cannot infer the output grid size from the dataset and 
+    # instead we hardcode the known LLC4320 rectangular shape (3×4320 by 4×4320).
     rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
     logging.info(f"LLC rectangular output shape: {rectangular_shape}")
 
