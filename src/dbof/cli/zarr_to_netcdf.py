@@ -416,7 +416,7 @@ def main(
     indices: list = None,
     iterations: list = None,
     dates: list = None,
-    channel: list = None,
+    channels: list = None,
     grid_dataset_name: str = 'llc4320_grid.zarr',
     grid_output_filename: str = 'llc4320_grid.nc',
 ) -> None:
@@ -495,7 +495,7 @@ def main(
             output_dir=output_dir,
             target_indices=target_indices,
             output_filename=output_filename,
-            channels=channel,
+            channels=channels,
         )
 
 
@@ -545,7 +545,7 @@ if __name__ == '__main__':
                    help=("[snapshots] Override the auto-generated output filename "
                          "(e.g. 'LLC4320_2012-01-01_props.nc'). "
                          "Only valid when converting a single timestep."))
-    p.add_argument('--channel', nargs='+', metavar='NAME',
+    p.add_argument('--channels', nargs='+', metavar='NAME',
                    help=("[snapshots] Save only the named channel(s) "
                          "(e.g. --channel log_gradb). Default: all channels."))
 
@@ -572,7 +572,7 @@ if __name__ == '__main__':
         indices=args.indices,
         iterations=args.iterations,
         dates=args.dates,
-        channel=args.channel,
+        channels=args.channels,
         grid_dataset_name=args.grid_dataset_name,
         grid_output_filename=args.grid_output_filename,
     )
