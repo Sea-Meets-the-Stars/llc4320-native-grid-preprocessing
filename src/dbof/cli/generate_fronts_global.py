@@ -40,6 +40,7 @@ import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
 
 import dbof.dataset_creation.config as config
 
+from IPython import embed
 
 # Constants --------------------------
 # NOTE these are constants for the LLC 4320 model. If we look to support other models in the future
@@ -354,7 +355,7 @@ def process_time_snapshot(
     del merged_mask
 
 
-def main():
+def main(config_file: str):
     """
     Entry point for native-grid LLC dataset_creation generation.
 
@@ -362,19 +363,19 @@ def main():
     and iteration over time snapshots.
     """
 
-    cli = config.parse_args()
-    cfg = config.load_config(cli.config)
+    #cli = config.parse_args()
+    cfg = config.load_config(config_file) #cli.config)
 
     # override run_id if passed in through cli
-    if cli.run_id is not None:
-        cfg = config.JobConfig(
-            run=config.RunConfig(run_id=cli.run_id, log_dir=cfg.run.log_dir),
-            data=cfg.data,
-            sampling=cfg.sampling,
-            output=cfg.output,
-            features=cfg.features,
-            runtime=cfg.runtime,
-        )
+    #if cli.run_id is not None:
+    #    cfg = config.JobConfig(
+    #        run=config.RunConfig(run_id=cli.run_id, log_dir=cfg.run.log_dir),
+    #        data=cfg.data,
+    #        sampling=cfg.sampling,
+    #        output=cfg.output,
+    #        features=cfg.features,
+    #        runtime=cfg.runtime,
+    #    )
 
     generate_logging(cfg)
 
@@ -451,5 +452,5 @@ def main():
         del ds
 
 
-if __name__ == "__main__":
-    main()
+#if __name__ == "__main__":
+#    main()
