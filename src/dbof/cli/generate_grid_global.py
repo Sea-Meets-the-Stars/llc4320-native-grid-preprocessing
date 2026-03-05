@@ -6,11 +6,6 @@ format (13, 4320, 4320) to a rectangular lat/lon image (12960, 17280), and
 saves the result directly to an S3 Zarr store alongside the snapshot data
 produced by generate_fronts_global.py.
 
-This is the S3 Zarr counterpart to generate_grid_netcdf.py (which writes
-a local NetCDF).  Having the grid in the same S3 location as the snapshots
-makes it easy to load both from the same bucket in notebooks or inference
-pipelines without managing a separate local file.
-
 Grid variables saved
 --------------------
   T-grid  (face, j, i)    → (j, i):  XC, YC, rA, Depth, hFacC, SN, CS
@@ -25,8 +20,7 @@ Store location
   s3://{bucket}/{folder}/{dataset_name}
   (default dataset_name: llc4320_grid.zarr)
 
-  This sits in the same S3 folder as the snapshot Zarr stores, so notebooks
-  can reach both via the same bucket/folder config.
+  This sits in the same S3 folder as the snapshot Zarr stores.
 
 Two separate S3 endpoints
 --------------------------
@@ -61,18 +55,13 @@ import sys
 
 import numpy as np
 import xarray as xr
-from xmitgcm.llcreader import llcmodel
-from xmitgcm.llcreader.llcmodel import (
-    _faces_coords_to_latlon,
-    _faces_to_latlon_scalar,
-    _faces_to_latlon_vector,
-    _drop_facedim,
-)
+
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 from dbof.io.filesystems import create_s3_filesystems
 from dbof.dataset_creation.zarr_grid_global import GlobalGridZarrWriter
+import dbof.utils.faces_to_latlon as faces_to_latlon
 
 # Source: raw LLC4320 kerchunk files on OSN (public, read-only, no credentials needed)
 DEFAULT_OSN_ENDPOINT  = "https://mghp.osn.xsede.org"
@@ -86,83 +75,6 @@ _U_GRID_VARS = ['dxC', 'dyG']                               # (face, j, i_g)
 _V_GRID_VARS = ['dyC', 'dxG']                               # (face, j_g, i)
 _Z_GRID_VARS = ['rAz']                                      # (face, j_g, i_g)
 _HFACC_VAR   = 'hFacC'                                      # (face, j, i [, k])
-
-
-# ---------------------------------------------------------------------------
-# Xarray-version-safe faces_dataset_to_latlon
-# ---------------------------------------------------------------------------
-
-def _faces_dataset_to_latlon(ds, metric_vector_pairs):
-    """
-    Xarray-version-safe replacement for llcmodel.faces_dataset_to_latlon.
-
-    The upstream function uses ``ds_new = ds_new.update(data_vars)`` which
-    returns None in xarray < 0.17, causing an AttributeError on the next line.
-    This version uses xr.merge() instead, which has stable semantics across
-    all xarray versions.
-    """
-    coord_vars = list(ds.coords)
-    ds_new = _faces_coords_to_latlon(ds)
-    nfaces = len(ds['face'])
-
-    vector_pairs = []
-    vnames = list(ds.reset_coords().variables)
-    for vname in list(vnames):
-        try:
-            mate = ds[vname].attrs['mate']
-        except KeyError:
-            mate = None
-        if mate is not None:
-            vector_pairs.append((vname, mate))
-            try:
-                vnames.remove(mate)
-            except ValueError:
-                raise ValueError(
-                    f"If '{vname}' in varnames, '{mate}' must also be in varnames"
-                )
-
-    all_vector_components = [
-        inner for outer in (vector_pairs + metric_vector_pairs) for inner in outer
-    ]
-    scalars = [v for v in vnames if v not in all_vector_components]
-    data_vars = {}
-
-    for vname in scalars:
-        if vname == 'face' or vname in ds_new:
-            continue
-        if 'face' in ds[vname].dims:
-            data = _faces_to_latlon_scalar(ds[vname].data, nfaces=nfaces)
-            dims = _drop_facedim(ds[vname].dims)
-        else:
-            data = ds[vname].data
-            dims = ds[vname].dims
-        data_vars[vname] = xr.Variable(dims, data, ds[vname].attrs)
-
-    for vname_u, vname_v in vector_pairs:
-        u_data, v_data = _faces_to_latlon_vector(
-            ds[vname_u].data, ds[vname_v].data, nfaces=nfaces
-        )
-        data_vars[vname_u] = xr.Variable(
-            _drop_facedim(ds[vname_u].dims), u_data, ds[vname_u].attrs
-        )
-        data_vars[vname_v] = xr.Variable(
-            _drop_facedim(ds[vname_v].dims), v_data, ds[vname_v].attrs
-        )
-
-    for vname_u, vname_v in metric_vector_pairs:
-        u_data, v_data = _faces_to_latlon_vector(
-            ds[vname_u].data, ds[vname_v].data, nfaces=nfaces, metric=True
-        )
-        data_vars[vname_u] = xr.Variable(
-            _drop_facedim(ds[vname_u].dims), u_data, ds[vname_u].attrs
-        )
-        data_vars[vname_v] = xr.Variable(
-            _drop_facedim(ds[vname_v].dims), v_data, ds[vname_v].attrs
-        )
-
-    ds_out = xr.merge([ds_new, xr.Dataset(data_vars)])
-    ds_out = ds_out.set_coords([c for c in coord_vars if c in ds_out])
-    return ds_out
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +92,7 @@ def _convert_group(ds_grid: xr.Dataset, var_names: list) -> xr.Dataset:
     present = [v for v in var_names if v in ds_grid]
     if not present:
         return xr.Dataset()
-    return _faces_dataset_to_latlon(ds_grid[present], metric_vector_pairs=[])
+    return faces_to_latlon.faces_dataset_to_latlon(ds_grid[present], metric_vector_pairs=[])
 
 
 # ---------------------------------------------------------------------------

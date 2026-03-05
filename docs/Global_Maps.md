@@ -29,7 +29,7 @@ Configuration is split into two files:
 
 ## LLC4320 Grid and Coordinate System
 
-LLC4320 output is stored across **13 curvilinear faces**. The stitching of the 13-faces into a 2D grid is performed by `_faces_dataset_to_latlon()`, a local re-implementation of the equivalent function in `llcreader.llcmodel`. See the [Known Issues](#known-issues) section for why this was re-implemented rather than imported directly.
+LLC4320 output is stored across **13 curvilinear faces**. The stitching of the 13-faces into a 2D grid is performed by `utils.faces_to_latlon.faces_dataset_to_latlon()`, a local re-implementation of the equivalent function in `llcreader.llcmodel`. See the [Known Issues](#known-issues) section for why this was re-implemented rather than imported directly.
 
 The 2D output shape for all variables is `(H=12960, W=17280)`.
 
@@ -272,11 +272,10 @@ CLI date strings use the format `DDMMYYYY-HH:MM:SS`, e.g. `11092012-12:00:00` = 
 
 ## Known Issues
 
-### `_faces_dataset_to_latlon` re-implementation
+### `utils.faces_to_latlon.faces_dataset_to_latlon` re-implementation
 
 The `llcreader.llcmodel` library contains a function for assembling the 13 LLC faces into a rectangular lat/lon array. However, **two lines in that function are incompatible with recent xarray versions**, causing a runtime error. Rather than pin a specific xarray version, the function was re-implemented locally in both `cli.generate_fronts_global` and `cli.generate_grid_global` with the lines corrected.
 
-> **TODO:** Move this corrected implementation to a shared helper module (e.g. `dbof.utils.llc_utils` or similar).
 
 ### Asyncio cleanup traceback on exit
 
