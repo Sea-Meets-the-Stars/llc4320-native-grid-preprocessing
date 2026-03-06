@@ -193,7 +193,7 @@ def get_remote_gridfile(endpoint_url):
 
     datasets = [
         open_delayed("reference://", engine="zarr", backend_kwargs=kwargs, 
-        chunks={'i': 720, 'j': 720})
+        chunks={"i": 720, "j": 720, "i_g": 720, "j_g": 720})
         #chunks={})
         for kwargs in backend_kwargs_list
     ]
