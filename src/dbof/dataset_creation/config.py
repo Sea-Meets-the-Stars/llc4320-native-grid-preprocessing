@@ -42,7 +42,8 @@ class FeaturesConfig:
             object.__setattr__(self, "model_data_feature_channels",
                                ["Eta", "Salt", "Theta", "U", "V", "W"])
         if self.compute_features_channels is None:
-            object.__setattr__(self, "compute_features_channels", ["log_gradb"])
+            object.__setattr__(self, "compute_features_channels", [])
+            #object.__setattr__(self, "compute_features_channels", ["log_gradb"])
 
 @dataclass(frozen=True)
 class RuntimeConfig:
