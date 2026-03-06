@@ -4,6 +4,9 @@ import ujson
 import dask
 from functools import partial
 
+# Default chunks for the LLC4320 grid
+#  Both the data variables and grid need the same chunking
+global_chunks={"i": 720, "j": 720, "i_g": 720, "j_g": 720}
 
 # ---------------------------------------------------------------------
 # Helper: close all open dataset_creation references
@@ -108,8 +111,7 @@ def get_remote_llc_data(endpoint_url, it, face_range):
             "reference://",
             engine="zarr",
             backend_kwargs=kwargs,
-            chunks={"i": 720, "j": 720, "i_g": 720, "j_g": 720}
-            #chunks={"i": 720, "j": 720}
+            chunks=global_chunks,
         )
         for kwargs in backend_kwargs_list
     ]
@@ -194,8 +196,7 @@ def get_remote_gridfile(endpoint_url):
 
     datasets = [
         open_delayed("reference://", engine="zarr", backend_kwargs=kwargs, 
-        chunks={"i": 720, "j": 720, "i_g": 720, "j_g": 720})
-        #chunks={})
+        chunks=global_chunks)
         for kwargs in backend_kwargs_list
     ]
     closers = [getattr_delayed(ds, "_close") for ds in datasets]

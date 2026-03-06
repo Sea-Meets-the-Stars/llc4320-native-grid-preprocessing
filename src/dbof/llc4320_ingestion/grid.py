@@ -1,3 +1,8 @@
+# This dictionary is used to define the face connections for the LLC4320 grid.
+# It is used to create the xgcm Grid object.
+
+import xgcm
+
 face_connections = {'face':  {
         0: {'X': ((12, 'Y', False), (3, 'X', False)),
             'Y': (None, (1, 'Y', False))},
@@ -26,3 +31,20 @@ face_connections = {'face':  {
         12: {'X': ((11, 'X', False), None),
                 'Y': ((9, 'Y', False), (0, 'X', False))}
 }}
+
+def set_xgcm_grid(ds_grid, use_connections:bool=True):
+    """ Set the xgcm Grid object for the LLC4320 grid 
+    Args:
+        ds_grid: xarray.Dataset
+            The dataset containing the LLC4320 grid data 
+
+    Returns:
+        xgcm.Grid
+            The xgcm Grid object for the LLC4320 grid
+    """
+    # Do it
+    if use_connections:
+        grid = xgcm.Grid(ds_grid, periodic=False, face_connections=face_connections)
+    else:
+        grid = xgcm.Grid(ds_grid, periodic=False)
+    return grid

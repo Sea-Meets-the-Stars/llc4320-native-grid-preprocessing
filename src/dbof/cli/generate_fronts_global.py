@@ -255,14 +255,10 @@ def process_time_snapshot(
     # NOTE The ordering of the following steps matters
 
     # --- Calculate Ice Mask ---
-    logging.info(f"Calculating ice mask")
-    #ice_mask = ~(ds_merge.Theta <= 0.0)
-    # TODO -- TURN THIS BACK ON
-    '''
-    ice_mask = ice_masking.mask_by_theta(ds_merge)
-    ice_mask_np = ice_mask.values
-    merged_mask = ice_mask_np & land_mask
-    '''
+    #logging.info(f"Calculating ice mask")
+    #ice_mask = ice_masking.mask_by_theta(ds_merge)
+    #ice_mask_np = ice_mask.values
+    #merged_mask = ice_mask_np & land_mask
 
     # --- Calculated Fields ---
     calculated_fields = {}
@@ -289,19 +285,6 @@ def process_time_snapshot(
 
     # Materialize gradb2 into memory before we lose the ds_merge reference. 
     gradb2_np = gradb2.values #protected line do not modify
-
-    '''
-    # Mask the edges as -999. where finite
-    mask_val = -999.
-    logging.info(f"Masking edges of gradb2 on each face with {mask_val} values")
-    for face in range(gradb2_np.shape[0]):
-        isf = np.isfinite(gradb2_np[face, 0, :])
-        gradb2_np[face, 0, isf] = mask_val
-        #
-        isf = np.isfinite(gradb2_np[face, :, 0])
-        gradb2_np[face, isf, 0] = mask_val
-    '''
-
     calculated_fields["gradb2_np"] = gradb2_np
 
 
@@ -362,8 +345,8 @@ def process_time_snapshot(
     grid = None
     del grid
 
-    merged_mask = None
-    del merged_mask
+    #merged_mask = None
+    #del merged_mask
 
 
 def main(config_file: str):
@@ -412,11 +395,7 @@ def main(config_file: str):
     # use_halo=False for global 
     ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
 
-    #grid = xgcm.Grid(ds_grid, periodic=False)
-    grid = xgcm.Grid(ds_grid,
-                periodic=False,
-                face_connections=llc_grid.face_connections,
-        )
+    grid = llc_grid.set_xgcm_grid(ds_grid, use_connections=True)
 
     # LLC4320 rectangular output shape is a model constant: 3×4320 rows, 4×4320 cols.
     # Because reset_coords() removed the face, i, and j coordinate values that 
