@@ -257,21 +257,24 @@ def process_time_snapshot(
     # --- Calculate Ice Mask ---
     logging.info(f"Calculating ice mask")
     #ice_mask = ~(ds_merge.Theta <= 0.0)
+    # TODO -- TURN THIS BACK ON
+    '''
     ice_mask = ice_masking.mask_by_theta(ds_merge)
     ice_mask_np = ice_mask.values
     merged_mask = ice_mask_np & land_mask
+    '''
 
     # --- Calculated Fields ---
     calculated_fields = {}
 
     # This must be included for the front finding
+    embed(header='276 of process_time_snapshot')
     gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
 
     #if "relative_vorticity" in computed_feature_channels:
     #    relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
     #    calculated_fields["relative_vorticity"] = relative_vorticity
 
-    embed(header='276 of process_time_snapshot')
 
     # Move non tracer values to tracer points. This allows us to stack images for our final patches.
     # TODO -- Could use original grid for this, as a hack of sorts
