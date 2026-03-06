@@ -5,7 +5,7 @@ data_access:
 # NOTE:
 # - This is NOT a user-selectable value.
 # - It MUST exactly match the run_id used when the dataset was generated.
-  run_id: "global_properties_20260306_170650"
+  run_id: "global_properties_20260306_174221"
 # NOTE:
 # - This is NOT a user-selectable list.
 # - It MUST exactly match the feature channel list used when the dataset was generated.
@@ -14,20 +14,20 @@ data_access:
 #
 # If unsure, refer to the run configuration used to generate this dataset.
   feature_channels:
-    - "Eta"
-    - "Salt"
-    - "Theta"
-    - "U"
-    - "V"
-    - "W"
+    #- "Eta"
+    #- "Salt"
+    #- "Theta"
+    #- "U"
+    #- "V"
+    #- "W"
     - "relative_vorticity"
-    #- "strain_n"
-    #- "strain_s"
-    #- "strain_mag"
-    #- "divergence"
-    #- "coriolis_f"
-    #- "rossby_number"
-    #- "okubo_weiss"
+    - "strain_n"
+    - "strain_s"
+    - "strain_mag"
+    - "divergence"
+    - "coriolis_f"
+    - "rossby_number"
+    - "okubo_weiss"
     - "gradb2"
 
 # Grid Zarr store written by generate_grid_global.py.
