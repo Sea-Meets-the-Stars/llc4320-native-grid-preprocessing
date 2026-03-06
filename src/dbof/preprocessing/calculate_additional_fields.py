@@ -218,19 +218,87 @@ def okubo_weiss_parameter(ds_merge, grid):
     return okubo_weiss
 
 
+def F_strain(ds_merge, grid):
+    """Compute the 2D kinematic frontogenesis tendency.
+
+    Derives surface buoyancy from Theta and Salt, computes zonal and
+    meridional gradients on the native LLC grid
+
+    Computes horizontal velocity gradients, then combines with 
+    buoyancy gradients to compute the kinematic frontogenesis 
+    tendency F_strain = -(du/dx * db/dx^2 + (du/dy + dv/dx)*db/dx*db/dy + dv/dy*db/dy^2)
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Theta', 'Salt', 'U', 'V', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dask.array.Array
+        Frontogenesis tendency field.
+    """
+
+    buoyancy = physical_calculations.buoyancy_of_field(ds_merge)*1e3
+    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
+
+    u_x = ds_merge.U.copy(deep=True)
+    v_y = ds_merge.V.copy(deep=True)
+
+    du_lambda_dlambda, du_lambda_dphi, dv_phi_dlambda, dv_phi_dphi = (
+        ng.calculate_jacobian(u_x, v_y, ds_merge, grid))
+    
+    F_strain = -(du_lambda_dlambda * zonal_grad_b**2 +
+                 (du_lambda_dphi + dv_phi_dlambda) * zonal_grad_b * merid_grad_b +
+                 dv_phi_dphi * merid_grad_b**2)
+
+    return F_strain
+
+
+def _frontogenesis_tendency(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
+    """Kinematic frontogenesis tendency from velocity gradient components.
+
+    F = -(du/dx * bx² + (du/dy + dv/dx) * bx*by + dv/dy * by²)
+
+    Used internally by all_velocity_properties to compute both the full and
+    geostrophic frontogenesis without duplicating the formula.
+
+    Parameters
+    ----------
+    du_dx, du_dy : xarray.DataArray  — ∂u/∂x, ∂u/∂y
+    dv_dx, dv_dy : xarray.DataArray  — ∂v/∂x, ∂v/∂y
+    grad_bx, grad_by : xarray.DataArray  — ∂b/∂x, ∂b/∂y
+    """
+    return -(du_dx * grad_bx**2 +
+             (du_dy + dv_dx) * grad_bx * grad_by +
+             dv_dy * grad_by**2)
+
+
 def all_velocity_properties(ds_merge, grid):
     """
     Compute all velocity-derived properties from a single Jacobian pass.
 
     Computes the Jacobian once and derives relative vorticity, strain (normal,
-    shear, magnitude), divergence, Coriolis parameter, Rossby number, and the
-    Okubo-Weiss parameter from the same four gradient components.
+    shear, magnitude), divergence, Coriolis parameter, Rossby number, the
+    Okubo-Weiss parameter, and the kinematic frontogenesis tendency from the
+    same four gradient components. Frontogenesis additionally requires the
+    buoyancy gradient (from Theta and Salt), but shares the velocity Jacobian
+    rather than recomputing it.
+
+    Note: the arithmetic in this function intentionally duplicates that in the
+    individual functions (relative_vorticity, strain, etc.) to ensure the
+    Jacobian is computed exactly once across all properties. Do not refactor
+    to call those individual functions here.
 
     Parameters
     ----------
     ds_merge : xarray.Dataset
-        Dataset containing U and V components on the model grid, grid metrics,
-        rotation coefficients ('CS', 'SN'), and latitude ('YC').
+        Dataset containing U, V on the model grid, grid metrics, rotation
+        coefficients ('CS', 'SN'), latitude ('YC'), and tracer fields
+        ('Theta', 'Salt') required for frontogenesis.
     grid : xgcm.Grid
         Grid object relating to ds_merge.
 
@@ -238,7 +306,9 @@ def all_velocity_properties(ds_merge, grid):
     -------
     dict of str -> xarray.DataArray
         Keys: 'relative_vorticity', 'strain_n', 'strain_s', 'strain_mag',
-              'divergence', 'coriolis_f', 'rossby_number', 'okubo_weiss'
+              'divergence', 'coriolis_f', 'rossby_number', 'okubo_weiss',
+              'frontogenesis_tendency', 'ug', 'vg',
+              'frontogenesis_geo', 'frontogenesis_ageo'
     """
     u_x = ds_merge.U.copy(deep=True)
     v_y = ds_merge.V.copy(deep=True)
@@ -246,9 +316,9 @@ def all_velocity_properties(ds_merge, grid):
     du_lambda_dlambda, du_lambda_dphi, dv_phi_dlambda, dv_phi_dphi = (
         ng.calculate_jacobian(u_x, v_y, ds_merge, grid))
 
-    omega     = dv_phi_dlambda - du_lambda_dphi
-    strain_n  = du_lambda_dlambda - dv_phi_dphi
-    strain_s  = du_lambda_dphi + dv_phi_dlambda
+    omega      = dv_phi_dlambda - du_lambda_dphi
+    strain_n   = du_lambda_dlambda - dv_phi_dphi
+    strain_s   = du_lambda_dphi + dv_phi_dlambda
     strain_mag = np.sqrt(strain_n**2 + strain_s**2)
     divergence = du_lambda_dlambda + dv_phi_dphi
 
@@ -257,13 +327,59 @@ def all_velocity_properties(ds_merge, grid):
     rossby_no   = omega / coriolis_f
     okubo_weiss = strain_n**2 + strain_s**2 - omega**2
 
+    # Buoyancy gradients — shared by full and geostrophic frontogenesis.
+    buoyancy = physical_calculations.buoyancy_of_field(ds_merge) * 1e3
+    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
+
+    # Full frontogenesis tendency — uses the velocity Jacobian computed above.
+    # strain_s (= du_lambda_dphi + dv_phi_dlambda) is reused as the cross term.
+    frontogenesis_tendency = _frontogenesis_tendency(
+        du_lambda_dlambda, du_lambda_dphi,
+        dv_phi_dlambda,    dv_phi_dphi,
+        zonal_grad_b,      merid_grad_b,
+    )
+
+    # Geostrophic velocity from sea surface height gradient.
+    # Eta is a scalar tracer (cell-centre), so its gradient uses
+    # calculate_native_gradient_tracer (not the Jacobian).
+    # ug = -(g/f) * deta/dy,  vg = (g/f) * deta/dx
+    # coriolis_f is reused from above. Near the equator f → 0, so ug/vg → inf/NaN
+    # in a narrow equatorial band — physically correct, mask downstream if needed.
+    g = 9.81  # m/s²; gravitational acceleration
+    zonal_grad_eta, merid_grad_eta = ng.calculate_native_gradient_tracer(
+        ds_merge['Eta'], ds_merge, grid=grid)
+    ug = -(g / coriolis_f) * merid_grad_eta
+    vg =  (g / coriolis_f) * zonal_grad_eta
+
+    # Geostrophic frontogenesis — ug/vg are at tracer points, so their
+    # gradients are computed as tracer gradients (not via calculate_jacobian,
+    # which expects staggered U/V). Buoyancy gradients are reused from above.
+    zonal_grad_ug, merid_grad_ug = ng.calculate_native_gradient_tracer(ug, ds_merge, grid=grid)
+    zonal_grad_vg, merid_grad_vg = ng.calculate_native_gradient_tracer(vg, ds_merge, grid=grid)
+    frontogenesis_geo = _frontogenesis_tendency(
+        zonal_grad_ug, merid_grad_ug,
+        zonal_grad_vg, merid_grad_vg,
+        zonal_grad_b,  merid_grad_b,
+    )
+
+    # Ageostrophic frontogenesis — residual of full minus geostrophic.
+    # Note: this is F(u,v) - F(ug,vg), which includes both the purely
+    # ageostrophic term F(u_ageo, v_ageo) and geostrophic/ageostrophic
+    # cross terms. Treat as a qualitative measure of ageostrophic influence.
+    frontogenesis_ageo = frontogenesis_tendency - frontogenesis_geo
+
     return {
-        'relative_vorticity': omega,
-        'strain_n':           strain_n,
-        'strain_s':           strain_s,
-        'strain_mag':         strain_mag,
-        'divergence':         divergence,
-        'coriolis_f':         coriolis_f,
-        'rossby_number':      rossby_no,
-        'okubo_weiss':        okubo_weiss,
+        'relative_vorticity':     omega,
+        'strain_n':               strain_n,
+        'strain_s':               strain_s,
+        'strain_mag':             strain_mag,
+        'divergence':             divergence,
+        'coriolis_f':             coriolis_f,
+        'rossby_number':          rossby_no,
+        'okubo_weiss':            okubo_weiss,
+        'frontogenesis_tendency': frontogenesis_tendency,
+        'frontogenesis_geo':      frontogenesis_geo,
+        'frontogenesis_ageo':     frontogenesis_ageo,
+        'ug':                     ug,
+        'vg':                     vg,
     }

@@ -174,28 +174,40 @@ def process_time_snapshot(
     merged_mask = ice_mask_np & land_mask
 
     # --- Calculated Fields ---
-    calculated_fields = {}
 
     # This must be included for the front finding
     gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
 
-    # Compute all velocity-derived properties from a single Jacobian pass.
-    # Materialise all requested fields together in one dask compute call so the
-    # Jacobian is evaluated exactly once. Without this, the lazy dask arrays share
-    # Jacobian graph nodes but each subsequent .values call (during channel extraction
-    # below) would recompute the full Jacobian independently — once per property.
+    # Build lazy arrays for all fields to be materialised.
+    #
+    # Velocity-derived properties (including frontogenesis) share one Jacobian
+    # pass inside all_velocity_properties — keeping them lazy here and computing
+    # them together in the single batch below means the Jacobian is evaluated
+    # exactly once.
+    #
+    # U and V are interpolated to tracer points lazily so they can be included
+    # in the same batch without modifying ds_merge (which must retain staggered
+    # U/V for the Jacobian computation above).
     velocity_props = calculate_additional_fields.all_velocity_properties(ds_merge, grid)
-    fields_to_materialise = {name: field for name, field in velocity_props.items()
-                             if name in computed_feature_channels}
-    logging.info(f"Materialising {len(fields_to_materialise)} velocity properties to memory...")
-    materialised = xr.Dataset(fields_to_materialise).compute()
-    for name in materialised:
-        calculated_fields[name] = materialised[name]
-    logging.info("Velocity properties materialised.")
+    U_tracer = grid.interp(ds_merge["U"], 'X', boundary='fill')
+    V_tracer = grid.interp(ds_merge["V"], 'Y', boundary='fill')
 
-    # Move non tracer values to tracer points. This allows us to stack images for our final patches.
-    ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
-    ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
+    # Materialise model fields and all requested velocity-derived properties in
+    # one batch. A single xr.Dataset.compute() call:
+    #   (a) evaluates the shared Jacobian graph exactly once across all properties;
+    #   (b) avoids the lazy-read corruption where a prior distributed compute
+    #       leaves the kerchunk/S3 graph for unrelated fields (Theta, Salt, etc.)
+    #       returning zeros on subsequent lazy evaluation.
+    fields_to_materialise = (
+        {ch: {'U': U_tracer, 'V': V_tracer}.get(ch, ds_merge[ch])
+         for ch in model_feature_channels}
+        | {name: field for name, field in velocity_props.items()
+           if name in computed_feature_channels}
+    )
+    logging.info(f"Materialising {len(fields_to_materialise)} fields "
+                 f"(model + velocity properties) to memory...")
+    materialised = xr.Dataset(fields_to_materialise).compute()
+    logging.info("All fields materialised.")
 
     '''
     Here we compute the calculated gradients into memory before creating our patches.
@@ -218,7 +230,7 @@ def process_time_snapshot(
         isf = np.isfinite(gradb2_np[face, :, 0])
         gradb2_np[face, isf, 0] = mask_val
 
-    calculated_fields["gradb2_np"] = gradb2_np
+    # gradb2_np used only for edge masking above; gradb2_da carries it forward.
 
 
     #from IPython import embed
@@ -239,8 +251,8 @@ def process_time_snapshot(
     # Assemble all channels into a single Dataset for a single conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels + ['gradb2']
     update_vars = (
-        {ch: ds_merge[ch] for ch in model_feature_channels}
-        | {ch: calculated_fields[ch] for ch in computed_feature_channels}
+        {ch: materialised[ch] for ch in model_feature_channels}
+        | {ch: materialised[ch] for ch in computed_feature_channels}
         | {'gradb2': gradb2_da}
     )
     ds_to_convert = ds.assign(update_vars)[channels_to_convert]

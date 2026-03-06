@@ -28,6 +28,11 @@ data_access:
     - "coriolis_f"
     - "rossby_number"
     - "okubo_weiss"
+    - "frontogenesis_tendency"
+    - "frontogenesis_geo"
+    - "frontogenesis_ageo"
+    - "ug"
+    - "vg"
     - "gradb2"
 
 # Grid Zarr store written by generate_grid_global.py.
