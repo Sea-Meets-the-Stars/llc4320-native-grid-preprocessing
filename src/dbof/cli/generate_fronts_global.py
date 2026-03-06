@@ -267,17 +267,21 @@ def process_time_snapshot(
     # This must be included for the front finding
     gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
 
-    '''
-    if "relative_vorticity" in computed_feature_channels:
-        relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
-        calculated_fields["relative_vorticity"] = relative_vorticity
-    '''
+    #if "relative_vorticity" in computed_feature_channels:
+    #    relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
+    #    calculated_fields["relative_vorticity"] = relative_vorticity
 
     embed(header='276 of process_time_snapshot')
 
     # Move non tracer values to tracer points. This allows us to stack images for our final patches.
+    # TODO -- Could use original grid for this, as a hack of sorts
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
+
+    #vec_u_to_ij = grid.interp_2d_vector({'X': ds_merge['U'], 'Y': ds_merge['V']},boundary='fill')
+    #vec_u_to_ij = grid.interp_2d_vector({'X': u_x, 'Y': v_y},boundary='fill')
+
+
 
     ## 
     #Here we compute the calculated gradients into memory before creating our patches. 
