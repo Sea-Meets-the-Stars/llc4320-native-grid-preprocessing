@@ -274,7 +274,6 @@ def process_time_snapshot(
         relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
         calculated_fields["relative_vorticity"] = relative_vorticity
 
-
     # Move non tracer values to tracer points. This allows us to stack images for our final patches.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
