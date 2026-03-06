@@ -108,7 +108,8 @@ def get_remote_llc_data(endpoint_url, it, face_range):
             "reference://",
             engine="zarr",
             backend_kwargs=kwargs,
-            chunks={"i": 720, "j": 720}
+            chunks={"i": 720, "j": 720, "i_g": 720, "j_g": 720}
+            #chunks={"i": 720, "j": 720}
         )
         for kwargs in backend_kwargs_list
     ]
