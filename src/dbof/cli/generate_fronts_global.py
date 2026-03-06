@@ -36,6 +36,7 @@ import dbof.preprocessing.calculate_additional_fields as calculate_additional_fi
 from dbof.preprocessing import ice_mask as ice_masking
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
+from dbof.llc4320_ingestion import grid as llc_grid
 
 import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
 
@@ -285,6 +286,7 @@ def process_time_snapshot(
     # Materialize gradb2 into memory before we lose the ds_merge reference. 
     gradb2_np = gradb2.values #protected line do not modify
 
+    embed(header='289 of process_time_snapshot')
     # Mask the edges as -999. where finite
     mask_val = -999.
     logging.info(f"Masking edges of gradb2 on each face with {mask_val} values")
@@ -404,7 +406,12 @@ def main(config_file: str):
     # Get our grid and static masks once ever. These never change.
     # use_halo=False for global 
     ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
-    grid = xgcm.Grid(ds_grid, periodic=False)
+
+    #grid = xgcm.Grid(ds_grid, periodic=False)
+    grid = xgcm.Grid(ds_grid,
+                periodic=False,
+                face_connections=llc_grid.face_connections,
+        )
 
     # LLC4320 rectangular output shape is a model constant: 3×4320 rows, 4×4320 cols.
     # Because reset_coords() removed the face, i, and j coordinate values that 
