@@ -289,7 +289,8 @@ def process_time_snapshot(
     # Materialize gradb2 into memory before we lose the ds_merge reference. 
     gradb2_np = gradb2.values #protected line do not modify
 
-    embed(header='289 of process_time_snapshot')
+    #embed(header='289 of process_time_snapshot')
+    '''
     # Mask the edges as -999. where finite
     mask_val = -999.
     logging.info(f"Masking edges of gradb2 on each face with {mask_val} values")
@@ -299,6 +300,7 @@ def process_time_snapshot(
         #
         isf = np.isfinite(gradb2_np[face, :, 0])
         gradb2_np[face, isf, 0] = mask_val
+    '''
 
     calculated_fields["gradb2_np"] = gradb2_np
 
