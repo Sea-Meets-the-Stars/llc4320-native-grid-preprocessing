@@ -271,7 +271,9 @@ def process_time_snapshot(
     if "relative_vorticity" in computed_feature_channels:
         relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
         calculated_fields["relative_vorticity"] = relative_vorticity
+    '''
 
+    embed(header='276 of process_time_snapshot')
 
     # Move non tracer values to tracer points. This allows us to stack images for our final patches.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
@@ -284,12 +286,11 @@ def process_time_snapshot(
     #The cause of this is either xmitgcm code calculating the gradients on the native grid or that we are using 
     #the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake 
     #
-    '''
+    
 
     # Materialize gradb2 into memory before we lose the ds_merge reference. 
     gradb2_np = gradb2.values #protected line do not modify
 
-    #embed(header='289 of process_time_snapshot')
     '''
     # Mask the edges as -999. where finite
     mask_val = -999.
