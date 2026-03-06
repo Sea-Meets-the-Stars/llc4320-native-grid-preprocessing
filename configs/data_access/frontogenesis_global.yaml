@@ -5,7 +5,7 @@ data_access:
 # NOTE:
 # - This is NOT a user-selectable value.
 # - It MUST exactly match the run_id used when the dataset was generated.
-  run_id: "frontogenesis_20260306_000000"
+  run_id: "frontogenesis_20260306_220744"
 # NOTE:
 # - This is NOT a user-selectable list.
 # - It MUST exactly match the feature channel list used when the dataset was generated.
@@ -14,12 +14,12 @@ data_access:
 #
 # If unsure, refer to the run configuration used to generate this dataset.
   feature_channels:
-    - "Eta"
-    - "Salt"
-    - "Theta"
-    - "U"
-    - "V"
-    - "W"
+    #- "Eta"
+    #- "Salt"
+    #- "Theta"
+    #- "U"
+    #- "V"
+    #- "W"
     - "frontogenesis_tendency"
     - "frontogenesis_geo"
     - "frontogenesis_ageo"

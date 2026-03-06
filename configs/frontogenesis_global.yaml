@@ -27,12 +27,12 @@ output:
 
 features:
   model_data_feature_channels:
-    - Eta
-    - Salt
-    - Theta
-    - U
-    - V
-    - W
+  #  - Eta
+  #  - Salt
+  #  - Theta
+  #  - U
+  #  - V
+  #  - W
   compute_features_channels:
     - frontogenesis_tendency
     - frontogenesis_geo

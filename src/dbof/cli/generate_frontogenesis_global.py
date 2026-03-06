@@ -27,6 +27,7 @@ import dbof.preprocessing.calculate_additional_fields as calculate_additional_fi
 from dbof.preprocessing import ice_mask as ice_masking
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
+from dbof.llc4320_ingestion import grid as llc_grid
 
 import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
 import dbof.dataset_creation.config as config
@@ -167,11 +168,11 @@ def process_time_snapshot(
     # NOTE The ordering of the following steps matters
 
     # --- Calculate Ice Mask ---
-    logging.info(f"Calculating ice mask")
+    #logging.info(f"Calculating ice mask")
     #ice_mask = ~(ds_merge.Theta <= 0.0)
-    ice_mask = ice_masking.mask_by_theta(ds_merge)
-    ice_mask_np = ice_mask.values
-    merged_mask = ice_mask_np & land_mask
+    #ice_mask = ice_masking.mask_by_theta(ds_merge)
+    #ice_mask_np = ice_mask.values
+    #merged_mask = ice_mask_np & land_mask
 
     # --- Calculated Fields ---
     calculated_fields = {}
@@ -189,13 +190,11 @@ def process_time_snapshot(
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
 
-    '''
-    Here we compute the calculated gradients into memory before creating our patches.
-    While this is arguably inefficient if we do not do this our Dask graph splits and we will run into difficult errors
-    or warnings to fix.
-    The cause of this is either xmitgcm code calculating the gradients on the native grid or that we are using
-    the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake
-    '''
+    #Here we compute the calculated gradients into memory before creating our patches.
+    #While this is arguably inefficient if we do not do this our Dask graph splits and we will run into difficult errors
+    #or warnings to fix.
+    #The cause of this is either xmitgcm code calculating the gradients on the native grid or that we are using
+    #the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake
 
     # Materialize gradb2 into memory before we lose the ds_merge reference.
     gradb2_np = gradb2.values #protected line do not modify
@@ -263,8 +262,8 @@ def process_time_snapshot(
     grid = None
     del grid
 
-    merged_mask = None
-    del merged_mask
+    #merged_mask = None
+    #del merged_mask
 
 
 def main(config_file: str = None, run_id: str = None):
@@ -328,7 +327,7 @@ def main(config_file: str = None, run_id: str = None):
     # the code cannot infer the output grid size from the dataset and
     # instead we hardcode the known LLC4320 rectangular shape (3×4320 by 4×4320).
     rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
-    logging.info(f"LLC rectangular output shape: {rectangular_shape}")
+    grid = llc_grid.set_xgcm_grid(ds_grid, use_connections=True)
 
     # Construct GlobalZarrDataset.
     zarr_ds = zarr_dataset.GlobalZarrDataset(
