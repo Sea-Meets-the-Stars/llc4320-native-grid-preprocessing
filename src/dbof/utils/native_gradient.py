@@ -1,5 +1,3 @@
-
-
 def calculate_jacobian(u_x, v_y, ds_merge, grid):
     """
        Compute zonal and meridional spatial derivatives of horizontal velocity components on a curvilinear grid.
