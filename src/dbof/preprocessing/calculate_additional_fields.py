@@ -282,11 +282,8 @@ def all_velocity_properties(ds_merge, grid):
     Compute all velocity-derived properties from a single Jacobian pass.
 
     Computes the Jacobian once and derives relative vorticity, strain (normal,
-    shear, magnitude), divergence, Coriolis parameter, Rossby number, the
-    Okubo-Weiss parameter, and the kinematic frontogenesis tendency from the
-    same four gradient components. Frontogenesis additionally requires the
-    buoyancy gradient (from Theta and Salt), but shares the velocity Jacobian
-    rather than recomputing it.
+    shear, magnitude), divergence, Coriolis parameter, Rossby number, and the
+    Okubo-Weiss parameter from the same four gradient components. 
 
     Note: the arithmetic in this function intentionally duplicates that in the
     individual functions (relative_vorticity, strain, etc.) to ensure the
@@ -297,8 +294,7 @@ def all_velocity_properties(ds_merge, grid):
     ----------
     ds_merge : xarray.Dataset
         Dataset containing U, V on the model grid, grid metrics, rotation
-        coefficients ('CS', 'SN'), latitude ('YC'), and tracer fields
-        ('Theta', 'Salt') required for frontogenesis.
+        coefficients ('CS', 'SN'), latitude ('YC').
     grid : xgcm.Grid
         Grid object relating to ds_merge.
 
@@ -307,8 +303,6 @@ def all_velocity_properties(ds_merge, grid):
     dict of str -> xarray.DataArray
         Keys: 'relative_vorticity', 'strain_n', 'strain_s', 'strain_mag',
               'divergence', 'coriolis_f', 'rossby_number', 'okubo_weiss',
-              'frontogenesis_tendency', 'ug', 'vg',
-              'frontogenesis_geo', 'frontogenesis_ageo'
     """
     u_x = ds_merge.U.copy(deep=True)
     v_y = ds_merge.V.copy(deep=True)
@@ -326,6 +320,51 @@ def all_velocity_properties(ds_merge, grid):
     coriolis_f  = 2.0 * omega_earth * np.sin(np.deg2rad(ds_merge['YC']))
     rossby_no   = omega / coriolis_f
     okubo_weiss = strain_n**2 + strain_s**2 - omega**2
+
+    return {
+        'relative_vorticity':     omega,
+        'strain_n':               strain_n,
+        'strain_s':               strain_s,
+        'strain_mag':             strain_mag,
+        'divergence':             divergence,
+        'coriolis_f':             coriolis_f,
+        'rossby_number':          rossby_no,
+        'okubo_weiss':            okubo_weiss,
+    }
+
+def all_frontogenesis_properties(ds_merge, grid):
+    """
+    Compute all frontogenesis properties from a single Jacobian pass.
+
+    Computes the Jacobian once and derives the kinematic frontogenesis tendency from the
+    same four gradient components. Frontogenesis additionally requires the
+    buoyancy gradient (from Theta and Salt), but shares the velocity Jacobian
+    rather than recomputing it.
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Dataset containing U, V on the model grid, grid metrics, rotation
+        coefficients ('CS', 'SN'), latitude ('YC'), and tracer fields
+        ('Theta', 'Salt') required for frontogenesis.
+    grid : xgcm.Grid
+        Grid object relating to ds_merge.
+
+    Returns
+    -------
+    dict of str -> xarray.DataArray
+        Keys: 'frontogenesis_tendency', 'ug', 'vg',
+              'frontogenesis_geo', 'frontogenesis_ageo'
+    """
+    u_x = ds_merge.U.copy(deep=True)
+    v_y = ds_merge.V.copy(deep=True)
+
+    du_lambda_dlambda, du_lambda_dphi, dv_phi_dlambda, dv_phi_dphi = (
+        ng.calculate_jacobian(u_x, v_y, ds_merge, grid))
+
+    omega_earth = 7.292115e-5  # rad/s ; Earth's rotation rate
+    coriolis_f  = 2.0 * omega_earth * np.sin(np.deg2rad(ds_merge['YC']))
+
 
     # Buoyancy gradients — shared by full and geostrophic frontogenesis.
     buoyancy = physical_calculations.buoyancy_of_field(ds_merge) * 1e3
@@ -369,14 +408,6 @@ def all_velocity_properties(ds_merge, grid):
     frontogenesis_ageo = frontogenesis_tendency - frontogenesis_geo
 
     return {
-        'relative_vorticity':     omega,
-        'strain_n':               strain_n,
-        'strain_s':               strain_s,
-        'strain_mag':             strain_mag,
-        'divergence':             divergence,
-        'coriolis_f':             coriolis_f,
-        'rossby_number':          rossby_no,
-        'okubo_weiss':            okubo_weiss,
         'frontogenesis_tendency': frontogenesis_tendency,
         'frontogenesis_geo':      frontogenesis_geo,
         'frontogenesis_ageo':     frontogenesis_ageo,

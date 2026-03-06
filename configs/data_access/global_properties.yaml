@@ -5,7 +5,7 @@ data_access:
 # NOTE:
 # - This is NOT a user-selectable value.
 # - It MUST exactly match the run_id used when the dataset was generated.
-  run_id: "global_properties_20260305_194647"
+  run_id: "global_properties_20260306_044400"
 # NOTE:
 # - This is NOT a user-selectable list.
 # - It MUST exactly match the feature channel list used when the dataset was generated.
@@ -28,11 +28,6 @@ data_access:
     - "coriolis_f"
     - "rossby_number"
     - "okubo_weiss"
-    - "frontogenesis_tendency"
-    - "frontogenesis_geo"
-    - "frontogenesis_ageo"
-    - "ug"
-    - "vg"
     - "gradb2"
 
 # Grid Zarr store written by generate_grid_global.py.

@@ -42,11 +42,7 @@ features:
     - coriolis_f
     - rossby_number
     - okubo_weiss
-    - frontogenesis_tendency
-    - frontogenesis_geo
-    - frontogenesis_ageo
-    - ug
-    - vg
+
     # gradb2 is always computed and appended automatically
 
 runtime:
