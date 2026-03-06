@@ -1,4 +1,4 @@
-
+from IPython import embed
 
 def calculate_jacobian(u_x, v_y, ds_merge, grid):
     """
@@ -27,6 +27,7 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
        dv_phi_dphi : xarray.DataArray
            Meridional derivative of the meridional velocity component.
        """
+    embed(header='29 of calculate_jacobian')
     # Move the values to tracer position
     vec_u_to_ij = grid.interp(u_x, 'X', boundary='fill')
     vec_v_to_ij = grid.interp(v_y, 'Y', boundary='fill')
