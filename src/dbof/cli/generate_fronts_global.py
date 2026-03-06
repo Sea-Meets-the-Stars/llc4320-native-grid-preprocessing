@@ -421,6 +421,7 @@ def main(config_file: str):
     ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
 
     #grid = xgcm.Grid(ds_grid, periodic=False)
+    embed(header='424 of main')
     grid = xgcm.Grid(ds_grid,
                 periodic=False,
                 face_connections=llc_grid.face_connections,
