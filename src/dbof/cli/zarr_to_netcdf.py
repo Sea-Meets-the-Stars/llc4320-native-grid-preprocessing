@@ -62,11 +62,11 @@ Usage — snapshots
     --s3-endpoint https://s3-west.nrp-nautilus.io \
     --bucket dbof \
     --folder native_grid_dbof_training_data \
-    --run-id year_1xglobal_20260226_043824 \
-    --dates 09112012-12:00:00 \
-    --channel log_gradb \
-    --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/DBOF_v1_test \
-    --output-filename LLC4320_2012-11-09T12_00_00_Divb2.nc
+    --run-id global_properties_20260306_174221 \
+    --dates 11092012-12:00:00 \
+    --channel okubo_weiss \
+    --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/ \
+    --output-filename LLC4320_2012-11-09T12_00_00_okubo_weiss_v1.nc
 
   Optional: convert only specific timesteps:
       --iterations 184320 328320
@@ -146,6 +146,7 @@ def zarr_to_netcdf(
     target_indices: list = None,    # list of t-axis indices, or None for all
     output_filename: str = None,    # override auto-generated name (single timestep)
     channels: list = None,          # subset of channel names to save; None = all
+    fs=None,                        # reuse an existing s3fs filesystem; created if None
 ) -> None:
     """
     Convert a GlobalZarrDataset on S3 to per-timestep NetCDF files locally.
@@ -191,13 +192,14 @@ def zarr_to_netcdf(
     # ------------------------------------------------------------------
     store_path = f"s3://{bucket.strip('/')}/{folder.strip('/')}/{run_id}/{dataset_name}"
     logging.info(f"Opening snapshot Zarr store: {store_path}")
-    _, fs_synch = create_s3_filesystems(s3_endpoint)
+    if fs is None:
+        _, fs = create_s3_filesystems(s3_endpoint)
     reader = zarr_dataset_global.GlobalZarrDatasetReader(
         bucket=bucket,
         folder=folder,
         run_id=run_id,
         dataset_name=dataset_name,
-        fs=fs_synch,
+        fs=fs,
     )
 
     n_total = len(reader)
@@ -405,7 +407,7 @@ def grid_zarr_to_netcdf(
 # ---------------------------------------------------------------------------
 
 def main(
-    output_dir: str,
+    output_dir: str = None,
     output_filename: str = None,
     mode: str = 'snapshots',
     s3_endpoint: str = 'https://s3-west.nrp-nautilus.io',
@@ -453,6 +455,49 @@ def main(
     grid_output_filename : str
         [grid] Output NetCDF filename (default: 'llc4320_grid.nc').
     """
+    if output_dir is None:
+        p = argparse.ArgumentParser(
+            description=(
+                "Convert S3 Zarr global LLC4320 stores to NetCDF.\n\n"
+                "  --mode snapshots  Convert per-timestep snapshot data to per-file NetCDF.\n"
+                "  --mode grid       Convert the static grid Zarr to a single NetCDF."
+            ),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+        )
+        p.add_argument('--mode', choices=['snapshots', 'grid'], default='snapshots')
+        p.add_argument('--s3-endpoint', required=True)
+        p.add_argument('--bucket', required=True)
+        p.add_argument('--folder', required=True)
+        p.add_argument('--output-dir', required=True)
+        p.add_argument('--run-id')
+        p.add_argument('--dataset-name', default='properties.zarr')
+        sel = p.add_mutually_exclusive_group()
+        sel.add_argument('--indices', nargs='+', type=int, metavar='T')
+        sel.add_argument('--iterations', nargs='+', type=int, metavar='IT')
+        sel.add_argument('--dates', nargs='+', metavar='DDMMYYYY-HH:MM:SS')
+        p.add_argument('--output-filename')
+        p.add_argument('--channel', nargs='+', metavar='NAME', dest='channels')
+        p.add_argument('--channels', nargs='+', metavar='NAME')
+        p.add_argument('--grid-dataset-name', default='llc4320_grid.zarr')
+        p.add_argument('--grid-output-filename', default='llc4320_grid.nc')
+        args = p.parse_args()
+        if args.mode == 'snapshots' and not args.run_id:
+            p.error("--run-id is required when --mode snapshots")
+        output_dir          = args.output_dir
+        output_filename     = args.output_filename
+        mode                = args.mode
+        s3_endpoint         = args.s3_endpoint
+        bucket              = args.bucket
+        folder              = args.folder
+        run_id              = args.run_id
+        dataset_name        = args.dataset_name
+        indices             = args.indices
+        iterations          = args.iterations
+        dates               = args.dates
+        channels            = args.channels or getattr(args, 'channel', None)
+        grid_dataset_name   = args.grid_dataset_name
+        grid_output_filename = args.grid_output_filename
+
     if mode == 'grid':
         grid_zarr_to_netcdf(
             s3_endpoint=s3_endpoint,
@@ -469,8 +514,12 @@ def main(
 
         target_indices = None
 
+        # Create the filesystem once here and reuse it for both date resolution
+        # and the actual data read, avoiding the asyncio "different loop" error
+        # that occurs when two s3fs sessions are created in the same process.
+        _, fs_synch = create_s3_filesystems(s3_endpoint)
+
         if iterations is not None or dates is not None:
-            _, fs_synch = create_s3_filesystems(s3_endpoint)
             reader = zarr_dataset_global.GlobalZarrDatasetReader(
                 bucket=bucket,
                 folder=folder,
@@ -496,6 +545,7 @@ def main(
             target_indices=target_indices,
             output_filename=output_filename,
             channels=channels,
+            fs=fs_synch,
         )
 
 
