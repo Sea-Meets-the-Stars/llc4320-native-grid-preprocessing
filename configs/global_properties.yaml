@@ -35,13 +35,13 @@ features:
     - W
   compute_features_channels:
     - relative_vorticity
-    - strain_n
-    - strain_s
-    - strain_mag
-    - divergence
-    - coriolis_f
-    - rossby_number
-    - okubo_weiss
+    #- strain_n
+    #- strain_s
+    #- strain_mag
+    #- divergence
+    #- coriolis_f
+    #- rossby_number
+    #- okubo_weiss
 
     # gradb2 is always computed and appended automatically
 

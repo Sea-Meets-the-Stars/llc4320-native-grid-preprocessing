@@ -27,6 +27,7 @@ import dbof.preprocessing.calculate_additional_fields as calculate_additional_fi
 from dbof.preprocessing import ice_mask as ice_masking
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
+from dbof.llc4320_ingestion import grid as llc_grid
 
 import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
 import dbof.dataset_creation.config as config
@@ -167,11 +168,11 @@ def process_time_snapshot(
     # NOTE The ordering of the following steps matters
 
     # --- Calculate Ice Mask ---
-    logging.info(f"Calculating ice mask")
+    #logging.info(f"Calculating ice mask")
     #ice_mask = ~(ds_merge.Theta <= 0.0)
-    ice_mask = ice_masking.mask_by_theta(ds_merge)
-    ice_mask_np = ice_mask.values
-    merged_mask = ice_mask_np & land_mask
+    #ice_mask = ice_masking.mask_by_theta(ds_merge)
+    #ice_mask_np = ice_mask.values
+    #merged_mask = ice_mask_np & land_mask
 
     # --- Calculated Fields ---
     calculated_fields = {}
@@ -179,37 +180,30 @@ def process_time_snapshot(
     # This must be included for the front finding
     gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
 
+    if "relative_vorticity" in computed_feature_channels:
+        relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
+        calculated_fields["relative_vorticity"] = relative_vorticity
+        
     # Compute all velocity-derived properties from a single Jacobian pass
-    velocity_props = calculate_additional_fields.all_velocity_properties(ds_merge, grid)
-    for name, field in velocity_props.items():
-        if name in computed_feature_channels:
-            calculated_fields[name] = field
+    #velocity_props = calculate_additional_fields.all_velocity_properties(ds_merge, grid)
+    #for name, field in velocity_props.items():
+    #    if name in computed_feature_channels:
+    #        calculated_fields[name] = field
 
     # Move non tracer values to tracer points. This allows us to stack images for our final patches.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
 
-    '''
-    Here we compute the calculated gradients into memory before creating our patches.
-    While this is arguably inefficient if we do not do this our Dask graph splits and we will run into difficult errors
-    or warnings to fix.
-    The cause of this is either xmitgcm code calculating the gradients on the native grid or that we are using
-    the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake
-    '''
+
+    #Here we compute the calculated gradients into memory before creating our patches.
+    #While this is arguably inefficient if we do not do this our Dask graph splits and we will run into difficult errors
+    #or warnings to fix.
+    #The cause of this is either xmitgcm code calculating the gradients on the native grid or that we are using
+    #the gradient in our sampling logic. I believe it is the first but I am not sure yet. - Jake
+    
 
     # Materialize gradb2 into memory before we lose the ds_merge reference.
     gradb2_np = gradb2.values #protected line do not modify
-
-    # Mask the edges as -999. where finite
-    mask_val = -999.
-    logging.info(f"Masking edges of gradb2 on each face with {mask_val} values")
-    for face in range(gradb2_np.shape[0]):
-        isf = np.isfinite(gradb2_np[face, 0, :])
-        gradb2_np[face, 0, isf] = mask_val
-        #
-        isf = np.isfinite(gradb2_np[face, :, 0])
-        gradb2_np[face, isf, 0] = mask_val
-
     calculated_fields["gradb2_np"] = gradb2_np
 
 
@@ -263,8 +257,8 @@ def process_time_snapshot(
     grid = None
     del grid
 
-    merged_mask = None
-    del merged_mask
+    #merged_mask = None
+    #del merged_mask
 
 
 def main(config_file: str = None, run_id: str = None):
@@ -320,7 +314,7 @@ def main(config_file: str = None, run_id: str = None):
     # Get our grid and static masks once ever. These never change.
     # use_halo=False for global
     ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
-    grid = xgcm.Grid(ds_grid, periodic=False)
+    grid = llc_grid.set_xgcm_grid(ds_grid, use_connections=True)
 
     # LLC4320 rectangular output shape is a model constant: 3×4320 rows, 4×4320 cols.
     # Because reset_coords() removed the face, i, and j coordinate values that

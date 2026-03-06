@@ -107,7 +107,7 @@ def generate_grid_zarr(
     osn_endpoint: str = DEFAULT_OSN_ENDPOINT,
 ) -> None:
     """
-    Load the LLC4320 grid, convert to rectangular lat/lon, and write to S3 Zarr.
+    Load the LLC4320 grid, convert to 2D lat/lon, and write to S3 Zarr.
 
     Parameters
     ----------
@@ -153,7 +153,7 @@ def generate_grid_zarr(
         logging.info("hFacC has k dimension; selecting surface level k=0")
 
     # ------------------------------------------------------------------
-    # 3. Convert each staggered-grid group to rectangular lat/lon
+    # 3. Convert each staggered-grid group to lat/lon
     # ------------------------------------------------------------------
     logging.info("Converting T-grid variables (XC, YC, rA, Depth, SN, CS)...")
     ds_t = _convert_group(co, _T_GRID_VARS)
