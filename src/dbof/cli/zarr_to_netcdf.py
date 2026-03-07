@@ -52,7 +52,7 @@ Usage — snapshots
     --bucket dbof \
     --folder native_grid_dbof_training_data \
     --run-id year_1xglobal_20260226_043824 \
-    --dates 09112012-12:00:00 \
+    --dates '2012-11-09 12:00:00' \
     --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/DBOF_v1_test \
     --output-filename LLC4320_2012-11-09T12_00_00_props.nc
 
@@ -63,14 +63,14 @@ Usage — snapshots
     --bucket dbof \
     --folder native_grid_dbof_training_data \
     --run-id global_properties_20260306_174221 \
-    --dates 11092012-12:00:00 \
+    --dates '2012-11-09 12:00:00' \
     --channel okubo_weiss \
     --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/ \
     --output-filename LLC4320_2012-11-09T12_00_00_okubo_weiss_v1.nc
 
   Optional: convert only specific timesteps:
       --iterations 184320 328320
-      --dates 01012012-00:00:00 01042012-00:00:00
+      --dates '2012-01-01 00:00:00' '2012-04-01 00:00:00'
       --indices 0 2
 
 Usage — grid
@@ -105,21 +105,22 @@ from dbof.io.filesystems import create_s3_filesystems
 import dbof.dataset_creation.zarr_dataset_global as zarr_dataset_global
 import dbof.dataset_creation.zarr_grid_global as zarr_grid_global
 
-# LLC4320 calendar constants (same as generate_fronts_global.py)
+# LLC4320 calendar constants (same as _generate_global_base.py)
 LLC4320_START_DATE    = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
 LLC4320_TIMESTEP_SECS = 25
-DATE_FMT              = '%d%m%Y-%H:%M:%S'
+# ISO 8601-style format: 'YYYY-MM-DD HH:MM:SS'  (e.g. '2012-09-11 12:00:00')
+DATE_FMT              = '%Y-%m-%d %H:%M:%S'
 
 
 def _date_to_iteration(date_str: str) -> int:
-    """Convert 'DDMMYYYY-HH:MM:SS' → LLC4320 iteration number."""
+    """Convert 'YYYY-MM-DD HH:MM:SS' → LLC4320 iteration number."""
     dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
     delta = dt - LLC4320_START_DATE
     if delta.total_seconds() < 0:
         raise ValueError(
             f"Date '{date_str}' is before LLC4320 start "
             f"({LLC4320_START_DATE.date()}). "
-            "Expected format: DDMMYYYY-HH:MM:SS, e.g. '01012012-00:00:00'."
+            "Expected format: YYYY-MM-DD HH:MM:SS, e.g. '2012-01-01 00:00:00'."
         )
     return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
 
@@ -445,7 +446,7 @@ def main(
     iterations : list of int, optional
         [snapshots] LLC4320 iteration numbers to convert.
     dates : list of str, optional
-        [snapshots] Model dates in 'DDMMYYYY-HH:MM:SS' format.
+        [snapshots] Model dates in 'YYYY-MM-DD HH:MM:SS' ISO format.
     output_filename : str, optional
         [snapshots] Override auto-generated output filename (single timestep only).
     channel : list of str, optional
@@ -474,7 +475,7 @@ def main(
         sel = p.add_mutually_exclusive_group()
         sel.add_argument('--indices', nargs='+', type=int, metavar='T')
         sel.add_argument('--iterations', nargs='+', type=int, metavar='IT')
-        sel.add_argument('--dates', nargs='+', metavar='DDMMYYYY-HH:MM:SS')
+        sel.add_argument('--dates', nargs='+', metavar='YYYY-MM-DD HH:MM:SS')
         p.add_argument('--output-filename')
         p.add_argument('--channel', nargs='+', metavar='NAME', dest='channels')
         p.add_argument('--channels', nargs='+', metavar='NAME')
@@ -588,8 +589,8 @@ if __name__ == '__main__':
                      help="[snapshots] t-axis indices to convert (0-based). Default: all.")
     sel.add_argument('--iterations', nargs='+', type=int, metavar='IT',
                      help="[snapshots] LLC4320 iteration numbers to convert.")
-    sel.add_argument('--dates', nargs='+', metavar='DDMMYYYY-HH:MM:SS',
-                     help="[snapshots] Model dates to convert, e.g. 01012012-00:00:00")
+    sel.add_argument('--dates', nargs='+', metavar='YYYY-MM-DD HH:MM:SS',
+                     help="[snapshots] Model dates in ISO format, e.g. '2012-01-01 00:00:00'")
 
     p.add_argument('--output-filename',
                    help=("[snapshots] Override the auto-generated output filename "
