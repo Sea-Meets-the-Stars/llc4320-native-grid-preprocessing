@@ -62,11 +62,11 @@ Usage — snapshots
     --s3-endpoint https://s3-west.nrp-nautilus.io \
     --bucket dbof \
     --folder native_grid_dbof_training_data \
-    --run-id global_properties_20260306_174221 \
+    --run-id global_properties_20260307_003609 \
     --dates '2012-11-09 12:00:00' \
-    --channel okubo_weiss \
+    --channel W \
     --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived/ \
-    --output-filename LLC4320_2012-11-09T12_00_00_okubo_weiss_v1.nc
+    --output-filename LLC4320_2012-11-09T12_00_00_W_v1.nc
 
   Optional: convert only specific timesteps:
       --iterations 184320 328320
