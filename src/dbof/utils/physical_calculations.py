@@ -58,3 +58,39 @@ def buoyancy_of_field(ds):
     buoyancy = buoyancy.persist()
 
     return buoyancy
+
+def density_of_field(ds):
+    """Compute surface density from potential temperature and salinity.
+
+    Uses the JMD95 equation of state to compute in-situ density at the
+    surface (p=0).
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset containing 'Theta' (potential temperature in deg C) and
+        'Salt' (salinity in PSU) variables with dimensions (face, j, i).
+
+    Returns
+    -------
+    xarray.DataArray
+        Surface density field [kg/m^3] with dask
+        backing, persisted into memory.
+    """
+    
+    # chunk data
+    ds = ds.chunk({'face': 1, 'j': 720, 'i': 720})
+    p = xr.zeros_like(ds.Theta)  # surface pressure
+
+    rho = xr.apply_ufunc(
+        jmd95.jmd95,
+        ds.Salt,
+        ds.Theta,
+        p,
+        dask="parallelized",
+        output_dtypes=[float],
+    )
+
+    rho = rho.persist()
+
+    return rho

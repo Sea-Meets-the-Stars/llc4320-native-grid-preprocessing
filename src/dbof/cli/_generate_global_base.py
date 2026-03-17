@@ -247,26 +247,25 @@ def process_time_snapshot(
 
     # Materialise gradb2 into memory before we lose the ds_merge reference.
     # This must remain a plain .values call — do not modify.
-    gradb2_np = gradb2.values  # protected line do not modify
-    calculated_fields["gradb2_np"] = gradb2_np
+    #gradb2_np = gradb2.values  # protected line do not modify
+    #calculated_fields["gradb2_np"] = gradb2_np
 
     # --- Stitch LLC faces (face, j, i) → 2D lat/lon (lat, lon) ---
     #
     # Wrap the materialised gradb2 back as a DataArray so it can be passed to
     # faces_dataset_to_latlon alongside the other xarray variables.
-    gradb2_da = xr.DataArray(
-        gradb2_np,
-        dims=ds_merge['Theta'].dims,
-        coords=ds_merge['Theta'].coords,
-        name='gradb2',
-    )
+    #gradb2_da = xr.DataArray(
+    #    gradb2_np,
+    #    dims=ds_merge['Theta'].dims,
+    #    coords=ds_merge['Theta'].coords,
+    #    name='gradb2',
+    #)
 
     # Assemble all channels into a single Dataset for a single conversion pass.
-    channels_to_convert = model_feature_channels + computed_feature_channels + ['gradb2']
+    channels_to_convert = model_feature_channels + computed_feature_channels #+ ['gradb2']
     update_vars = (
         {ch: ds_merge[ch] for ch in model_feature_channels}
         | {ch: calculated_fields[ch] for ch in computed_feature_channels}
-        | {'gradb2': gradb2_da}
     )
     ds_to_convert = ds.assign(update_vars)[channels_to_convert]
 
@@ -282,6 +281,7 @@ def process_time_snapshot(
     )
 
     # Extract channels in a consistent order and stack into (C, H, W).
+    logging.info("Extracting channels and stacking into (C, H, W) format")
     channel_arrays = [ds_rect[ch].values for ch in channels_to_convert]
     data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
 
@@ -304,6 +304,7 @@ def run_global_pipeline(
     config_file: str = None,
     run_id: str = None,
     compute_fields_fn = None,
+    cfg: config.JobConfig = None,
 ) -> None:
     """
     Main orchestration loop shared by all global generate scripts.
@@ -311,21 +312,28 @@ def run_global_pipeline(
     Parameters
     ----------
     config_file : str, optional
-        Path to the YAML config file.  If ``None``, the value is read from
-        ``--config`` on the command line via ``config.parse_args()``.
+        Path to the YAML config file.  If ``None`` and ``cfg`` is also
+        ``None``, the value is read from ``--config`` on the command line
+        via ``config.parse_args()``.  Ignored when ``cfg`` is provided.
     run_id : str, optional
-        Run-id override (takes precedence over the value in the YAML).
+        Run-id override (takes precedence over the value in the YAML or
+        the provided ``cfg``).
         If ``None`` and called from the CLI, ``--run_id`` is used if provided.
     compute_fields_fn : callable
         ``(ds_merge, grid, computed_feature_channels) -> dict``
         Mode-specific field computation.  See ``process_time_snapshot``.
+    cfg : config.JobConfig, optional
+        A fully-constructed ``JobConfig`` object.  When supplied, the
+        ``config_file`` argument is ignored and no YAML file is read.
+        Useful for callers that construct the config in memory (e.g.
+        ``generate_combined_global``) to avoid writing a temporary file.
     """
-    if config_file is None:
-        cli = config.parse_args()
-        config_file = cli.config
-        run_id = run_id or cli.run_id
-
-    cfg = config.load_config(config_file)
+    if cfg is None:
+        if config_file is None:
+            cli = config.parse_args()
+            config_file = cli.config
+            run_id = run_id or cli.run_id
+        cfg = config.load_config(config_file)
 
     # override run_id if supplied by the caller
     if run_id is not None:

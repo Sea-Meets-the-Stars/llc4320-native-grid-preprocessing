@@ -4,6 +4,10 @@ import dbof.utils.native_gradient as ng
 import dask.array as da
 
 
+# ------------------------------------------------------------------------------------
+# ---------------------------- FRONTAL STRUCTURE -------------------------------------
+# ------------------------------------------------------------------------------------ 
+
 def grad_b2(ds_merge, grid):
     """Compute the squared buoyancy gradient magnitude.
 
@@ -59,6 +63,120 @@ def log_grad_b(ds_merge, grid):
     log_gradb = da.log10(gradb2)
 
     return log_gradb
+
+def grad_rho2(ds_merge, grid):
+    """Compute squared surface density gradient from potential temperature and salinity.
+
+    Uses the JMD95 equation of state to compute in-situ density at the
+    surface (p=0).
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Dataset containing 'Theta' (potential temperature in deg C) and
+        'Salt' (salinity in PSU) variables with dimensions (face, j, i).
+
+    Returns
+    -------
+    xarray.DataArray
+        Surface density field [km/s^2] with dask
+        backing, persisted into memory.
+    """
+
+    rho = physical_calculations.density_of_field(ds_merge)
+    
+    zonal_grad_rho, merid_grad_rho = ng.calculate_native_gradient_tracer(rho, ds_merge, grid=grid)
+
+    gradrho2 = physical_calculations.grad_squared(zonal_grad_rho, merid_grad_rho)
+
+    return gradrho2
+
+
+def grad_theta2(ds_merge, grid):
+    """Compute the squared temperature gradient magnitude.
+
+    Computes zonal and meridional gradients on the native LLC grid, 
+    squares and sums them
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Theta', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dask.array.Array
+        squared temperature gradient magnitude.
+        Units are (K/m)^2
+    """
+    theta = ds_merge.Theta.copy(deep=True)
+
+    zonal_grad_theta, merid_grad_theta = ng.calculate_native_gradient_tracer(theta, ds_merge, grid=grid)
+
+    gradtheta2 = physical_calculations.grad_squared(zonal_grad_theta, merid_grad_theta)
+
+    return gradtheta2
+
+def grad_salt2(ds_merge, grid):
+    """Compute the squared salinity gradient magnitude.
+
+    Computes zonal and meridional gradients on the native LLC grid, 
+    squares and sums them
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Theta', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dask.array.Array
+        squared salinity gradient magnitude.
+        Units are (psu/m)^2
+    """
+    salt = ds_merge.Salt.copy(deep=True)
+
+    zonal_grad_salt, merid_grad_salt = ng.calculate_native_gradient_tracer(salt, ds_merge, grid=grid)
+
+    gradsalt2 = physical_calculations.grad_squared(zonal_grad_salt, merid_grad_salt)
+    return gradsalt2
+
+def grad_eta2(ds_merge, grid):
+    """Compute the squared SSH gradient magnitude.
+
+    Computes zonal and meridional gradients on the native LLC grid, 
+    squares and sums them
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Eta', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dask.array.Array
+        squared SSH gradient magnitude.
+        Units are (m/m)^2
+    """
+    eta = ds_merge.Eta.copy(deep=True)
+
+    zonal_grad_eta, merid_grad_eta = ng.calculate_native_gradient_tracer(eta, ds_merge, grid=grid)
+    gradeta2 = physical_calculations.grad_squared(zonal_grad_eta, merid_grad_eta)
+    return gradeta2
+
+
+# ------------------------------------------------------------------------------------
+# --------------------------------- KINEMATIC ----------------------------------------
+# ------------------------------------------------------------------------------------
 
 def relative_vorticity(ds_merge, grid):
     """
@@ -217,6 +335,10 @@ def okubo_weiss_parameter(ds_merge, grid):
 
     return okubo_weiss
 
+
+# ------------------------------------------------------------------------------------
+# ------------------------------ FRONTOGENESIS ---------------------------------------
+# ------------------------------------------------------------------------------------ 
 
 def F_strain(ds_merge, grid):
     """Compute the 2D kinematic frontogenesis tendency.
