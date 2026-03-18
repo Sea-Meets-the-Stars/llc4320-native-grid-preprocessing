@@ -331,7 +331,7 @@ def _compute_native_fields(ds_merge, grid, computed_feature_channels: list) -> d
     """
     Compute callback for the ``native_fields`` subset.
 
-    No derived quantities are computed here — all requested channels are raw
+    No derived quantities are computed here. These are raw
     model state variables specified in ``model_data_feature_channels`` in the
     config.
 
@@ -349,8 +349,7 @@ def _compute_frontal_structure_fields(
     """
     Compute callback for the ``frontal_structure`` subset.
 
-    Computes scalar gradient-magnitude fields that characterise front intensity
-    and water-mass structure.
+    Computes scalar gradient-magnitude fields.
 
     Parameters
     ----------
@@ -412,20 +411,6 @@ def _compute_frontogenesis_fields(
 
     Computes geostrophic velocities and geostrophic/ageostrophic frontogenesis
     via a single pass through ``all_frontogenesis_properties``.
-
-    Dask graph mitigation
-    ---------------------
-    This subset merges two large lazy lineages: the velocity Jacobian and tracer
-    gradients for buoyancy and Eta (needed for ug/vg).  When these lazy arrays
-    are assembled into a single Dataset and written together, the combined task
-    graph can trigger both the large-graph warning and the more serious run_spec
-    scheduler warnings.
-
-    To avoid this, all selected fields are materialised with a *single*
-    ``dask.compute()`` call here.  This allows the Dask scheduler to fuse and
-    optimise the shared subgraph in one round, after which NumPy arrays are
-    returned.  Downstream zarr writes are then completely decoupled from the
-    Dask graph.
 
     Parameters
     ----------
