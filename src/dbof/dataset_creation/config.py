@@ -31,6 +31,7 @@ class OutputConfig:
     target_km_res: int = 150
     down_sample_res: int = 64
 
+#TODO jake fix downstream issues in cutouts logic
 @dataclass(frozen=True)
 class FeaturesConfig:
     model_data_feature_channels: List[str] = None
