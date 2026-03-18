@@ -13,27 +13,17 @@ native_fields
 
 frontal_structure
     Scalar gradient magnitudes that characterise front intensity and water-mass
-    structure: ``gradsalt2``, ``gradtheta2``, ``gradeta2``, ``turner_angle``,
-    plus the always-automatic ``gradb2``.
-    NOTE: the underlying functions (grad_salt2, grad_theta2, grad_eta2,
-    turner_angle) must be present in calculate_additional_fields.py before
-    running this subset.
+    structure: ``gradsalt2``, ``gradtheta2``, ``gradeta2``
 
 kinematic
     Velocity-derived scalar fields computed from a single Jacobian pass:
     ``relative_vorticity``, ``strain_n``, ``strain_s``, ``strain_mag``,
     ``divergence``, ``coriolis_f``, ``rossby_number``, ``okubo_weiss``,
-    plus the always-automatic ``gradb2``.
 
-dynamical
-    Kinematic frontogenesis tendency only (``frontogenesis_tendency``) plus
-    the always-automatic ``gradb2``.  Computing only this one field keeps the
-    Dask task graph as small as possible; see the geostrophic note below.
-
-geostrophic
-    Geostrophic velocities and geostrophic/ageostrophic frontogenesis
-    decomposition: ``ug``, ``vg``, ``frontogenesis_geo``,
-    ``frontogenesis_ageo``, plus the always-automatic ``gradb2``.
+frontogenesis
+    Kinematic frontogenesis tendency and geostrophic components
+    ``frontogenesis_tendency``,``ug``, ``vg``, ``frontogenesis_geo``,
+    ``frontogenesis_ageo``.
 
     *** Dask graph note ***
     This subset internally calls ``all_frontogenesis_properties``, which
@@ -69,16 +59,8 @@ but consumed by this script before the config object is constructed:
         ...
       kinematic:
         ...
-      dynamical:
+      frontogenesis:
         ...
-      geostrophic:
-        ...
-
-The selected subset's ``compute_features_channels``,
-``model_data_feature_channels``, and (optionally) ``dataset_name`` are
-used to build a ``JobConfig`` object in memory, which is passed directly
-to ``run_global_pipeline`` via its ``cfg`` parameter.  No temporary file
-is written.
 
 Date format
 -----------
@@ -106,8 +88,7 @@ def _compute_native_fields(ds_merge, grid, computed_feature_channels: list) -> d
 
     No derived quantities are computed here — all requested channels are raw
     model state variables specified in ``model_data_feature_channels`` in the
-    config.  The always-automatic ``gradb2`` is still added by the base
-    pipeline regardless.
+    config.  
 
     Returns
     -------
@@ -124,8 +105,7 @@ def _compute_frontal_structure_fields(
     Compute callback for the ``frontal_structure`` subset.
 
     Computes scalar gradient-magnitude fields that characterise front intensity
-    and water-mass structure.  ``gradb2`` is handled automatically by the base
-    pipeline and must NOT be returned here.
+    and water-mass structure. 
 
     Parameters
     ----------
@@ -142,7 +122,7 @@ def _compute_frontal_structure_fields(
         "gradsalt2":   calculate_additional_fields.grad_salt2,
         "gradtheta2":  calculate_additional_fields.grad_theta2,
         "gradeta2":    calculate_additional_fields.grad_eta2,
-        "gradb2": calculate_additional_fields.grad_b2,
+        "gradb2":      calculate_additional_fields.grad_b2,
     }
     return {
         name: fn(ds_merge, grid)
@@ -179,38 +159,7 @@ def _compute_kinematic_fields(
     }
 
 
-def _compute_dynamical_fields(
-    ds_merge, grid, computed_feature_channels: list
-) -> dict:
-    """
-    Compute callback for the ``dynamical`` subset.
-
-    Computes only ``frontogenesis_tendency`` via a single pass through
-    ``all_frontogenesis_properties``.  Requesting only this one field keeps
-    the Dask task graph as small as possible — the more complex geostrophic
-    decomposition fields (which require additional tracer gradient lineages)
-    are intentionally excluded to avoid the large run_spec scheduler warnings
-    that appear when multiple frontogenesis-derived fields are written together.
-
-    Parameters
-    ----------
-    ds_merge : xr.Dataset
-    grid : xgcm.Grid
-    computed_feature_channels : list of str
-
-    Returns
-    -------
-    dict
-    """
-    props = calculate_additional_fields.all_frontogenesis_properties(ds_merge, grid)
-    return {
-        name: field
-        for name, field in props.items()
-        if name in computed_feature_channels
-    }
-
-
-def _compute_geostrophic_fields(
+def _compute_frontogenesis_fields(
     ds_merge, grid, computed_feature_channels: list
 ) -> dict:
     """
@@ -270,8 +219,7 @@ SUBSET_COMPUTE_FNS = {
     "native_fields":     _compute_native_fields,
     "frontal_structure": _compute_frontal_structure_fields,
     "kinematic":         _compute_kinematic_fields,
-    "dynamical":         _compute_dynamical_fields,
-    "geostrophic":       _compute_geostrophic_fields,
+    "frontogenesis":         _compute_frontogenesis_fields,
 }
 
 
@@ -373,9 +321,7 @@ def main(config_file: str = None, run_id: str = None, subset: str = None) -> Non
 
     # --- Build JobConfig in memory -------------------------------------------
     # The 'subsets' and 'active_subset' keys are top-level YAML keys that
-    # config.load_config does not know about.  Rather than writing a patched
-    # temporary file, we build the JobConfig directly so that run_global_pipeline
-    # can receive it via its cfg parameter and skip the file-read step entirely.
+    # config.load_config does not know about.  The JobConfig is built directly.
 
     output_dict = {**raw.get("output", {})}
     if "dataset_name" in subset_entry:

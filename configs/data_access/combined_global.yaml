@@ -9,7 +9,7 @@ data_access:
 #   was run.  All subsets from a single session share this run_id and are stored
 #   in the same S3 directory:
 #     s3://{bucket}/{folder}/{run_id}/{subset}.zarr
-  run_id: "combined_test00"
+  run_id: "combined_global_20260317_224620"
 
 # Per-subset zarr names and their channel lists.
 #
@@ -35,7 +35,7 @@ data_access:
         - "U"
         - "V"
         - "W"
-        - "gradb2"
+
 
     frontal_structure:
       dataset_name: "frontal_structure.zarr"
@@ -43,7 +43,6 @@ data_access:
         - "gradsalt2"
         - "gradtheta2"
         - "gradeta2"
-        - "turner_angle"
         - "gradb2"
 
     kinematic:
@@ -57,24 +56,20 @@ data_access:
         - "coriolis_f"
         - "rossby_number"
         - "okubo_weiss"
-        - "gradb2"
 
-    dynamical:
-      dataset_name: "dynamical.zarr"
-      feature_channels:
-        - "frontogenesis_tendency"
-        - "gradb2"
 
-    geostrophic:
-      dataset_name: "geostrophic.zarr"
+    frontogenesis:
+      dataset_name: "frontogenesis.zarr"
       # frontogenesis_geo  = geostrophic frontogenesis tendency
       # frontogenesis_ageo = ageostrophic frontogenesis tendency (residual)
       feature_channels:
+        - "frontogenesis_tendency"
         - "ug"
         - "vg"
         - "frontogenesis_geo"
         - "frontogenesis_ageo"
-        - "gradb2"
+
+
 
 # Grid Zarr store written by generate_grid_global.py.
 # NOTE: The grid is stored WITHOUT a run_id prefix (it is shared across all runs):

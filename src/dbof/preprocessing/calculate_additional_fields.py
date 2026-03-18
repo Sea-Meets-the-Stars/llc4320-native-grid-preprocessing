@@ -335,70 +335,6 @@ def okubo_weiss_parameter(ds_merge, grid):
 
     return okubo_weiss
 
-
-# ------------------------------------------------------------------------------------
-# ------------------------------ FRONTOGENESIS ---------------------------------------
-# ------------------------------------------------------------------------------------ 
-
-def F_strain(ds_merge, grid):
-    """Compute the 2D kinematic frontogenesis tendency.
-
-    Derives surface buoyancy from Theta and Salt, computes zonal and
-    meridional gradients on the native LLC grid
-
-    Computes horizontal velocity gradients, then combines with 
-    buoyancy gradients to compute the kinematic frontogenesis 
-    tendency F_strain = -(du/dx * db/dx^2 + (du/dy + dv/dx)*db/dx*db/dy + dv/dy*db/dy^2)
-
-    Parameters
-    ----------
-    ds_merge : xarray.Dataset
-        Merged dataset containing 'Theta', 'Salt', 'U', 'V', grid metrics
-        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
-    grid : xgcm.Grid
-        Grid object used for differencing and interpolation.
-
-    Returns
-    -------
-    dask.array.Array
-        Frontogenesis tendency field.
-    """
-
-    buoyancy = physical_calculations.buoyancy_of_field(ds_merge)*1e3
-    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
-
-    u_x = ds_merge.U.copy(deep=True)
-    v_y = ds_merge.V.copy(deep=True)
-
-    du_lambda_dlambda, du_lambda_dphi, dv_phi_dlambda, dv_phi_dphi = (
-        ng.calculate_jacobian(u_x, v_y, ds_merge, grid))
-    
-    F_strain = -(du_lambda_dlambda * zonal_grad_b**2 +
-                 (du_lambda_dphi + dv_phi_dlambda) * zonal_grad_b * merid_grad_b +
-                 dv_phi_dphi * merid_grad_b**2)
-
-    return F_strain
-
-
-def _frontogenesis_tendency(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
-    """Kinematic frontogenesis tendency from velocity gradient components.
-
-    F = -(du/dx * bx² + (du/dy + dv/dx) * bx*by + dv/dy * by²)
-
-    Used internally by all_velocity_properties to compute both the full and
-    geostrophic frontogenesis without duplicating the formula.
-
-    Parameters
-    ----------
-    du_dx, du_dy : xarray.DataArray  — ∂u/∂x, ∂u/∂y
-    dv_dx, dv_dy : xarray.DataArray  — ∂v/∂x, ∂v/∂y
-    grad_bx, grad_by : xarray.DataArray  — ∂b/∂x, ∂b/∂y
-    """
-    return -(du_dx * grad_bx**2 +
-             (du_dy + dv_dx) * grad_bx * grad_by +
-             dv_dy * grad_by**2)
-
-
 def all_velocity_properties(ds_merge, grid):
     """
     Compute all velocity-derived properties from a single Jacobian pass.
@@ -454,6 +390,30 @@ def all_velocity_properties(ds_merge, grid):
         'okubo_weiss':            okubo_weiss,
     }
 
+# ------------------------------------------------------------------------------------
+# ------------------------------ FRONTOGENESIS ---------------------------------------
+# ------------------------------------------------------------------------------------ 
+
+def _frontogenesis_tendency(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
+    """Kinematic frontogenesis tendency from velocity gradient components.
+
+    F = -(du/dx * bx² + (du/dy + dv/dx) * bx*by + dv/dy * by²)
+
+    Used internally by all_velocity_properties to compute both the full and
+    geostrophic frontogenesis without duplicating the formula.
+
+    Parameters
+    ----------
+    du_dx, du_dy : xarray.DataArray  — ∂u/∂x, ∂u/∂y
+    dv_dx, dv_dy : xarray.DataArray  — ∂v/∂x, ∂v/∂y
+    grad_bx, grad_by : xarray.DataArray  — ∂b/∂x, ∂b/∂y
+    """
+    return -(du_dx * grad_bx**2 +
+             (du_dy + dv_dx) * grad_bx * grad_by +
+             dv_dy * grad_by**2)
+
+
+#TODO: Lauren edit this, perhaps break it up and move the aggregate part upstream
 def all_frontogenesis_properties(ds_merge, grid):
     """
     Compute all frontogenesis properties from a single Jacobian pass.

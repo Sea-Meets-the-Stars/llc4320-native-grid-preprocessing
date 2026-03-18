@@ -91,7 +91,7 @@ subsets:
       - rossby_number
       - okubo_weiss
 
-  dynamical:
+  frontogenesis:
     # Kinematic frontogenesis tendency only.
     # Deliberately limited to one field to keep the Dask task graph as small
     # as possible.  The geostrophic decomposition fields (which require
@@ -99,37 +99,12 @@ subsets:
     # computing them here alongside frontogenesis_tendency is what triggers
     # the large-graph / run_spec scheduler warnings.
     # Output also includes the automatic gradb2.
-    dataset_name: "dynamical.zarr"
+    dataset_name: "frontogenesis.zarr"
     model_data_feature_channels: []
     compute_features_channels:
       - frontogenesis_tendency
-
-  geostrophic:
-    # Geostrophic velocities and geostrophic / ageostrophic frontogenesis
-    # decomposition.
-    #
-    # *** Dask note ***
-    # This subset merges two large lazy lineages: the velocity Jacobian
-    # (shared with 'dynamical') AND the Eta-gradient lineage required for
-    # ug / vg.  Computing multiple fields from this combined graph together
-    # triggers the large-graph warning and, with enough fields, the more
-    # serious run_spec scheduler warnings.
-    #
-    # Mitigation: the geostrophic callback calls dask.compute() on all
-    # selected fields in a single scheduler submission before returning,
-    # fusing the shared subgraph and returning NumPy arrays.  This decouples
-    # the downstream zarr writes from the Dask graph entirely.
-    # If you still experience issues, try reducing zarr_async_concurrency
-    # in the runtime section above (e.g. to 32 or 64).
-    #
-    # Channel names match the keys returned by all_frontogenesis_properties:
-    #   frontogenesis_geo  = geostrophic frontogenesis tendency
-    #   frontogenesis_ageo = ageostrophic frontogenesis tendency (residual)
-    # Output also includes the automatic gradb2.
-    dataset_name: "geostrophic.zarr"
-    model_data_feature_channels: []
-    compute_features_channels:
       - ug
       - vg
       - frontogenesis_geo
       - frontogenesis_ageo
+

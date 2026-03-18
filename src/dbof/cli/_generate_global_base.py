@@ -216,7 +216,6 @@ def process_time_snapshot(
         Raw model fields to include in the output (e.g. ``['Theta', 'Salt']``).
     computed_feature_channels :
         Names of mode-specific derived fields (e.g. ``['relative_vorticity']``).
-        ``'gradb2'`` is always appended automatically and must NOT appear here.
     it : int
         LLC4320 iteration number (used only for logging).
     compute_fields_fn : callable
@@ -227,16 +226,11 @@ def process_time_snapshot(
     Notes
     -----
     The ordering of operations inside this function matters:
-    1. ``gradb2`` is computed first (needs staggered U/V).
-    2. ``compute_fields_fn`` is called (may also need staggered U/V).
-    3. U and V are interpolated to tracer points.
-    4. ``gradb2`` is materialised into a NumPy array.
-    5. All channels are stitched face→latlon and written to zarr.
+    1. ``compute_fields_fn`` is called (may also need staggered U/V).
+    2. U and V are interpolated to tracer points.
+    3. All channels are stitched face→latlon and written to zarr.
     """
     
-    # gradb2 must always be computed (used for front finding)
-    gradb2 = calculate_additional_fields.grad_b2(ds_merge, grid)
-
     # --- Computed (mode-specific) fields ---
     calculated_fields = compute_fields_fn(ds_merge, grid, computed_feature_channels)
 
@@ -244,22 +238,6 @@ def process_time_snapshot(
     # (face, j, i) grid before the face→latlon stitch.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
-
-    # Materialise gradb2 into memory before we lose the ds_merge reference.
-    # This must remain a plain .values call — do not modify.
-    #gradb2_np = gradb2.values  # protected line do not modify
-    #calculated_fields["gradb2_np"] = gradb2_np
-
-    # --- Stitch LLC faces (face, j, i) → 2D lat/lon (lat, lon) ---
-    #
-    # Wrap the materialised gradb2 back as a DataArray so it can be passed to
-    # faces_dataset_to_latlon alongside the other xarray variables.
-    #gradb2_da = xr.DataArray(
-    #    gradb2_np,
-    #    dims=ds_merge['Theta'].dims,
-    #    coords=ds_merge['Theta'].coords,
-    #    name='gradb2',
-    #)
 
     # Assemble all channels into a single Dataset for a single conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels #+ ['gradb2']
@@ -381,7 +359,7 @@ def run_global_pipeline(
         cfg.run.run_id,
         cfg.output.dataset_name,
         fs=fs,
-        channel_names=model_feature_channels + computed_feature_channels + ["gradb2"],
+        channel_names=model_feature_channels + computed_feature_channels,
         rectangular_shape=rectangular_shape,
     )
     logging.info("Zarr dataset created.")
