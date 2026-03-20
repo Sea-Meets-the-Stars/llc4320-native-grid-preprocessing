@@ -15,6 +15,7 @@ class DataConfig:
     sampling_step: int = 168
     start_record: int = 1180
     timestep_hours: Optional[int] = None
+    date_iterations: Optional[List[str]] = None  # explicit timestamps as 'DDMMYYYY-HH:MM:SS'; overrides range logic
 
 @dataclass(frozen=True)
 class SamplingConfig:
@@ -30,6 +31,7 @@ class OutputConfig:
     target_km_res: int = 150
     down_sample_res: int = 64
 
+#TODO jake fix downstream issues in cutouts logic
 @dataclass(frozen=True)
 class FeaturesConfig:
     model_data_feature_channels: List[str] = None
@@ -41,7 +43,8 @@ class FeaturesConfig:
             object.__setattr__(self, "model_data_feature_channels",
                                ["Eta", "Salt", "Theta", "U", "V", "W"])
         if self.compute_features_channels is None:
-            object.__setattr__(self, "compute_features_channels", ["log_gradb"])
+            object.__setattr__(self, "compute_features_channels", [])
+            #object.__setattr__(self, "compute_features_channels", ["log_gradb"])
 
 @dataclass(frozen=True)
 class RuntimeConfig:

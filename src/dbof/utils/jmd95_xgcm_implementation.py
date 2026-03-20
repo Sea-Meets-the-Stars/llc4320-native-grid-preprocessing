@@ -129,6 +129,18 @@ def _check_dimensions(s,t,p=np.zeros(())):
     return
 
 def _check_salinity(s):
+    """Validate salinity values, replacing negatives with NaN.
+
+    Parameters
+    ----------
+    s : numpy.ndarray
+        Salinity array [PSU (PSS-78)].
+
+    Returns
+    -------
+    numpy.ndarray
+        Salinity array with any negative values set to NaN.
+    """
     logger = logging.getLogger(__name__)
 
     sneg = s<0
@@ -139,8 +151,26 @@ def _check_salinity(s):
 
     return s
 
-def bulkmodjmd95(salt,theta,p):
-    """ Compute bulk modulus
+def bulkmodjmd95(salt, theta, p):
+    """Compute the secant bulk modulus of sea water (JMD95).
+
+    Uses the Jackett and McDougall (1995) polynomial to compute the
+    secant bulk modulus K, which relates pressure to compression of
+    sea water.
+
+    Parameters
+    ----------
+    salt : array_like
+        Salinity [PSU (PSS-78)].
+    theta : array_like
+        Potential temperature [degree C (IPTS-68)].
+    p : array_like
+        Sea pressure [bar] (note: input is already in bar, not dbar).
+
+    Returns
+    -------
+    numpy.ndarray
+        Secant bulk modulus K [bar].
     """
     # make sure arguments are floating point
     s = np.asarray(salt, dtype=np.float64)
