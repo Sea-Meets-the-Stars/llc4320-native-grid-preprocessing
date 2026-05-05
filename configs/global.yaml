@@ -74,6 +74,7 @@ subsets:
       - gradtheta2
       - gradeta2
       - gradrho2
+      - turner_angle
 
   kinematic:
     # Velocity-derived scalar fields computed from a single Jacobian pass
