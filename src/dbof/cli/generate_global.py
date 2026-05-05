@@ -43,7 +43,8 @@ CLI usage
     generate-global \\
         --config configs/combined_global.yaml \\
         --subset kinematic \\
-        [--run_id my_run]
+        [--run_id my_run] \\
+        [--no-icemask]
 
 Config design
 -------------
@@ -234,7 +235,7 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig, use_halo: bool = False):
             ds_grid, cfg.output.target_km_res
         )
     else:
-        land_mask = (ds_grid.hFacC == 0).values  # raw land mask, no coastal buffer
+        land_mask = ds_grid.hFacC  # raw land mask, no coastal buffer
 
     return ds_grid, land_mask
 
@@ -254,6 +255,7 @@ def process_time_snapshot(
     computed_feature_channels: list,
     it: int,
     compute_fields_fn,
+    apply_icemask: bool = True,
 ) -> None:
     """
     Process one time snapshot and write it to the zarr store.
@@ -272,6 +274,10 @@ def process_time_snapshot(
         ``(ds_merge, grid, computed_feature_channels) -> dict``
         Returns a mapping of ``{channel_name: DataArray | ndarray}`` for all
         channels listed in ``computed_feature_channels``.
+    apply_icemask : bool, default True
+        When ``True`` (the default), pixels where ``Theta <= 0`` are treated as
+        sea ice and set to NaN in the output.  Set to ``False`` to retain those
+        values (e.g. when studying polar / sub-freezing surface waters).
 
     Notes
     -----
@@ -302,16 +308,36 @@ def process_time_snapshot(
     has_uv = ('U' in model_feature_channels and 'V' in model_feature_channels)
     metric_vector_pairs = [('U', 'V')] if has_uv else []
 
+    # land mask (always applied) + optional ice mask
+    land_mask_da = (ds_merge.hFacC == 0)  # True where land (hFacC == 0)
+    mask_vars = {'_land_mask': land_mask_da}
+    if apply_icemask:
+        logging.info("Calculating and applying ice mask (Theta <= 0) and land mask (hFacC == 0)")
+        ice_mask_da = (ds_merge.Theta <= 0.0)  # True where ice
+        mask_vars['_ice_mask'] = ice_mask_da
+    else:
+        logging.info("Calculating and applying land mask (hFacC == 0); ice mask disabled")
+
+    ds_to_convert = ds_to_convert.assign(mask_vars)
+    channels_to_convert_with_mask = channels_to_convert + list(mask_vars.keys())
+
     logging.info("Converting from LLC faces to rectangular lat/lon...")
     ds_rect = faces_to_latlon.faces_dataset_to_latlon(
-        ds_to_convert,
+        ds_to_convert[channels_to_convert_with_mask],
         metric_vector_pairs=metric_vector_pairs,
     )
 
     # Extract channels in a consistent order and stack into (C, H, W).
     logging.info("Extracting channels and stacking into (C, H, W) format")
+    land_mask_rect = ds_rect['_land_mask'].values.astype(bool)  # shape: (H, W), True where land
+    combined_mask = land_mask_rect
+    if apply_icemask:
+        ice_mask_rect = ds_rect['_ice_mask'].values.astype(bool)  # shape: (H, W)
+        combined_mask = combined_mask | ice_mask_rect
     channel_arrays = [ds_rect[ch].values for ch in channels_to_convert]
     data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
+    data = np.where(combined_mask[np.newaxis], np.nan, data)
+
 
     # Write to zarr store.
     logging.info("Writing snapshot to zarr dataset")
@@ -504,6 +530,17 @@ def _parse_args():
             "If omitted, the value of 'active_subset' in the config YAML is used."
         ),
     )
+    parser.add_argument(
+        "--no-icemask",
+        dest="apply_icemask",
+        action="store_false",
+        default=True,
+        help=(
+            "Disable the sea-ice mask (Theta <= 0).  By default the ice mask "
+            "is applied and pixels where surface temperature is at or below "
+            "freezing are set to NaN.  Pass --no-icemask to keep those values."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -516,6 +553,7 @@ def run_global_pipeline(
     run_id: str = None,
     compute_fields_fn = None,
     cfg: config.JobConfig = None,
+    apply_icemask: bool = True,
 ) -> None:
     """
     Main orchestration loop for global dataset generation.
@@ -537,6 +575,9 @@ def run_global_pipeline(
         A fully-constructed ``JobConfig`` object.  When supplied,
         ``config_file`` is ignored.  Useful for callers that construct the
         config in memory (e.g. ``main()``) to avoid writing a temporary file.
+    apply_icemask : bool, default True
+        When ``True``, pixels where ``Theta <= 0`` are NaN-ed out as sea ice.
+        Pass ``False`` to retain sub-freezing surface values.
     """
     if cfg is None:
         if config_file is None:
@@ -613,6 +654,7 @@ def run_global_pipeline(
             computed_feature_channels,
             it,
             compute_fields_fn,
+            apply_icemask=apply_icemask,
         )
 
         ds_merge = None
@@ -626,12 +668,12 @@ def run_global_pipeline(
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main(config_file: str = None, run_id: str = None, subset: str = None) -> None:
+def main(config_file: str = None, run_id: str = None, subset: str = None, apply_icemask: bool = None) -> None:
     """
     Entry point for the global dataset generation script.
 
     Can be called from the CLI (no arguments; reads ``--config``, ``--run_id``,
-    and ``--subset`` from ``sys.argv``) or directly from Python by passing the
+    and ``--subset``, and ``--no-icemask`` from ``sys.argv``) or directly from Python by passing the
     arguments explicitly.
 
     Parameters
@@ -646,6 +688,12 @@ def main(config_file: str = None, run_id: str = None, subset: str = None) -> Non
         One of the keys in ``SUBSET_COMPUTE_FNS``.  If ``None``, falls back to
         ``--subset`` from the CLI, then to the ``active_subset`` key in the
         YAML config.
+    apply_icemask : bool or None, optional
+        Whether to NaN-out pixels where ``Theta <= 0`` (sea-ice mask).
+        ``True``  — ice mask on  (default when called from the CLI).
+        ``False`` — ice mask off (equivalent to passing ``--no-icemask``).
+        ``None``  — read from the CLI flag (``--no-icemask``); defaults to
+                    ``True`` if not passed on the command line.
     """
     # --- Resolve arguments ---------------------------------------------------
     if config_file is None:
@@ -653,6 +701,10 @@ def main(config_file: str = None, run_id: str = None, subset: str = None) -> Non
         config_file = cli.config
         run_id = run_id or cli.run_id
         subset = subset or cli.subset
+        if apply_icemask is None:
+            apply_icemask = cli.apply_icemask
+    elif apply_icemask is None:
+        apply_icemask = True  
 
     # --- Load raw YAML -------------------------------------------------------
     with open(config_file, "r") as fh:
@@ -710,4 +762,5 @@ def main(config_file: str = None, run_id: str = None, subset: str = None) -> Non
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
         cfg=cfg,
+        apply_icemask=apply_icemask,
     )
