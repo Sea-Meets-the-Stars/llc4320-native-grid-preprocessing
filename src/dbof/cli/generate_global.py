@@ -12,10 +12,11 @@ native_fields
     No derived quantities are computed.
 
 frontal_structure
-    Scalar gradient magnitudes that characterise front intensity and water-mass
-    structure: ``gradsalt2``, ``gradtheta2``, ``gradeta2``.
-    Optionally include ``gradb2`` by adding it to ``compute_features_channels``
-    in the config.
+    Scalar gradient magnitudes and the Turner angle characterising front
+    intensity and water-mass structure: ``gradsalt2``, ``gradtheta2``,
+    ``gradeta2``, ``gradrho2``, ``gradb2``, ``turner_angle``.
+    The Turner angle reuses the gradient fields computed earlier in the
+    same callback, so no gradient is evaluated twice.
 
 kinematic
     Velocity-derived scalar fields computed from a single Jacobian pass:
@@ -349,7 +350,10 @@ def _compute_frontal_structure_fields(
     """
     Compute callback for the ``frontal_structure`` subset.
 
-    Computes scalar gradient-magnitude fields.
+    Computes scalar gradient-magnitude fields and the Turner angle.
+    Gradient fields that the Turner angle depends on (``gradtheta2``,
+    ``gradsalt2``, ``gradrho2``) are computed first and forwarded, so
+    each gradient is only evaluated once.
 
     Parameters
     ----------
@@ -362,18 +366,31 @@ def _compute_frontal_structure_fields(
     dict
         Mapping of ``{channel_name: DataArray}`` for each requested channel.
     """
-    _FIELD_FNS = {
+    # --- gradient fields (computed first so turner_angle can reuse them) ---
+    _GRAD_FNS = {
         "gradsalt2":  calculate_additional_fields.grad_salt2,
         "gradtheta2": calculate_additional_fields.grad_theta2,
         "gradeta2":   calculate_additional_fields.grad_eta2,
         "gradb2":     calculate_additional_fields.grad_b2,
         "gradrho2":   calculate_additional_fields.grad_rho2,
     }
-    return {
+
+    results = {
         name: fn(ds_merge, grid)
-        for name, fn in _FIELD_FNS.items()
+        for name, fn in _GRAD_FNS.items()
         if name in computed_feature_channels
     }
+
+    # --- Turner angle (reuses already-computed gradients) ------------------
+    results["turner_angle"] = calculate_additional_fields.turner_angle(
+        ds_merge,
+        grid,
+        gradtheta2=results["gradtheta2"],
+        gradsalt2=results["gradsalt2"],
+        gradrho2=results["gradrho2"],
+    )
+
+    return results
 
 
 def _compute_kinematic_fields(

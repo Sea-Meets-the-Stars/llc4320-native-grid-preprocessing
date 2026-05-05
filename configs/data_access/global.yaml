@@ -45,6 +45,7 @@ data_access:
         - "gradeta2"
         - "gradb2"
         - "gradrho2"
+        - "turner_angle"
 
     kinematic:
       dataset_name: "kinematic.zarr"
