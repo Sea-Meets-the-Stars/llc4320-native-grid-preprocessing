@@ -20,7 +20,7 @@ data_access:
 # - gradb2 is always the last channel in every subset (appended automatically
 #   by the pipeline).
 # - Raw model fields (Theta, Salt, Eta, U, V, W) are ONLY present in the
-#   native_fields subset.  All other subsets store only computed channels + gradb2.
+#   native_fields subset.  All other subsets store only computed channels.
 #
 # Uncomment the run_id line (and update its value) in data_access above once
 # a real run has been completed.

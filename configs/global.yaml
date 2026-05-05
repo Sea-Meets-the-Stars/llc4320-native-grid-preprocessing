@@ -45,14 +45,11 @@ active_subset: kinematic
 # subsets : per-subset channel lists and (optional) dataset name.
 #   The selected subset's values are injected into features / output at
 #   runtime before the pipeline runs — without touching this file.
-#
-#   gradb2 is ALWAYS appended automatically by the base pipeline regardless
-#   of which subset is selected.  Do not add it to any channel list below.
+
 subsets:
 
   native_fields:
     # Raw model state variables — no derived quantities are computed.
-    # Output contains the 6 native model fields plus the automatic gradb2.
     dataset_name: "native_fields.zarr"
     model_data_feature_channels:
       - Theta
@@ -65,7 +62,7 @@ subsets:
 
   frontal_structure:
     # Scalar gradient-magnitude fields characterising front intensity and
-    # water-mass structure. Output also includes the automatic gradb2.
+    # water-mass structure. 
     dataset_name: "frontal_structure.zarr"
     model_data_feature_channels: []
     compute_features_channels:
@@ -80,7 +77,7 @@ subsets:
     # Velocity-derived scalar fields computed from a single Jacobian pass
     # (relative vorticity, strain components, divergence, Rossby number,
     # Okubo-Weiss parameter, Coriolis parameter).
-    # Output also includes the automatic gradb2.
+
     dataset_name: "kinematic.zarr"
     model_data_feature_channels: []
     compute_features_channels:
@@ -94,13 +91,7 @@ subsets:
       - okubo_weiss
 
   frontogenesis:
-    # Kinematic frontogenesis tendency only.
-    # Deliberately limited to one field to keep the Dask task graph as small
-    # as possible.  The geostrophic decomposition fields (which require
-    # additional Eta-gradient lineages) are in the 'geostrophic' subset;
-    # computing them here alongside frontogenesis_tendency is what triggers
-    # the large-graph / run_spec scheduler warnings.
-    # Output also includes the automatic gradb2.
+    # Frontogenesis fields computed from a single Jacobian pass.
     dataset_name: "frontogenesis.zarr"
     model_data_feature_channels: []
     compute_features_channels:
