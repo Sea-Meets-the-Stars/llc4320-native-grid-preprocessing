@@ -367,6 +367,7 @@ def _compute_frontal_structure_fields(
         "gradtheta2": calculate_additional_fields.grad_theta2,
         "gradeta2":   calculate_additional_fields.grad_eta2,
         "gradb2":     calculate_additional_fields.grad_b2,
+        "gradrho2":   calculate_additional_fields.grad_rho2,
     }
     return {
         name: fn(ds_merge, grid)
@@ -436,6 +437,7 @@ def _compute_frontogenesis_fields(
     # Single dask.compute() call fuses the shared graph (Jacobian + tracer
     # gradients) into one scheduler submission, avoiding the run_spec warnings
     # that appear when multiple frontogenesis arrays are computed lazily later.
+    # ** Claude suggestion **
     keys = list(selected.keys())
     materialised = dask.compute(*[selected[k] for k in keys])
     return dict(zip(keys, materialised))

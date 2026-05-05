@@ -73,6 +73,7 @@ subsets:
       - gradsalt2
       - gradtheta2
       - gradeta2
+      - gradrho2
 
   kinematic:
     # Velocity-derived scalar fields computed from a single Jacobian pass
