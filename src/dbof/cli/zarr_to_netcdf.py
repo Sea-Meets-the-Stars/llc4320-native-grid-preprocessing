@@ -471,7 +471,7 @@ def main(
         p.add_argument('--folder', required=True)
         p.add_argument('--output-dir', required=True)
         p.add_argument('--run-id')
-        p.add_argument('--dataset-name', default='properties.zarr')
+        p.add_argument('--dataset-name', required=True)
         sel = p.add_mutually_exclusive_group()
         sel.add_argument('--indices', nargs='+', type=int, metavar='T')
         sel.add_argument('--iterations', nargs='+', type=int, metavar='IT')
@@ -581,8 +581,8 @@ if __name__ == '__main__':
     # --- snapshots-mode args ---
     p.add_argument('--run-id',
                    help="[snapshots] run_id used when writing the Zarr store")
-    p.add_argument('--dataset-name', default='dataset_creation.zarr',
-                   help="[snapshots] dataset_name (default: dataset_creation.zarr)")
+    p.add_argument('--dataset-name', required=True,
+                   help="[snapshots] dataset_name (e.g. stratification.zarr)")
 
     sel = p.add_mutually_exclusive_group()
     sel.add_argument('--indices', nargs='+', type=int, metavar='T',
