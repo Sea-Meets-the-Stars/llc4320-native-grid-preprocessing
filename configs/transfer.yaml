@@ -1,0 +1,110 @@
+# ---------------------------------------------------------------------------
+# Config for the LLC4320 transfer CLI  (transfer_llc4320.py)
+#
+# Copies variables from the MIT LLC4320 zarr store to S3.
+# No computation — pure data transfer with depth-optimised chunk layout.
+#
+# 3D chunk layout: (k=all, face=1, j=720, i=720)
+# — matches MIT on-disk layout (all depth levels per stored object)
+# — optimal for depth-diagnostic pipelines (MLD, N², vertical shear…)
+# — one S3 GET retrieves the full water column for one face tile
+#
+# Two output stores:
+#   {folder}/grid.zarr          — static grid variables (written once)
+#   {folder}/{YYYYMMDDTHH}.zarr — time-varying fields (per-date)
+#
+# Usage:
+#   transfer-timestep --config configs/transfer.yaml --init-store
+# ---------------------------------------------------------------------------
+
+run:
+  run_id: "transfer_llc4320"
+  log_dir: "./logs"
+
+data:
+  # Path to the full LLC4320 zarr store on the local / cluster filesystem.
+  MIT_data_path: "/orcd/data/abodner/003/LLC4320/LLC4320"
+
+  # Date for time-varying fields.  Override from CLI with --date.
+  date_iterations:
+    - '2012-11-09 12:00:00'
+
+  # Required by DataConfig defaults; unused by the transfer script.
+  endpoint_url: "https://mghp.osn.xsede.org"
+  sampling_step: 168
+  start_record: 1180
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  folder: "LLC4320_v1"
+
+# ---------------------------------------------------------------------------
+# Transfer-specific settings
+# ---------------------------------------------------------------------------
+transfer:
+  # Static grid variables — written once to grid.zarr.
+  # Geometry, masks, and vertical coordinates.
+  static_variables:
+    - XC
+    - YC
+    - XG
+    - YG
+    - Depth
+    - CS
+    - SN
+    - drC
+    - drF
+    - dxC
+    - dxF
+    - dxG
+    - dxV
+    - dyC
+    - dyF
+    - dyG
+    - dyU
+    - hFacC
+    - hFacS
+    - hFacW
+    - mask_c
+    - mask_s
+    - mask_w
+    - Z
+    - Zl
+    - Zu
+    - Zp1
+    - PHrefC
+    - PHrefF
+    - rhoRef
+    # Dimension coordinates (i, j, face, i_g, j_g, k, k_l, k_u, k_p1)
+    # are written automatically by ensure_coord_written() whenever a
+    # data variable that uses them is transferred — no need to list here.
+    - rA
+    - rAz
+    - rAw
+    - rAs
+  static_dataset_name: "grid.zarr"
+
+  # Time-varying fields — written per-date (e.g. 20121109T12.zarr).
+  variables:
+    - Theta
+    - Salt
+    - Eta
+    - U
+    - V
+    - W
+    - oceTAUX
+    - oceTAUY
+    - SIarea
+    - oceQnet
+    - time
+
+  # Horizontal tile sizes for zarr chunking.
+  tile_j: 720
+  tile_i: 720
+
+runtime:
+  zarr_async_concurrency: 128
+  # "synchronous" is safest for a single-timestep transfer.
+  # Use "distributed" if you want parallel chunk writes.
+  dask_scheduler: "synchronous"

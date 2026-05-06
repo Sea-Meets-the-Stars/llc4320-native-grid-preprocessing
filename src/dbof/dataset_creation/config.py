@@ -16,6 +16,8 @@ class DataConfig:
     start_record: int = 1180
     timestep_hours: Optional[int] = None
     date_iterations: Optional[List[str]] = None  # explicit timestamps as 'DDMMYYYY-HH:MM:SS'; overrides range logic
+    MIT_data_path: Optional[str] = None           # path to MIT LLC4320 zarr store (MIT surface pipeline)
+    k_levels: Optional[List[int]] = None         # depth indices to process; None = all 51 levels
 
 @dataclass(frozen=True)
 class SamplingConfig:
@@ -49,6 +51,14 @@ class FeaturesConfig:
 @dataclass(frozen=True)
 class RuntimeConfig:
     zarr_async_concurrency: int = 128
+    # Dask scheduler: "distributed" (default, spawns worker processes),
+    # "synchronous" (single-threaded, all RAM in one process — best for
+    # memory-constrained jobs), or "threads" (threaded, shared memory).
+    dask_scheduler: str = "distributed"
+    # Only used when dask_scheduler == "distributed":
+    dask_n_workers: Optional[int] = None          # default: one per core
+    dask_threads_per_worker: Optional[int] = None  # default: 1
+    dask_memory_limit: Optional[str] = None        # e.g. "40GB"
 
 @dataclass(frozen=True)
 class JobConfig:
