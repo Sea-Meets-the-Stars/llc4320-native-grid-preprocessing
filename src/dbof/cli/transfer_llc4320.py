@@ -58,7 +58,6 @@ TS_PER_HOUR = 144
 LLC4320_START_DATE = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
 LLC4320_TIMESTEP_SECS = 25
 DATE_FMT = "%Y-%m-%d %H:%M:%S"
-MIT_HOUR_OFFSET_ITERS = 10_368   # = 72 hours * 144 iter/hour
 
 H_J_DIMS = ("j", "j_g")
 H_I_DIMS = ("i", "i_g")
@@ -687,14 +686,7 @@ def run_transfer(
     # --- Time-varying fields -------------------------------------------------
     if time_variables and subset in ("time", "all"):
         iteration = date_to_iteration(date_str)
-        time_idx = (iteration - MIT_HOUR_OFFSET_ITERS) // TS_PER_HOUR
-
-        if time_idx < 0:
-            raise ValueError(
-                f"Date '{date_str}' (iteration {iteration}) precedes the MIT "
-                f"zarr store start (iteration {MIT_HOUR_OFFSET_ITERS}, "
-                f"2011-09-16 00:00 UTC).  time_idx would be {time_idx}."
-            )
+        time_idx = iteration // TS_PER_HOUR
 
         # Validate time dimension
         if "time" not in ds.dims:
