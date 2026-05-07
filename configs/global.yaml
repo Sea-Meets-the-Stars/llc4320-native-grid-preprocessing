@@ -8,7 +8,8 @@ data:
   timestep_hours: 168  # total hours to process; overridden by date_iterations if set
 
   date_iterations:
-    - '2012-11-09 12:00:00'
+    #- '2012-11-09 12:00:00'
+    - '2011-12-09 12:00:00'
   # --- specify exact timestamps in YYYY-MM-DD HH:MM:SS (ISO) format ---
   # If set, date_iterations overrides sampling_step / start_record / timestep_hours.
 
