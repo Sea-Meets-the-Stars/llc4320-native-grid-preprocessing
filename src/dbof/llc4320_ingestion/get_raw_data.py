@@ -225,10 +225,22 @@ def get_remote_gridfile(endpoint_url):
 s3_timestep_chunks = {"face": 1, "k": 51, "j": 720, "i": 720}
 
 
-def _s3_storage_options(s3_endpoint):
-    """S3 storage options with anonymous access and retry config."""
+def _s3_storage_options(s3_endpoint, anon=None):
+    """S3 storage options with automatic credential detection.
+
+    Parameters
+    ----------
+    s3_endpoint : str
+        S3-compatible endpoint URL.
+    anon : bool or None
+        Force anonymous access (True) or credentialed access (False).
+        If None, uses anonymous for the OSN endpoint and credentialed
+        for all others (e.g. NRP Nautilus).
+    """
+    if anon is None:
+        anon = "mghp.osn.xsede.org" in s3_endpoint
     return {
-        "anon": True,
+        "anon": anon,
         "client_kwargs": {"endpoint_url": s3_endpoint},
     }
 

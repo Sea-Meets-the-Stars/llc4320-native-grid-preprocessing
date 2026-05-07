@@ -160,11 +160,7 @@ def _date_to_iteration(date_str: str) -> int:
     The LLC4320 model starts at 2011-09-13 00:00:00 UTC (iteration 0) with a
     25-second timestep.  The returned iteration is rounded to the nearest step.
 
-    Examples
-    --------
-    _date_to_iteration('2011-09-13 00:00:00')  ->  0
-    _date_to_iteration('2012-01-01 00:00:00')  ->  ~1,011,456
-    _date_to_iteration('2012-09-11 12:00:00')  ->  ~1,463,616
+    NOTE: Callers that access OSN data must add FIRST_WIND_RECORD_OFFSET (10 368).
     """
     dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
     delta = dt - LLC4320_START_DATE
@@ -193,9 +189,12 @@ def calculate_iterations_for_llc(cfg: config.JobConfig) -> np.ndarray:
        ``None`` the range runs to ``MAX_ITER``.
     """
     if cfg.data.date_iterations is not None:
-        iterations = [_date_to_iteration(d) for d in cfg.data.date_iterations]
+        iterations = [
+            _date_to_iteration(d) + FIRST_WIND_RECORD_OFFSET
+            for d in cfg.data.date_iterations
+        ]
         logging.info(
-            "Using date-derived iteration list: "
+            "Using date-derived iteration list (OSN offset applied): "
             + ", ".join(f"'{d}' → {it}" for d, it in zip(cfg.data.date_iterations, iterations))
         )
         return np.array(iterations, dtype=int)
