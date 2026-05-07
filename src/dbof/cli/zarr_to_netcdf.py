@@ -105,15 +105,20 @@ from dbof.io.filesystems import create_s3_filesystems
 import dbof.dataset_creation.zarr_dataset_global as zarr_dataset_global
 import dbof.dataset_creation.zarr_grid_global as zarr_grid_global
 
-# LLC4320 calendar constants (same as _generate_global_base.py)
-LLC4320_START_DATE    = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
-LLC4320_TIMESTEP_SECS = 25
+# LLC4320 calendar constants (same as generate_global.py)
+LLC4320_START_DATE         = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
+LLC4320_TIMESTEP_SECS      = 25
+FIRST_WIND_RECORD_OFFSET   = 10_368   # OSN data offset applied by generate_global
 # ISO 8601-style format: 'YYYY-MM-DD HH:MM:SS'  (e.g. '2012-09-11 12:00:00')
-DATE_FMT              = '%Y-%m-%d %H:%M:%S'
+DATE_FMT                   = '%Y-%m-%d %H:%M:%S'
 
 
 def _date_to_iteration(date_str: str) -> int:
-    """Convert 'YYYY-MM-DD HH:MM:SS' → LLC4320 iteration number."""
+    """Convert 'YYYY-MM-DD HH:MM:SS' → LLC4320 iteration number.
+
+    Includes the FIRST_WIND_RECORD_OFFSET so the returned iteration matches
+    what generate_global.py writes into the zarr store.
+    """
     dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
     delta = dt - LLC4320_START_DATE
     if delta.total_seconds() < 0:
@@ -122,7 +127,7 @@ def _date_to_iteration(date_str: str) -> int:
             f"({LLC4320_START_DATE.date()}). "
             "Expected format: YYYY-MM-DD HH:MM:SS, e.g. '2012-01-01 00:00:00'."
         )
-    return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
+    return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS) + FIRST_WIND_RECORD_OFFSET
 
 
 def _iteration_to_datetime(iteration: int) -> datetime:
