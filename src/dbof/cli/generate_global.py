@@ -106,11 +106,10 @@ import dbof.dataset_creation.config as config
 
 import dbof.utils.faces_to_latlon as faces_to_latlon
 
+from IPython import embed
 
 # ---------------------------------------------------------------------------
 # LLC4320 model constants
-# NOTE: these are constants for the LLC 4320 model.  If we look to support
-# other models in the future this will need to be updated or configurable.
 # ---------------------------------------------------------------------------
 TS_PER_HOUR              = 144          # model cadence: 25 s → 144 steps/hr
 MAX_ITER                 = 1_495_008
@@ -294,6 +293,10 @@ def process_time_snapshot(
     # (face, j, i) grid before the face→latlon stitch.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
+    if "oceTAUY" in ds_merge:
+        ds_merge["oceTAUY"] = grid.interp(ds_merge["oceTAUY"], 'Y', boundary='fill')
+    if "oceTAUX" in ds_merge:
+        ds_merge["oceTAUX"] = grid.interp(ds_merge["oceTAUX"], 'X', boundary='fill')
 
     # Assemble all channels into a single Dataset for a single conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels
@@ -302,11 +305,16 @@ def process_time_snapshot(
         | {ch: calculated_fields[ch] for ch in computed_feature_channels}
     )
     ds_to_convert = ds.assign(update_vars)[channels_to_convert]
-
-    # metric_vector_pairs tells faces_dataset_to_latlon to rotate the direction
-    # of vector fields (U, V) when Arctic-cap faces are transposed.
-    has_uv = ('U' in model_feature_channels and 'V' in model_feature_channels)
-    metric_vector_pairs = [('U', 'V')] if has_uv else []
+    
+    metric_vector_pairs = []
+    if 'V' in ds_to_convert.variables:
+        ds_to_convert['V'].attrs.pop('mate', None)
+    if 'U' in ds_to_convert.variables:
+        ds_to_convert['U'].attrs['mate'] = 'V'
+    if 'oceTAUY' in ds_to_convert.variables:
+        ds_to_convert['oceTAUY'].attrs.pop('mate', None)
+    if 'oceTAUX' in ds_to_convert.variables:
+        ds_to_convert['oceTAUX'].attrs['mate'] = 'oceTAUY'
 
     # land mask (always applied) + optional ice mask
     land_mask_da = (ds_merge.hFacC == 0)  # True where land (hFacC == 0)
@@ -321,6 +329,7 @@ def process_time_snapshot(
     ds_to_convert = ds_to_convert.assign(mask_vars)
     channels_to_convert_with_mask = channels_to_convert + list(mask_vars.keys())
 
+    # stitch faces
     logging.info("Converting from LLC faces to rectangular lat/lon...")
     ds_rect = faces_to_latlon.faces_dataset_to_latlon(
         ds_to_convert[channels_to_convert_with_mask],
@@ -337,7 +346,6 @@ def process_time_snapshot(
     channel_arrays = [ds_rect[ch].values for ch in channels_to_convert]
     data = np.stack(channel_arrays, axis=0)   # shape: (C, compact_h, compact_w)
     data = np.where(combined_mask[np.newaxis], np.nan, data)
-
 
     # Write to zarr store.
     logging.info("Writing snapshot to zarr dataset")
@@ -554,6 +562,7 @@ def run_global_pipeline(
     compute_fields_fn = None,
     cfg: config.JobConfig = None,
     apply_icemask: bool = True,
+    s3_source: dict = None,
 ) -> None:
     """
     Main orchestration loop for global dataset generation.
@@ -578,6 +587,12 @@ def run_global_pipeline(
     apply_icemask : bool, default True
         When ``True``, pixels where ``Theta <= 0`` are NaN-ed out as sea ice.
         Pass ``False`` to retain sub-freezing surface values.
+    s3_source : dict or None
+        Optional S3 timestep store location (keys: ``s3_endpoint``, ``bucket``,
+        ``folder``).  When provided, variables listed in
+        ``model_feature_channels`` that are not available from the kerchunk
+        endpoint (e.g. ``oceTAUX``, ``oceTAUY``, ``SIarea``) are loaded from
+        these stores instead.  Requires ``date_iterations`` in the config.
     """
     if cfg is None:
         if config_file is None:
@@ -625,6 +640,21 @@ def run_global_pipeline(
     rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
     logging.info(f"LLC rectangular output shape: {rectangular_shape}")
 
+    # Identify model channels that must be loaded from S3 timestep stores
+    # (not available in the kerchunk endpoint).
+    _KERCHUNK_VARS = {'Theta', 'Salt', 'Eta', 'U', 'V', 'W'}
+    s3_vars = [ch for ch in model_feature_channels if ch not in _KERCHUNK_VARS]
+    iter_to_date = {}
+    if s3_vars and s3_source:
+        if cfg.data.date_iterations is None:
+            raise ValueError(
+                f"S3-only variables {s3_vars} require 'date_iterations' in the "
+                "config when 's3_source' is provided."
+            )
+        for date_str, it in zip(cfg.data.date_iterations, iter_range):
+            iter_to_date[int(it)] = date_str
+        logging.info(f"Will load {s3_vars} from S3 timestep stores")
+
     # Construct the zarr output store
     zarr_ds = zarr_dataset.GlobalZarrDataset(
         cfg.output.bucket,
@@ -642,6 +672,26 @@ def run_global_pipeline(
         ds       = get_raw_data.get_remote_llc_data(ENDPOINT_URL, it, LLC_FACES)
         ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
         logging.info(f"Data loaded for iteration: {it}")
+
+        # Load additional surface variables from S3 timestep stores.
+        if s3_vars and int(it) in iter_to_date:
+            ds_s3 = get_raw_data.get_s3_timestep_data(
+                s3_source['s3_endpoint'],
+                s3_source['bucket'],
+                s3_source['folder'],
+                iter_to_date[int(it)],
+                face_range=LLC_FACES,
+                vars_requested=s3_vars,
+            )
+            for v in s3_vars:
+                if v in ds_s3:
+                    da = ds_s3[v]
+                    if 'k' in da.dims:
+                        da = da.isel(k=0)
+                    if 'k_l' in da.dims:
+                        da = da.isel(k_l=0)
+                    ds_merge[v] = da
+            logging.info(f"S3 variables merged: {[v for v in s3_vars if v in ds_s3]}")
 
         process_time_snapshot(
             cfg,
@@ -668,13 +718,18 @@ def run_global_pipeline(
 # Entry point
 # ---------------------------------------------------------------------------
 
-def main(config_file: str = None, run_id: str = None, subset: str = None, apply_icemask: bool = None) -> None:
+def main(
+    config_file: str = None,
+    run_id: str = None,
+    subset: str = None,
+    apply_icemask: bool = None,
+) -> None:
     """
     Entry point for the global dataset generation script.
 
     Can be called from the CLI (no arguments; reads ``--config``, ``--run_id``,
-    and ``--subset``, and ``--no-icemask`` from ``sys.argv``) or directly from Python by passing the
-    arguments explicitly.
+    ``--subset``, and ``--no-icemask`` from ``sys.argv``) or directly from
+    Python by passing the arguments explicitly.
 
     Parameters
     ----------
@@ -758,9 +813,14 @@ def main(config_file: str = None, run_id: str = None, subset: str = None, apply_
         runtime=config.RuntimeConfig(**raw.get("runtime", {})),
     )
 
+
+    # S3 source: optional, for variables not in the kerchunk endpoint.
+    s3_source_cfg = raw.get("s3_source") or None
+
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
         cfg=cfg,
         apply_icemask=apply_icemask,
+        s3_source=s3_source_cfg,
     )

@@ -36,6 +36,17 @@ runtime:
   zarr_async_concurrency: 128
 
 # ---------------------------------------------------------------------------
+# S3 source: location of the transferred LLC4320 timestep stores
+# (written by transfer_llc4320.py).  Only needed when native_fields includes
+# variables not present in the kerchunk endpoint (e.g. oceTAUX, oceTAUY,
+# SIarea).
+# ---------------------------------------------------------------------------
+s3_source:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  folder: "LLC4320"
+
+# ---------------------------------------------------------------------------
 # Combined-script configuration
 # ---------------------------------------------------------------------------
 # active_subset : default subset when --subset is not passed on the CLI.
@@ -50,6 +61,7 @@ subsets:
 
   native_fields:
     # Raw model state variables — no derived quantities are computed.
+    # 6 core model fields plus 3 surface-only fields from S3 source.
     dataset_name: "native_fields.zarr"
     model_data_feature_channels:
       - Theta
@@ -58,6 +70,9 @@ subsets:
       - U
       - V
       - W
+      - oceTAUX
+      - oceTAUY
+      - SIarea
     compute_features_channels: []
 
   frontal_structure:
