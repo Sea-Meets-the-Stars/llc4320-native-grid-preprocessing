@@ -8,7 +8,8 @@ The subset of properties to compute is selected at runtime via ``--subset``
 Available subsets
 -----------------
 native_fields
-    Raw model state variables only (Theta, Salt, Eta, U, V, W).
+    Raw model state variables only (Theta, Salt, Eta, U, V, W, oceTAUX,
+    oceTAUY, SIarea).
     No derived quantities are computed.
 
 frontal_structure
@@ -41,10 +42,20 @@ frontogenesis
 CLI usage
 ---------
     generate-global \\
-        --config configs/combined_global.yaml \\
-        --subset kinematic \\
+        --config configs/global.yaml \\
+        --subset native_fields \\
         [--run_id my_run] \\
-        [--no-icemask]
+        [--icemask]
+
+When ``--run_id`` is omitted and ``date_iterations`` is set in the YAML,
+each date is processed as a separate pipeline run with an auto-generated
+run_id in YYYYMMDD_HHMMSS format.  For example, two dates produce::
+
+    s3://dbof/surface_fields/20111209_120000/native_fields.zarr
+    s3://dbof/surface_fields/20121109_120000/native_fields.zarr
+
+When ``--run_id`` is provided explicitly, all dates are written into a
+single zarr store under that run_id (original behaviour).
 
 Config design
 -------------
@@ -56,7 +67,7 @@ constructed:
     subsets:
       native_fields:
         dataset_name: "native_fields.zarr"
-        model_data_feature_channels: [Theta, Salt, Eta, U, V, W]
+        model_data_feature_channels: [Theta, Salt, Eta, U, V, W, ...]
         compute_features_channels: []
       frontal_structure:
         ...
