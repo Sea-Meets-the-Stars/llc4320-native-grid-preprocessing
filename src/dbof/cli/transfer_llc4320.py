@@ -3,6 +3,8 @@
 Transfer LLC4320 variables from a local zarr store to S3 Zarr with a
 unified tiled layout.
 
+#NOTE: this script is designed to be run from the MIT machines.
+
 Two categories of variables are transferred to separate stores:
 
 1. **Static grid variables** (geometry, masks, vertical coordinates) —
