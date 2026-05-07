@@ -509,6 +509,17 @@ SUBSET_COMPUTE_FNS = {
 # Argument parsing
 # ---------------------------------------------------------------------------
 
+def _date_to_run_id(date_str: str) -> str:
+    """
+    Convert a date string like '2011-12-09 12:00:00' into a directory-safe
+    run_id like '20111209_120000'.
+
+    Format: YYYYMMDD_HHMMSS
+    """
+    dt = datetime.strptime(date_str.strip(), DATE_FMT)
+    return dt.strftime("%Y%m%d_%H%M%S")
+
+
 def _parse_args():
     """Parse --config, --run_id, and --subset from sys.argv."""
     parser = argparse.ArgumentParser(
@@ -538,14 +549,14 @@ def _parse_args():
         ),
     )
     parser.add_argument(
-        "--no-icemask",
+        "--icemask",
         dest="apply_icemask",
-        action="store_false",
-        default=True,
+        action="store_true",
+        default=False,
         help=(
-            "Disable the sea-ice mask (Theta <= 0).  By default the ice mask "
-            "is applied and pixels where surface temperature is at or below "
-            "freezing are set to NaN.  Pass --no-icemask to keep those values."
+            "Enable the sea-ice mask (Theta <= 0).  By default the ice mask "
+            "is NOT applied.  Pass --icemask to NaN out pixels where surface "
+            "temperature is at or below freezing."
         ),
     )
     return parser.parse_args()
@@ -717,6 +728,34 @@ def run_global_pipeline(
 # Entry point
 # ---------------------------------------------------------------------------
 
+def _build_job_config(raw: dict, subset_entry: dict) -> config.JobConfig:
+    """
+    Build a ``JobConfig`` from the raw YAML dict and the resolved subset entry.
+
+    Shared helper so that both the single-run and per-date code paths in
+    ``main()`` construct configs identically.
+    """
+    output_dict = {**raw.get("output", {})}
+    if "dataset_name" in subset_entry:
+        output_dict["dataset_name"] = subset_entry["dataset_name"]
+
+    return config.JobConfig(
+        run=config.RunConfig(**raw.get("run", {})),
+        data=config.DataConfig(**raw.get("data", {})),
+        sampling=config.SamplingConfig(**raw.get("sampling", {})),
+        output=config.OutputConfig(**output_dict),
+        features=config.FeaturesConfig(
+            model_data_feature_channels=subset_entry.get(
+                "model_data_feature_channels", []
+            ),
+            compute_features_channels=subset_entry.get(
+                "compute_features_channels", []
+            ),
+        ),
+        runtime=config.RuntimeConfig(**raw.get("runtime", {})),
+    )
+
+
 def main(
     config_file: str = None,
     run_id: str = None,
@@ -729,6 +768,20 @@ def main(
     Can be called from the CLI (no arguments; reads ``--config``, ``--run_id``,
     ``--subset``, and ``--no-icemask`` from ``sys.argv``) or directly from
     Python by passing the arguments explicitly.
+
+    Date-based auto run_id
+    ----------------------
+    When ``--run_id`` is **not** provided and the config contains
+    ``date_iterations``, each date is processed as a separate pipeline run
+    whose ``run_id`` is derived from the date string in YYYYMMDD_HHMMSS
+    format (e.g. ``'2011-12-09 12:00:00'`` → ``'20111209_120000'``).
+    The output layout becomes::
+
+        s3://dbof/surface_fields/20111209_120000/native_fields.zarr
+        s3://dbof/surface_fields/20121109_120000/native_fields.zarr
+
+    When ``--run_id`` **is** provided, the original behaviour is preserved:
+    all dates are written into a single zarr store under that run_id.
 
     Parameters
     ----------
@@ -744,10 +797,10 @@ def main(
         YAML config.
     apply_icemask : bool or None, optional
         Whether to NaN-out pixels where ``Theta <= 0`` (sea-ice mask).
-        ``True``  — ice mask on  (default when called from the CLI).
-        ``False`` — ice mask off (equivalent to passing ``--no-icemask``).
-        ``None``  — read from the CLI flag (``--no-icemask``); defaults to
-                    ``True`` if not passed on the command line.
+        ``True``  — ice mask on  (equivalent to passing ``--icemask``).
+        ``False`` — ice mask off (default when called from the CLI).
+        ``None``  — read from the CLI flag (``--icemask``); defaults to
+                    ``False`` if not passed on the command line.
     """
     # --- Resolve arguments ---------------------------------------------------
     if config_file is None:
@@ -758,7 +811,7 @@ def main(
         if apply_icemask is None:
             apply_icemask = cli.apply_icemask
     elif apply_icemask is None:
-        apply_icemask = True  
+        apply_icemask = False
 
     # --- Load raw YAML -------------------------------------------------------
     with open(config_file, "r") as fh:
@@ -789,32 +842,48 @@ def main(
             f"{config_file}.  Please add a 'subsets.{subset}' block."
         )
 
-    # --- Build JobConfig in memory -------------------------------------------
-    # The 'subsets' and 'active_subset' keys are top-level YAML keys that
-    # config.load_config does not know about.  The JobConfig is built directly.
-    output_dict = {**raw.get("output", {})}
-    if "dataset_name" in subset_entry:
-        output_dict["dataset_name"] = subset_entry["dataset_name"]
-
-    cfg = config.JobConfig(
-        run=config.RunConfig(**raw.get("run", {})),
-        data=config.DataConfig(**raw.get("data", {})),
-        sampling=config.SamplingConfig(**raw.get("sampling", {})),
-        output=config.OutputConfig(**output_dict),
-        features=config.FeaturesConfig(
-            model_data_feature_channels=subset_entry.get(
-                "model_data_feature_channels", []
-            ),
-            compute_features_channels=subset_entry.get(
-                "compute_features_channels", []
-            ),
-        ),
-        runtime=config.RuntimeConfig(**raw.get("runtime", {})),
-    )
-
-
     # S3 source: optional, for variables not in the kerchunk endpoint.
     s3_source_cfg = raw.get("s3_source") or None
+
+    # --- Per-date looping ----------------------------------------------------
+    # When no explicit run_id is given and date_iterations is set, each date
+    # gets its own pipeline run with an auto-generated run_id derived from the
+    # date string.  This produces the directory layout:
+    #   s3://dbof/surface_fields/<DATE>/native_fields.zarr
+    date_iterations = raw.get("data", {}).get("date_iterations")
+
+    if run_id is None and date_iterations is not None and len(date_iterations) > 0:
+        print(
+            f"No --run_id provided; will create a separate output directory "
+            f"for each of the {len(date_iterations)} date(s) in date_iterations."
+        )
+        for date_str in date_iterations:
+            auto_run_id = _date_to_run_id(date_str)
+            print(f"\n{'='*60}")
+            print(f"Processing date: {date_str}  →  run_id: {auto_run_id}")
+            print(f"{'='*60}")
+
+            # Build a single-date config so only this date is processed.
+            single_date_raw = {**raw}
+            single_date_raw["data"] = {
+                **raw.get("data", {}),
+                "date_iterations": [date_str],
+            }
+            cfg = _build_job_config(single_date_raw, subset_entry)
+
+            run_global_pipeline(
+                run_id=auto_run_id,
+                compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
+                cfg=cfg,
+                apply_icemask=apply_icemask,
+                s3_source=s3_source_cfg,
+            )
+
+        print(f"\nAll {len(date_iterations)} date(s) processed.")
+        return
+
+    # --- Single run (explicit run_id or range mode) --------------------------
+    cfg = _build_job_config(raw, subset_entry)
 
     run_global_pipeline(
         run_id=run_id,
