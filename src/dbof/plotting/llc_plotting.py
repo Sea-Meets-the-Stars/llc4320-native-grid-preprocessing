@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import cmocean
 import numpy as np
+
 # import dask.array as da
 
 def plot_log_faces_layout(da, color_map = cmocean.cm.thermal, vmin=None, vmax=None):
@@ -137,7 +138,7 @@ def plot_llc_faces_layout(ds, color_map = cmocean.cm.thermal, vmin=None, vmax=No
         ax = axes[row * 5 + col]
 
         if not is_mask:
-            mappable= var.plot(ax=ax, add_colorbar=False, cmap=color_map, vmin=vmin, vmax=vmax)
+            mappable= var.plot(ax=ax, cmap=color_map, vmin=vmin, vmax=vmax)
         else:
             mappable = var.plot(ax=ax, add_colorbar=False, cmap=color_map, vmin=vmin, vmax=vmax, shading="nearest", infer_intervals=False)
 

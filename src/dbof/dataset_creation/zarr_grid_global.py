@@ -190,6 +190,9 @@ class GlobalGridZarrReader:
         # use_consolidated=False: zarr v3 defaults to looking for consolidated
         # metadata and raises GroupNotFoundError when absent.
         self.root = zarr.open_group(store=store, mode="r", use_consolidated=False)
+        print(list(self.root.attrs.keys()))
+
+        print(self.root)
 
         self.grid_shape = tuple(self.root.attrs["grid_shape"])
         self.variables  = list(self.root.attrs["variables"])
