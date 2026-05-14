@@ -222,9 +222,9 @@ def ensure_coord_written(root, ds, coord_name, chunk_len=None):
 
 def infer_layout(da: xr.DataArray):
     """
-    Classify a DataArray as 1D-vertical, 2D-horizontal, or 3D-horizontal
-    based on its dimension names.
-    Drives which writer function is used to transfer the variable to S3. 
+    Classify a DataArray as 1D-time-only, 1D-vertical, 2D-horizontal, or
+    3D-horizontal based on its dimension names.
+    Drives which writer function is used to transfer the variable to S3.
     """
     dims = da.dims
     has_time = "time" in dims
@@ -237,6 +237,13 @@ def infer_layout(da: xr.DataArray):
     if len(vdims) > 1:
         raise ValueError(f"{da.name} dims {dims}: multiple vertical dims found")
     vdim = vdims[0] if vdims else None
+
+    # 1D time-only (e.g. the "time" coordinate variable itself)
+    if dims == ("time",):
+        return {
+            "kind": "1d_time",
+            "has_time": True,
+        }
 
     # 1D vertical profile
     if vdim is not None and not has_face:
@@ -455,6 +462,34 @@ def write_1d_vertical(root, ds, da, time_idx):
     _verify_tile(z_var, (slice(None),), vals, f"{da.name} (1D)")
 
 
+def write_1d_time(root, ds, da, time_idx):
+    """Write the scalar time value for a single timestep into the zarr store.
+
+    The source ``da`` has shape ``(ntime,)`` over the full time dimension.
+    We select ``time_idx`` and store the resulting scalar as a 1-element
+    array so downstream readers can retrieve the MIT-epoch time index for
+    this snapshot.
+    """
+    val = da.isel(time=time_idx).values
+    # Store as a scalar (0-d) or 1-element array — 1-element is safer for
+    # zarr readers that expect at least one dimension.
+    out = np.atleast_1d(val)
+
+    logging.info(f"Writing time value for {da.name}: time_idx={time_idx} → value={val}")
+    z_var = root.create_array(
+        da.name,
+        shape=out.shape,
+        chunks=out.shape,
+        dtype=out.dtype,
+        overwrite=True,
+        fill_value=0,
+    )
+    safe_set_attrs(z_var, da.attrs)
+    z_var[:] = out
+
+    _verify_tile(z_var, (slice(None),), out, f"{da.name} (1D time)")
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -587,7 +622,9 @@ def _transfer_variables(ds, variables, root, tile_j, tile_i,
 
         logging.info(f"=== {var}: {kind}, dims={da.dims} ===")
 
-        if kind == "2d_horizontal":
+        if kind == "1d_time":
+            write_1d_time(root, ds, da, time_idx)
+        elif kind == "2d_horizontal":
             write_2d_horizontal(root, ds, da, time_idx, tile_j, tile_i)
         elif kind == "3d_horizontal":
             write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i)

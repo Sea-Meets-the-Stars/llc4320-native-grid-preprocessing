@@ -666,15 +666,21 @@ def run_global_pipeline(
     _KERCHUNK_VARS = {'Theta', 'Salt', 'Eta', 'U', 'V', 'W'}
     s3_vars = [ch for ch in model_feature_channels if ch not in _KERCHUNK_VARS]
     iter_to_date = {}
-    if s3_vars and s3_source:
-        if cfg.data.date_iterations is None:
-            raise ValueError(
-                f"S3-only variables {s3_vars} require 'date_iterations' in the "
-                "config when 's3_source' is provided."
-            )
+    if s3_source and cfg.data.date_iterations is not None:
+        if s3_vars:
+            logging.info(f"Will load {s3_vars} from S3 timestep stores")
         for date_str, it in zip(cfg.data.date_iterations, iter_range):
             iter_to_date[int(it)] = date_str
-        logging.info(f"Will load {s3_vars} from S3 timestep stores")
+    elif s3_vars and s3_source is None:
+        logging.warning(
+            f"S3-only variables {s3_vars} requested but no s3_source configured; "
+            "these will be missing from the output."
+        )
+    elif s3_vars and cfg.data.date_iterations is None:
+        raise ValueError(
+            f"S3-only variables {s3_vars} require 'date_iterations' in the "
+            "config when 's3_source' is provided."
+        )
 
     # Construct the zarr output store
     zarr_ds = zarr_dataset.GlobalZarrDataset(
@@ -713,6 +719,92 @@ def run_global_pipeline(
                         da = da.isel(k_l=0)
                     ds_merge[v] = da
             logging.info(f"S3 variables merged: {[v for v in s3_vars if v in ds_s3]}")
+
+        # -----------------------------------------------------------------
+        # Cross-check: verify OSN and MIT timestamps refer to the same
+        # physical time.
+        #
+        # transfer_llc4320.py stores two metadata items on each per-date
+        # zarr store:
+        #   selected_iteration : int  — date_to_iteration(date_str), NO offset
+        #   selected_date_utc  : str  — the original date string
+        #
+        # It also (optionally) stores a 'time' data variable holding the
+        # value of the MIT zarr's time coordinate at the selected index.
+        #
+        # We use selected_iteration (most reliable) and cross-check:
+        #   OSN iteration  ==  selected_iteration + FIRST_WIND_RECORD_OFFSET
+        #
+        # If 'time' was also transferred, we log its raw value for extra
+        # visibility.
+        # -----------------------------------------------------------------
+        if s3_source and int(it) in iter_to_date:
+            _date_for_check = iter_to_date[int(it)]
+            try:
+                ds_check = get_raw_data.get_s3_timestep_data(
+                    s3_source['s3_endpoint'],
+                    s3_source['bucket'],
+                    s3_source['folder'],
+                    _date_for_check,
+                    face_range=LLC_FACES,
+                    vars_requested=['time'],
+                )
+
+                # --- Primary check: selected_iteration attribute ----------
+                mit_iter_attr = ds_check.attrs.get('selected_iteration')
+                mit_date_attr = ds_check.attrs.get('selected_date_utc')
+
+                if mit_iter_attr is not None:
+                    expected_osn_iter = int(mit_iter_attr) + FIRST_WIND_RECORD_OFFSET
+                    if expected_osn_iter == int(it):
+                        logging.info(
+                            f"TIMESTAMP CHECK PASSED: OSN iter={it}, "
+                            f"MIT selected_iteration={mit_iter_attr}, "
+                            f"MIT date='{mit_date_attr}', "
+                            f"reconstructed OSN iter="
+                            f"{mit_iter_attr}+{FIRST_WIND_RECORD_OFFSET}"
+                            f"={expected_osn_iter} ✓"
+                        )
+                    else:
+                        logging.error(
+                            f"TIMESTAMP MISMATCH: OSN iter={it}, "
+                            f"MIT selected_iteration={mit_iter_attr} → "
+                            f"expected OSN iter={expected_osn_iter} "
+                            f"(date='{_date_for_check}')"
+                        )
+                        raise RuntimeError(
+                            f"Timestep alignment failure for "
+                            f"'{_date_for_check}': OSN iteration {it} != "
+                            f"MIT-derived iteration {expected_osn_iter} "
+                            f"(selected_iteration={mit_iter_attr}, "
+                            f"FIRST_WIND_RECORD_OFFSET="
+                            f"{FIRST_WIND_RECORD_OFFSET})."
+                        )
+
+                # --- Secondary: log raw 'time' variable if present --------
+                if 'time' in ds_check:
+                    mit_time_raw = ds_check['time'].values.flat[0]
+                    logging.info(
+                        f"  MIT 'time' variable raw value: {mit_time_raw}"
+                    )
+
+                if mit_iter_attr is None and 'time' not in ds_check:
+                    logging.warning(
+                        f"Timestamp cross-check skipped for "
+                        f"'{_date_for_check}': no 'selected_iteration' "
+                        f"attribute and no 'time' variable in S3 store. "
+                        f"Re-run transfer_llc4320.py with --variables time "
+                        f"to enable."
+                    )
+
+                ds_check.close()
+            except Exception as exc:
+                if "alignment" in str(exc).lower():
+                    raise   # re-raise our own RuntimeError
+                logging.warning(
+                    f"Timestamp cross-check could not be completed for "
+                    f"iter={it}: {exc}"
+                )
 
         process_time_snapshot(
             cfg,
