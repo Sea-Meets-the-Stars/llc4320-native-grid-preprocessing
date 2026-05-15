@@ -483,6 +483,7 @@ def write_1d_time(root, ds, da, time_idx):
         dtype=out.dtype,
         overwrite=True,
         fill_value=0,
+        dimension_names=("time",),
     )
     safe_set_attrs(z_var, da.attrs)
     z_var[:] = out
