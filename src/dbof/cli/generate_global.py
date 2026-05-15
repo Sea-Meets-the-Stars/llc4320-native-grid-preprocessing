@@ -86,7 +86,7 @@ All ``date_iterations`` entries in the YAML must use ISO format:
 import sys
 import logging
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # numerical / compute
@@ -133,6 +133,7 @@ LLC_FACES                = range(13)
 LLC4320_START_DATE    = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
 LLC4320_TIMESTEP_SECS = 25           # seconds per model step
 
+
 # ISO 8601-style format: 'YYYY-MM-DD HH:MM:SS'  (e.g. '2012-09-11 12:00:00')
 DATE_FMT              = '%Y-%m-%d %H:%M:%S'
 
@@ -163,7 +164,7 @@ def generate_logging(cfg: config.JobConfig) -> None:
     )
 
 
-def _date_to_iteration(date_str: str) -> int:
+def _date_to_iteration(date_str: str, osn_offset: bool = True) -> int:
     """
     Convert a date string in 'YYYY-MM-DD HH:MM:SS' format to an LLC4320
     iteration number.
@@ -171,7 +172,19 @@ def _date_to_iteration(date_str: str) -> int:
     The LLC4320 model starts at 2011-09-13 00:00:00 UTC (iteration 0) with a
     25-second timestep.  The returned iteration is rounded to the nearest step.
 
-    NOTE: Callers that access OSN data must add FIRST_WIND_RECORD_OFFSET (10 368).
+    FIRST_WIND_RECORD_OFFSET (10 368) is added by default to align with the OSN
+    data store's iteration numbering, which is shifted relative to the MIT model epoch.
+    i.e. the start date for OSN is 2011-09-10 00:00:00 UTC.
+
+    Parameters
+    ----------
+    date_str : str
+        Date in 'YYYY-MM-DD HH:MM:SS' format.
+    osn_offset : bool, default True
+        If True, add FIRST_WIND_RECORD_OFFSET (10 368) to the raw iteration
+        number.  This is required when accessing data from the OSN kerchunk
+        store, whose iteration numbering is shifted relative to the MIT model
+        epoch.
     """
     dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
     delta = dt - LLC4320_START_DATE
@@ -180,7 +193,10 @@ def _date_to_iteration(date_str: str) -> int:
             f"Date '{date_str}' is before LLC4320 start ({LLC4320_START_DATE.date()}). "
             f"Expected format: YYYY-MM-DD HH:MM:SS  (e.g. '2011-09-13 00:00:00')."
         )
-    return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
+    it = round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
+    if osn_offset:
+        it += FIRST_WIND_RECORD_OFFSET
+    return it
 
 
 def calculate_iterations_for_llc(cfg: config.JobConfig) -> np.ndarray:
@@ -199,10 +215,11 @@ def calculate_iterations_for_llc(cfg: config.JobConfig) -> np.ndarray:
        ``sampling_step``, and ``timestep_hours``.  If ``timestep_hours`` is
        ``None`` the range runs to ``MAX_ITER``.
     """
+
+    # Iteration mode: convert date strings → iteration numbers
     if cfg.data.date_iterations is not None:
         iterations = [
-            _date_to_iteration(d) + FIRST_WIND_RECORD_OFFSET
-            for d in cfg.data.date_iterations
+            _date_to_iteration(d) for d in cfg.data.date_iterations
         ]
         logging.info(
             "Using date-derived iteration list (OSN offset applied): "
@@ -331,8 +348,8 @@ def process_time_snapshot(
     mask_vars = {'_land_mask': land_mask_da}
     if apply_icemask:
         logging.info("Calculating and applying ice mask (Theta <= 0) and land mask (hFacC == 0)")
-        ice_mask_da = (ds_merge.Theta <= 0.0)  # True where ice
-        mask_vars['_ice_mask'] = ice_mask_da
+        ice_mask_naive = (ds_merge.Theta <= 0.0)  # True where ice
+        mask_vars['_ice_mask'] = ice_mask_naive
     else:
         logging.info("Calculating and applying land mask (hFacC == 0); ice mask disabled")
 
@@ -722,25 +739,23 @@ def run_global_pipeline(
 
         # -----------------------------------------------------------------
         # Cross-check: verify OSN and MIT timestamps refer to the same
-        # physical time.
+        # physical time by comparing the actual 'time' variable from
+        # both datasets.
         #
-        # transfer_llc4320.py stores two metadata items on each per-date
-        # zarr store:
-        #   selected_iteration : int  — date_to_iteration(date_str), NO offset
-        #   selected_date_utc  : str  — the original date string
+        # OSN time: CF-encoded "seconds since 2011-09-10", decoded by
+        #           xarray to datetime64 (scalar coordinate after isel).
+        # MIT time: numpy.datetime64[ns] stored directly in the S3
+        #           timestep Zarr store written by transfer_llc4320.py.
         #
-        # It also (optionally) stores a 'time' data variable holding the
-        # value of the MIT zarr's time coordinate at the selected index.
-        #
-        # We use selected_iteration (most reliable) and cross-check:
-        #   OSN iteration  ==  selected_iteration + FIRST_WIND_RECORD_OFFSET
-        #
-        # If 'time' was also transferred, we log its raw value for extra
-        # visibility.
+        # Both should resolve to the same datetime for a given date.
         # -----------------------------------------------------------------
         if s3_source and int(it) in iter_to_date:
             _date_for_check = iter_to_date[int(it)]
             try:
+                # OSN time: scalar coordinate on ds (after isel(time=0))
+                osn_time = np.datetime64(ds['time'].values, 'ns')
+
+                # MIT time: load from S3 timestep store
                 ds_check = get_raw_data.get_s3_timestep_data(
                     s3_source['s3_endpoint'],
                     s3_source['bucket'],
@@ -750,51 +765,32 @@ def run_global_pipeline(
                     vars_requested=['time'],
                 )
 
-                # --- Primary check: selected_iteration attribute ----------
-                mit_iter_attr = ds_check.attrs.get('selected_iteration')
-                mit_date_attr = ds_check.attrs.get('selected_date_utc')
+                if 'time' in ds_check:
+                    mit_time = np.datetime64(ds_check['time'].values.flat[0], 'ns')
 
-                if mit_iter_attr is not None:
-                    expected_osn_iter = int(mit_iter_attr) + FIRST_WIND_RECORD_OFFSET
-                    if expected_osn_iter == int(it):
+                    if osn_time == mit_time:
                         logging.info(
-                            f"TIMESTAMP CHECK PASSED: OSN iter={it}, "
-                            f"MIT selected_iteration={mit_iter_attr}, "
-                            f"MIT date='{mit_date_attr}', "
-                            f"reconstructed OSN iter="
-                            f"{mit_iter_attr}+{FIRST_WIND_RECORD_OFFSET}"
-                            f"={expected_osn_iter} ✓"
+                            f"TIMESTAMP CHECK PASSED: OSN time={osn_time}, "
+                            f"MIT time={mit_time}, "
+                            f"date='{_date_for_check}' ✓"
                         )
                     else:
                         logging.error(
-                            f"TIMESTAMP MISMATCH: OSN iter={it}, "
-                            f"MIT selected_iteration={mit_iter_attr} → "
-                            f"expected OSN iter={expected_osn_iter} "
+                            f"TIMESTAMP MISMATCH: OSN time={osn_time}, "
+                            f"MIT time={mit_time} "
                             f"(date='{_date_for_check}')"
                         )
                         raise RuntimeError(
                             f"Timestep alignment failure for "
-                            f"'{_date_for_check}': OSN iteration {it} != "
-                            f"MIT-derived iteration {expected_osn_iter} "
-                            f"(selected_iteration={mit_iter_attr}, "
-                            f"FIRST_WIND_RECORD_OFFSET="
-                            f"{FIRST_WIND_RECORD_OFFSET})."
+                            f"'{_date_for_check}': "
+                            f"OSN time={osn_time} != MIT time={mit_time}."
                         )
-
-                # --- Secondary: log raw 'time' variable if present --------
-                if 'time' in ds_check:
-                    mit_time_raw = ds_check['time'].values.flat[0]
-                    logging.info(
-                        f"  MIT 'time' variable raw value: {mit_time_raw}"
-                    )
-
-                if mit_iter_attr is None and 'time' not in ds_check:
+                else:
                     logging.warning(
                         f"Timestamp cross-check skipped for "
-                        f"'{_date_for_check}': no 'selected_iteration' "
-                        f"attribute and no 'time' variable in S3 store. "
-                        f"Re-run transfer_llc4320.py with --variables time "
-                        f"to enable."
+                        f"'{_date_for_check}': no 'time' variable in S3 "
+                        f"store. Re-run transfer_llc4320.py with "
+                        f"--variables time to enable."
                     )
 
                 ds_check.close()
