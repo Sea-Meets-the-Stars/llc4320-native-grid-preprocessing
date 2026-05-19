@@ -217,8 +217,9 @@ def get_remote_gridfile(endpoint_url):
 
     return grid
 
-    # ---------------------------------------------------------------------------
-# S3 timestep store access
+
+# ---------------------------------------------------------------------------
+# S3 timestep store access - SURFACE ONLY
 # ---------------------------------------------------------------------------
 
 # Chunks matching the on-disk layout of stores written by transfer_llc4320.py
