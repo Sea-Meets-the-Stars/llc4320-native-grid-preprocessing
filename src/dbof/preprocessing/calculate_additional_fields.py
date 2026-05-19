@@ -173,6 +173,58 @@ def grad_eta2(ds_merge, grid):
     gradeta2 = physical_calculations.grad_squared(zonal_grad_eta, merid_grad_eta)
     return gradeta2
 
+def turner_angle(ds_merge, grid, *, gradtheta2=None, gradsalt2=None, gradrho2=None):
+    """Compute the horizontal Turner Angle.
+
+    Tu_h = arctan( ∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T - β∇S) )
+
+        Linear EOS  ∇ρ = ρ₀(−α∇T + β∇S) -->
+
+        Numerator   = ∇ρ·(α∇T + β∇S) = ρ₀(β²|∇S|² - α²|∇T|²)
+                 [T·S cross terms cancel exactly]
+
+        Denominator = ∇ρ·(α∇T - β∇S) = -|∇ρ|²/ρ₀
+                 [follows from |∇ρ|² = ρ₀²(α²|∇T|² - 2αβ∇T·∇S + β²|∇S|²)]
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Merged dataset containing 'Theta', 'Salt', grid metrics
+        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    gradtheta2 : array-like, optional
+        Pre-computed |∇θ|².  Computed from *ds_merge* when *None*.
+    gradsalt2 : array-like, optional
+        Pre-computed |∇S|².  Computed from *ds_merge* when *None*.
+    gradrho2 : array-like, optional
+        Pre-computed |∇ρ|².  Computed from *ds_merge* when *None*.
+
+    Returns
+    -------
+    dask.array.Array
+        Turner Angle.
+        Units are degrees.
+    """
+
+    ALPHA = 2.0e-4   # thermal expansion coefficient  (°C⁻¹)
+    BETA  = 7.4e-4   # haline contraction coefficient (PSU⁻¹)
+    RHO0  = 1025.0   # reference density (kg m⁻³)
+
+    if gradtheta2 is None:
+        gradtheta2 = grad_theta2(ds_merge, grid)
+    if gradsalt2 is None:
+        gradsalt2 = grad_salt2(ds_merge, grid)
+    if gradrho2 is None:
+        gradrho2 = grad_rho2(ds_merge, grid)
+
+    numer      = RHO0 * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
+    denom      = np.where(gradrho2 > 0, -gradrho2 / RHO0, np.nan) # Mask pixels where |∇ρ| = 0 to avoid divide-by-zero
+
+    tu_rad = np.arctan(numer / denom)
+    tu_h   = np.degrees(tu_rad)
+
+    return tu_h
 
 # ------------------------------------------------------------------------------------
 # --------------------------------- KINEMATIC ----------------------------------------

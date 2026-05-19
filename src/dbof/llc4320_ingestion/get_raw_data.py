@@ -216,3 +216,87 @@ def get_remote_gridfile(endpoint_url):
         ds_local.close()
 
     return grid
+
+    # ---------------------------------------------------------------------------
+# S3 timestep store access
+# ---------------------------------------------------------------------------
+
+# Chunks matching the on-disk layout of stores written by transfer_llc4320.py
+s3_timestep_chunks = {"face": 1, "k": 51, "j": 720, "i": 720}
+
+
+def _s3_storage_options(s3_endpoint, anon=None):
+    """S3 storage options with automatic credential detection.
+
+    Parameters
+    ----------
+    s3_endpoint : str
+        S3-compatible endpoint URL.
+    anon : bool or None
+        Force anonymous access (True) or credentialed access (False).
+        If None, uses anonymous for the OSN endpoint and credentialed
+        for all others (e.g. NRP Nautilus).
+    """
+    if anon is None:
+        anon = "mghp.osn.xsede.org" in s3_endpoint
+    return {
+        "anon": anon,
+        "client_kwargs": {"endpoint_url": s3_endpoint},
+    }
+
+
+def get_s3_timestep_data(
+    s3_endpoint,
+    bucket,
+    folder,
+    date_str,
+    face_range=None,
+    vars_requested=None,
+):
+    """
+    Load a single-timestep snapshot from an S3 timestep store.
+
+    Parameters
+    ----------
+    s3_endpoint : str
+        S3-compatible endpoint URL.
+    bucket : str
+        S3 bucket (e.g. ``'dbof/'``).
+    folder : str
+        S3 folder within the bucket (e.g. ``'LLC4320_v1'``).
+    date_str : str
+        Date in 'YYYY-MM-DD HH:MM:SS' format.
+    face_range : iterable of int or None
+        LLC face indices to include.  ``None`` loads all.
+    vars_requested : list[str] or None
+        Variables to extract.  ``None`` returns all.
+
+    Returns
+    -------
+    xarray.Dataset
+    """
+    from datetime import datetime as _dt
+
+    date_tag = _dt.strptime(date_str, '%Y-%m-%d %H:%M:%S').strftime("%Y%m%dT%H")
+    store_name = f"{date_tag}.zarr"
+    s3_url = f"s3://{bucket}{folder}/{store_name}"
+
+    ds = xr.open_zarr(
+        s3_url,
+        consolidated=False,
+        chunks=s3_timestep_chunks,
+        storage_options=_s3_storage_options(s3_endpoint),
+    )
+
+    if vars_requested is not None:
+        available = [v for v in vars_requested if v in ds]
+        ds = ds[available]
+
+    if face_range is not None and 'face' in ds.dims:
+        face_list = list(face_range)
+        if face_list != list(range(ds.sizes['face'])):
+            ds = ds.isel(face=face_list)
+            ds = ds.chunk({"face": ds.sizes["face"]})
+
+    print(f"S3 timestep data loaded: {store_name}, vars={list(ds.data_vars)}")
+    return ds
