@@ -1,0 +1,316 @@
+# ---------------------------------------------------------------------------
+# Config for generate_global_depth.py — S3-based pipeline
+#
+# This pipeline reads from S3 timestep stores created by transfer_llc4320.py
+# and supports two modes:
+#   1. Surface-only variables (direct output)
+#   2. Derived depth diagnostics (depth -> compute -> reduce -> save)
+#
+# Full global (x, y, z) stacks are never written.
+#
+# Usage:
+#   generate-global-depth --config configs/global_depth.yaml --subset derived_fields
+#   generate-global-depth --config configs/global_depth.yaml --subset eta
+# ---------------------------------------------------------------------------
+
+run:
+  run_id: "global_depth_test00"
+  log_dir: "../test_logs/"
+
+data:
+  # date_iterations are required for this pipeline.
+  # Each entry must match a transferred timestep store in S3
+  # (e.g., '2012-11-09 12:00:00' → 20121109T12.zarr).
+  date_iterations:
+    - '2012-11-09 12:00:00'
+
+  # Required by DataConfig defaults; not used by this pipeline.
+  endpoint_url: "https://mghp.osn.xsede.org"
+  sampling_step: 168
+  start_record: 1180
+
+sampling:
+  # Not used by this script; required by DataConfig.
+  bias_to_high_gradients: 1.0
+  sample_points_per_snapshot: 1
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  folder: "properties/"
+  dataset_name: "global_depth.zarr"    # overridden per-subset below
+  target_km_res: 150
+  down_sample_res: 64
+
+features:
+  # Overwritten at runtime by the selected subset's values below.
+  model_data_feature_channels: []
+  compute_features_channels: []
+
+runtime:
+  zarr_async_concurrency: 8
+  # The Nautilus NRP S3 endpoint intermittently serves corrupt bytes.
+  # The distributed scheduler retries failed tasks (retries=10 in
+  # calculated_fields_at_depth.py).  Keep n_workers × threads moderate.
+  dask_scheduler: "distributed"
+  dask_n_workers: 4
+  dask_threads_per_worker: 4
+
+
+# ---------------------------------------------------------------------------
+# S3 source: location of the transferred LLC4320 timestep stores
+# (written by transfer_llc4320.py).
+# ---------------------------------------------------------------------------
+s3_source:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  folder: "LLC4320_v1"
+  # Grid store lives in the original (non-corrupt) transfer location.
+  # If grid_folder is set, grid.zarr is read from here instead of folder.
+  grid_folder: "LLC4320"
+
+# ---------------------------------------------------------------------------
+# active_subset : default when --subset is not passed on the CLI.
+# ---------------------------------------------------------------------------
+active_subset: stratification
+
+subsets:
+
+  # ===========================================================================
+  # Depth-resolved diagnostic subsets
+  # (depth -> compute -> reduce -> save; full water column used lazily)
+  #
+  # Fields with four depth variants use the suffixes:
+  #   _sfc      z = 0 (surface, k=0)
+  #   _z25m     z = 25 m (fixed depth, ~k=3)
+  #   _mld      interpolated to the mixed-layer depth
+  #   _mld_mean thickness-weighted mean over 0 <= z <= MLD
+  # ===========================================================================
+
+  stratification:
+    dataset_name: "stratification.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      - mixed_layer_depth
+      - N2_sfc
+      - N2_z25m
+      - N2_mld
+      - N2_mld_mean
+      - ml_heat_content
+
+  vertical_shear:
+    dataset_name: "vertical_shear.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      #- vertical_shear_sfc
+      #- vertical_shear_z25m
+      - vertical_shear_mld
+      #- vertical_shear_mld_mean
+      #- Ri_sfc
+      #- Ri_z25m
+      - Ri_mld
+      #- Ri_mld_mean
+
+  mixing_parameters:
+    dataset_name: "mixing_parameters.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      #- Fr_sfc
+      #- Fr_z25m
+      - Fr_mld
+      #- Fr_mld_mean
+      #- Ro_sfc
+      #- Ro_z25m
+      - Ro_mld
+      #- Ro_mld_mean
+      - Burger_number
+
+  ertel_pv:
+    dataset_name: "ertel_pv.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      #- ertel_pv_sfc
+      #- ertel_pv_z25m
+      - ertel_pv_mld
+      #- ertel_pv_mld_mean
+      #- ertel_pv_vertical_sfc
+      #- ertel_pv_vertical_z25m
+      - ertel_pv_vertical_mld
+      #- ertel_pv_vertical_mld_mean
+      #- ertel_pv_tilt_sfc
+      #- ertel_pv_tilt_z25m
+      - ertel_pv_tilt_mld
+      #- ertel_pv_tilt_mld_mean
+
+  buoyancy_fluxes:
+    dataset_name: "buoyancy_fluxes.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      #- uB_sfc
+      #- uB_z25m
+      - uB_mld
+      #- uB_mld_mean
+      #- vB_sfc
+      #- vB_z25m
+      - vB_mld
+      #- vB_mld_mean
+      #- wB_sfc
+      #- wB_z25m
+      - wB_mld
+      #- wB_mld_mean
+
+  surface_wind:
+    dataset_name: "surface_wind.zarr"
+    surface_only: true
+    model_data_feature_channels:
+      - oceTAUX
+      - oceTAUY
+      - oceQnet
+    compute_features_channels:
+      - wind_stress_curl
+      - ekman_pumping
+      - u_ekman
+      - v_ekman
+
+  energetics:
+    dataset_name: "energetics.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      - KE_sfc
+      - KE_z25m
+      - KE_mld
+      - KE_mld_mean
+
+  frontal_structure:
+    dataset_name: "frontal_structure.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      - gradb2_sfc
+      #- gradb2_z25m
+      #- gradb2_mld
+      #- gradb2_mld_mean
+      - gradtheta2_sfc
+      #- gradtheta2_z25m
+      #- gradtheta2_mld
+      #- gradtheta2_mld_mean
+      - gradsalt2_sfc
+      #- gradsalt2_z25m
+      #- gradsalt2_mld
+      #- gradsalt2_mld_mean
+      - gradrho2_sfc
+      #- gradrho2_z25m
+      #- gradrho2_mld
+      #- gradrho2_mld_mean
+      - gradeta2_sfc
+      - turner_angle_sfc
+      #- turner_angle_z25m
+      #- turner_angle_mld
+      #- turner_angle_mld_mean
+
+  kinematic:
+    dataset_name: "kinematic.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      - relative_vorticity_sfc
+      #- relative_vorticity_z25m
+      #- relative_vorticity_mld
+      #- relative_vorticity_mld_mean
+      - strain_n_sfc
+      #- strain_n_z25m
+      #- strain_n_mld
+      #- strain_n_mld_mean
+      - strain_s_sfc
+      #- strain_s_z25m
+      #- strain_s_mld
+      #- strain_s_mld_mean
+      - strain_mag_sfc
+      #- strain_mag_z25m
+      #- strain_mag_mld
+      #- strain_mag_mld_mean
+      - divergence_sfc
+      #- divergence_z25m
+      #- divergence_mld
+      #- divergence_mld_mean
+      - okubo_weiss_sfc
+      #- okubo_weiss_z25m
+      #- okubo_weiss_mld
+      #- okubo_weiss_mld_mean
+
+  frontogenesis:
+    dataset_name: "frontogenesis.zarr"
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      - frontogenesis_tendency_sfc
+      #- frontogenesis_tendency_z25m
+      #- frontogenesis_tendency_mld
+      #- frontogenesis_tendency_mld_mean
+      - frontogenesis_geo_sfc
+      #- frontogenesis_geo_z25m
+      #- frontogenesis_geo_mld
+      #- frontogenesis_geo_mld_mean
+      - frontogenesis_ageo_sfc
+      #- frontogenesis_ageo_z25m
+      #- frontogenesis_ageo_mld
+      #- frontogenesis_ageo_mld_mean
+      - ug_sfc
+      - vg_sfc
+
+  # ===========================================================================
+  # Surface-only subsets
+  # (read from the same S3 timestep stores but only use surface data)
+  # ===========================================================================
+
+  native_fields:
+    dataset_name: "native_fields.zarr"
+    surface_only: true
+    model_data_feature_channels:
+      - Theta
+      - Salt
+      - Eta
+      - U
+      - V
+      - W
+    compute_features_channels: []
+
+  native_surface:
+    dataset_name: "native_surface.zarr"
+    surface_only: true
+    model_data_feature_channels:
+      - Theta
+      - Salt
+      - Eta
+      - U
+      - V
+      - W
+    compute_features_channels: []
+
+  eta:
+    dataset_name: "eta.zarr"
+    surface_only: true
+    model_data_feature_channels:
+      - Eta
+    compute_features_channels: []
+
+  icearea:
+    dataset_name: "icearea.zarr"
+    surface_only: true
+    model_data_feature_channels:
+      - SIarea
+    compute_features_channels: []
+
+  windstress:
+    dataset_name: "windstress.zarr"
+    surface_only: true
+    model_data_feature_channels:
+      - oceTAUX
+      - oceTAUY
+    compute_features_channels: []

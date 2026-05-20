@@ -8,8 +8,7 @@ The subset of properties to compute is selected at runtime via ``--subset``
 Available subsets
 -----------------
 native_fields
-    Raw model state variables only (Theta, Salt, Eta, U, V, W, oceTAUX,
-    oceTAUY, SIarea).
+    Raw model state variables only (Theta, Salt, Eta, U, V, W).
     No derived quantities are computed.
 
 frontal_structure
@@ -42,20 +41,10 @@ frontogenesis
 CLI usage
 ---------
     generate-global \\
-        --config configs/global.yaml \\
-        --subset native_fields \\
+        --config configs/global_OSN.yaml \\
+        --subset kinematic \\
         [--run_id my_run] \\
-        [--icemask]
-
-When ``--run_id`` is omitted and ``date_iterations`` is set in the YAML,
-each date is processed as a separate pipeline run with an auto-generated
-run_id in YYYYMMDD_HHMMSS format.  For example, two dates produce::
-
-    s3://dbof/surface_fields/20111209_120000/native_fields.zarr
-    s3://dbof/surface_fields/20121109_120000/native_fields.zarr
-
-When ``--run_id`` is provided explicitly, all dates are written into a
-single zarr store under that run_id (original behaviour).
+        [--no-icemask]
 
 Config design
 -------------
@@ -67,7 +56,7 @@ constructed:
     subsets:
       native_fields:
         dataset_name: "native_fields.zarr"
-        model_data_feature_channels: [Theta, Salt, Eta, U, V, W, ...]
+        model_data_feature_channels: [Theta, Salt, Eta, U, V, W]
         compute_features_channels: []
       frontal_structure:
         ...
@@ -86,7 +75,7 @@ All ``date_iterations`` entries in the YAML must use ISO format:
 import sys
 import logging
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 # numerical / compute
@@ -133,7 +122,6 @@ LLC_FACES                = range(13)
 LLC4320_START_DATE    = datetime(2011, 9, 13, 0, 0, 0, tzinfo=timezone.utc)
 LLC4320_TIMESTEP_SECS = 25           # seconds per model step
 
-
 # ISO 8601-style format: 'YYYY-MM-DD HH:MM:SS'  (e.g. '2012-09-11 12:00:00')
 DATE_FMT              = '%Y-%m-%d %H:%M:%S'
 
@@ -164,7 +152,7 @@ def generate_logging(cfg: config.JobConfig) -> None:
     )
 
 
-def _date_to_iteration(date_str: str, osn_offset: bool = True) -> int:
+def _date_to_iteration(date_str: str) -> int:
     """
     Convert a date string in 'YYYY-MM-DD HH:MM:SS' format to an LLC4320
     iteration number.
@@ -172,19 +160,11 @@ def _date_to_iteration(date_str: str, osn_offset: bool = True) -> int:
     The LLC4320 model starts at 2011-09-13 00:00:00 UTC (iteration 0) with a
     25-second timestep.  The returned iteration is rounded to the nearest step.
 
-    FIRST_WIND_RECORD_OFFSET (10 368) is added by default to align with the OSN
-    data store's iteration numbering, which is shifted relative to the MIT model epoch.
-    i.e. the start date for OSN is 2011-09-10 00:00:00 UTC.
-
-    Parameters
-    ----------
-    date_str : str
-        Date in 'YYYY-MM-DD HH:MM:SS' format.
-    osn_offset : bool, default True
-        If True, add FIRST_WIND_RECORD_OFFSET (10 368) to the raw iteration
-        number.  This is required when accessing data from the OSN kerchunk
-        store, whose iteration numbering is shifted relative to the MIT model
-        epoch.
+    Examples
+    --------
+    _date_to_iteration('2011-09-13 00:00:00')  ->  0
+    _date_to_iteration('2012-01-01 00:00:00')  ->  ~1,011,456
+    _date_to_iteration('2012-09-11 12:00:00')  ->  ~1,463,616
     """
     dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
     delta = dt - LLC4320_START_DATE
@@ -193,10 +173,7 @@ def _date_to_iteration(date_str: str, osn_offset: bool = True) -> int:
             f"Date '{date_str}' is before LLC4320 start ({LLC4320_START_DATE.date()}). "
             f"Expected format: YYYY-MM-DD HH:MM:SS  (e.g. '2011-09-13 00:00:00')."
         )
-    it = round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
-    if osn_offset:
-        it += FIRST_WIND_RECORD_OFFSET
-    return it
+    return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
 
 
 def calculate_iterations_for_llc(cfg: config.JobConfig) -> np.ndarray:
@@ -215,14 +192,10 @@ def calculate_iterations_for_llc(cfg: config.JobConfig) -> np.ndarray:
        ``sampling_step``, and ``timestep_hours``.  If ``timestep_hours`` is
        ``None`` the range runs to ``MAX_ITER``.
     """
-
-    # Iteration mode: convert date strings → iteration numbers
     if cfg.data.date_iterations is not None:
-        iterations = [
-            _date_to_iteration(d) for d in cfg.data.date_iterations
-        ]
+        iterations = [_date_to_iteration(d) for d in cfg.data.date_iterations]
         logging.info(
-            "Using date-derived iteration list (OSN offset applied): "
+            "Using date-derived iteration list: "
             + ", ".join(f"'{d}' → {it}" for d, it in zip(cfg.data.date_iterations, iterations))
         )
         return np.array(iterations, dtype=int)
@@ -320,10 +293,6 @@ def process_time_snapshot(
     # (face, j, i) grid before the face→latlon stitch.
     ds_merge["V"] = grid.interp(ds_merge["V"], 'Y', boundary='fill')
     ds_merge["U"] = grid.interp(ds_merge["U"], 'X', boundary='fill')
-    if "oceTAUY" in ds_merge:
-        ds_merge["oceTAUY"] = grid.interp(ds_merge["oceTAUY"], 'Y', boundary='fill')
-    if "oceTAUX" in ds_merge:
-        ds_merge["oceTAUX"] = grid.interp(ds_merge["oceTAUX"], 'X', boundary='fill')
 
     # Assemble all channels into a single Dataset for a single conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels
@@ -338,18 +307,14 @@ def process_time_snapshot(
         ds_to_convert['V'].attrs.pop('mate', None)
     if 'U' in ds_to_convert.variables:
         ds_to_convert['U'].attrs['mate'] = 'V'
-    if 'oceTAUY' in ds_to_convert.variables:
-        ds_to_convert['oceTAUY'].attrs.pop('mate', None)
-    if 'oceTAUX' in ds_to_convert.variables:
-        ds_to_convert['oceTAUX'].attrs['mate'] = 'oceTAUY'
 
     # land mask (always applied) + optional ice mask
     land_mask_da = (ds_merge.hFacC == 0)  # True where land (hFacC == 0)
     mask_vars = {'_land_mask': land_mask_da}
     if apply_icemask:
         logging.info("Calculating and applying ice mask (Theta <= 0) and land mask (hFacC == 0)")
-        ice_mask_naive = (ds_merge.Theta <= 0.0)  # True where ice
-        mask_vars['_ice_mask'] = ice_mask_naive
+        ice_mask_da = (ds_merge.Theta <= 0.0)  # True where ice
+        mask_vars['_ice_mask'] = ice_mask_da
     else:
         logging.info("Calculating and applying land mask (hFacC == 0); ice mask disabled")
 
@@ -537,17 +502,6 @@ SUBSET_COMPUTE_FNS = {
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-def _date_to_run_id(date_str: str) -> str:
-    """
-    Convert a date string like '2011-12-09 12:00:00' into a directory-safe
-    run_id like '20111209_120000'.
-
-    Format: YYYYMMDD_HHMMSS
-    """
-    dt = datetime.strptime(date_str.strip(), DATE_FMT)
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
 def _parse_args():
     """Parse --config, --run_id, and --subset from sys.argv."""
     parser = argparse.ArgumentParser(
@@ -577,14 +531,14 @@ def _parse_args():
         ),
     )
     parser.add_argument(
-        "--icemask",
+        "--no-icemask",
         dest="apply_icemask",
-        action="store_true",
-        default=False,
+        action="store_false",
+        default=True,
         help=(
-            "Enable the sea-ice mask (Theta <= 0).  By default the ice mask "
-            "is NOT applied.  Pass --icemask to NaN out pixels where surface "
-            "temperature is at or below freezing."
+            "Disable the sea-ice mask (Theta <= 0).  By default the ice mask "
+            "is applied and pixels where surface temperature is at or below "
+            "freezing are set to NaN.  Pass --no-icemask to keep those values."
         ),
     )
     return parser.parse_args()
@@ -600,7 +554,6 @@ def run_global_pipeline(
     compute_fields_fn = None,
     cfg: config.JobConfig = None,
     apply_icemask: bool = True,
-    s3_source: dict = None,
 ) -> None:
     """
     Main orchestration loop for global dataset generation.
@@ -625,12 +578,6 @@ def run_global_pipeline(
     apply_icemask : bool, default True
         When ``True``, pixels where ``Theta <= 0`` are NaN-ed out as sea ice.
         Pass ``False`` to retain sub-freezing surface values.
-    s3_source : dict or None
-        Optional S3 timestep store location (keys: ``s3_endpoint``, ``bucket``,
-        ``folder``).  When provided, variables listed in
-        ``model_feature_channels`` that are not available from the kerchunk
-        endpoint (e.g. ``oceTAUX``, ``oceTAUY``, ``SIarea``) are loaded from
-        these stores instead.  Requires ``date_iterations`` in the config.
     """
     if cfg is None:
         if config_file is None:
@@ -678,27 +625,6 @@ def run_global_pipeline(
     rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
     logging.info(f"LLC rectangular output shape: {rectangular_shape}")
 
-    # Identify model channels that must be loaded from S3 timestep stores
-    # (not available in the kerchunk endpoint).
-    _KERCHUNK_VARS = {'Theta', 'Salt', 'Eta', 'U', 'V', 'W'}
-    s3_vars = [ch for ch in model_feature_channels if ch not in _KERCHUNK_VARS]
-    iter_to_date = {}
-    if s3_source and cfg.data.date_iterations is not None:
-        if s3_vars:
-            logging.info(f"Will load {s3_vars} from S3 timestep stores")
-        for date_str, it in zip(cfg.data.date_iterations, iter_range):
-            iter_to_date[int(it)] = date_str
-    elif s3_vars and s3_source is None:
-        logging.warning(
-            f"S3-only variables {s3_vars} requested but no s3_source configured; "
-            "these will be missing from the output."
-        )
-    elif s3_vars and cfg.data.date_iterations is None:
-        raise ValueError(
-            f"S3-only variables {s3_vars} require 'date_iterations' in the "
-            "config when 's3_source' is provided."
-        )
-
     # Construct the zarr output store
     zarr_ds = zarr_dataset.GlobalZarrDataset(
         cfg.output.bucket,
@@ -716,91 +642,6 @@ def run_global_pipeline(
         ds       = get_raw_data.get_remote_llc_data(ENDPOINT_URL, it, LLC_FACES)
         ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
         logging.info(f"Data loaded for iteration: {it}")
-
-        # Load additional surface variables from S3 timestep stores.
-        if s3_vars and int(it) in iter_to_date:
-            ds_s3 = get_raw_data.get_s3_timestep_data(
-                s3_source['s3_endpoint'],
-                s3_source['bucket'],
-                s3_source['folder'],
-                iter_to_date[int(it)],
-                face_range=LLC_FACES,
-                vars_requested=s3_vars,
-            )
-            for v in s3_vars:
-                if v in ds_s3:
-                    da = ds_s3[v]
-                    if 'k' in da.dims:
-                        da = da.isel(k=0)
-                    if 'k_l' in da.dims:
-                        da = da.isel(k_l=0)
-                    ds_merge[v] = da
-            logging.info(f"S3 variables merged: {[v for v in s3_vars if v in ds_s3]}")
-
-        # -----------------------------------------------------------------
-        # Cross-check: verify OSN and MIT timestamps refer to the same
-        # physical time by comparing the actual 'time' variable from
-        # both datasets.
-        #
-        # OSN time: CF-encoded "seconds since 2011-09-10", decoded by
-        #           xarray to datetime64 (scalar coordinate after isel).
-        # MIT time: numpy.datetime64[ns] stored directly in the S3
-        #           timestep Zarr store written by transfer_llc4320.py.
-        #
-        # Both should resolve to the same datetime for a given date.
-        # -----------------------------------------------------------------
-        if s3_source and int(it) in iter_to_date:
-            _date_for_check = iter_to_date[int(it)]
-            try:
-                # OSN time: scalar coordinate on ds (after isel(time=0))
-                osn_time = np.datetime64(ds['time'].values, 'ns')
-
-                # MIT time: load from S3 timestep store
-                ds_check = get_raw_data.get_s3_timestep_data(
-                    s3_source['s3_endpoint'],
-                    s3_source['bucket'],
-                    s3_source['folder'],
-                    _date_for_check,
-                    face_range=LLC_FACES,
-                    vars_requested=['time'],
-                )
-
-                if 'time' in ds_check:
-                    mit_time = np.datetime64(ds_check['time'].values.flat[0], 'ns')
-
-                    if osn_time == mit_time:
-                        logging.info(
-                            f"TIMESTAMP CHECK PASSED: OSN time={osn_time}, "
-                            f"MIT time={mit_time}, "
-                            f"date='{_date_for_check}' ✓"
-                        )
-                    else:
-                        logging.error(
-                            f"TIMESTAMP MISMATCH: OSN time={osn_time}, "
-                            f"MIT time={mit_time} "
-                            f"(date='{_date_for_check}')"
-                        )
-                        raise RuntimeError(
-                            f"Timestep alignment failure for "
-                            f"'{_date_for_check}': "
-                            f"OSN time={osn_time} != MIT time={mit_time}."
-                        )
-                else:
-                    logging.warning(
-                        f"Timestamp cross-check skipped for "
-                        f"'{_date_for_check}': no 'time' variable in S3 "
-                        f"store. Re-run transfer_llc4320.py with "
-                        f"--variables time to enable."
-                    )
-
-                ds_check.close()
-            except Exception as exc:
-                if "alignment" in str(exc).lower():
-                    raise   # re-raise our own RuntimeError
-                logging.warning(
-                    f"Timestamp cross-check could not be completed for "
-                    f"iter={it}: {exc}"
-                )
 
         process_time_snapshot(
             cfg,
@@ -827,34 +668,6 @@ def run_global_pipeline(
 # Entry point
 # ---------------------------------------------------------------------------
 
-def _build_job_config(raw: dict, subset_entry: dict) -> config.JobConfig:
-    """
-    Build a ``JobConfig`` from the raw YAML dict and the resolved subset entry.
-
-    Shared helper so that both the single-run and per-date code paths in
-    ``main()`` construct configs identically.
-    """
-    output_dict = {**raw.get("output", {})}
-    if "dataset_name" in subset_entry:
-        output_dict["dataset_name"] = subset_entry["dataset_name"]
-
-    return config.JobConfig(
-        run=config.RunConfig(**raw.get("run", {})),
-        data=config.DataConfig(**raw.get("data", {})),
-        sampling=config.SamplingConfig(**raw.get("sampling", {})),
-        output=config.OutputConfig(**output_dict),
-        features=config.FeaturesConfig(
-            model_data_feature_channels=subset_entry.get(
-                "model_data_feature_channels", []
-            ),
-            compute_features_channels=subset_entry.get(
-                "compute_features_channels", []
-            ),
-        ),
-        runtime=config.RuntimeConfig(**raw.get("runtime", {})),
-    )
-
-
 def main(
     config_file: str = None,
     run_id: str = None,
@@ -867,20 +680,6 @@ def main(
     Can be called from the CLI (no arguments; reads ``--config``, ``--run_id``,
     ``--subset``, and ``--no-icemask`` from ``sys.argv``) or directly from
     Python by passing the arguments explicitly.
-
-    Date-based auto run_id
-    ----------------------
-    When ``--run_id`` is **not** provided and the config contains
-    ``date_iterations``, each date is processed as a separate pipeline run
-    whose ``run_id`` is derived from the date string in YYYYMMDD_HHMMSS
-    format (e.g. ``'2011-12-09 12:00:00'`` → ``'20111209_120000'``).
-    The output layout becomes::
-
-        s3://dbof/surface_fields/20111209_120000/native_fields.zarr
-        s3://dbof/surface_fields/20121109_120000/native_fields.zarr
-
-    When ``--run_id`` **is** provided, the original behaviour is preserved:
-    all dates are written into a single zarr store under that run_id.
 
     Parameters
     ----------
@@ -896,10 +695,10 @@ def main(
         YAML config.
     apply_icemask : bool or None, optional
         Whether to NaN-out pixels where ``Theta <= 0`` (sea-ice mask).
-        ``True``  — ice mask on  (equivalent to passing ``--icemask``).
-        ``False`` — ice mask off (default when called from the CLI).
-        ``None``  — read from the CLI flag (``--icemask``); defaults to
-                    ``False`` if not passed on the command line.
+        ``True``  — ice mask on  (default when called from the CLI).
+        ``False`` — ice mask off (equivalent to passing ``--no-icemask``).
+        ``None``  — read from the CLI flag (``--no-icemask``); defaults to
+                    ``True`` if not passed on the command line.
     """
     # --- Resolve arguments ---------------------------------------------------
     if config_file is None:
@@ -910,7 +709,7 @@ def main(
         if apply_icemask is None:
             apply_icemask = cli.apply_icemask
     elif apply_icemask is None:
-        apply_icemask = False
+        apply_icemask = True  
 
     # --- Load raw YAML -------------------------------------------------------
     with open(config_file, "r") as fh:
@@ -941,53 +740,33 @@ def main(
             f"{config_file}.  Please add a 'subsets.{subset}' block."
         )
 
-    # S3 source: optional, for variables not in the kerchunk endpoint.
-    s3_source_cfg = raw.get("s3_source") or None
+    # --- Build JobConfig in memory -------------------------------------------
+    # The 'subsets' and 'active_subset' keys are top-level YAML keys that
+    # config.load_config does not know about.  The JobConfig is built directly.
+    output_dict = {**raw.get("output", {})}
+    if "dataset_name" in subset_entry:
+        output_dict["dataset_name"] = subset_entry["dataset_name"]
 
-    # --- Per-date looping ----------------------------------------------------
-    # When no explicit run_id is given and date_iterations is set, each date
-    # gets its own pipeline run with an auto-generated run_id derived from the
-    # date string.  This produces the directory layout:
-    #   s3://dbof/surface_fields/<DATE>/native_fields.zarr
-    date_iterations = raw.get("data", {}).get("date_iterations")
+    cfg = config.JobConfig(
+        run=config.RunConfig(**raw.get("run", {})),
+        data=config.DataConfig(**raw.get("data", {})),
+        sampling=config.SamplingConfig(**raw.get("sampling", {})),
+        output=config.OutputConfig(**output_dict),
+        features=config.FeaturesConfig(
+            model_data_feature_channels=subset_entry.get(
+                "model_data_feature_channels", []
+            ),
+            compute_features_channels=subset_entry.get(
+                "compute_features_channels", []
+            ),
+        ),
+        runtime=config.RuntimeConfig(**raw.get("runtime", {})),
+    )
 
-    if run_id is None and date_iterations is not None and len(date_iterations) > 0:
-        print(
-            f"No --run_id provided; will create a separate output directory "
-            f"for each of the {len(date_iterations)} date(s) in date_iterations."
-        )
-        for date_str in date_iterations:
-            auto_run_id = _date_to_run_id(date_str)
-            print(f"\n{'='*60}")
-            print(f"Processing date: {date_str}  →  run_id: {auto_run_id}")
-            print(f"{'='*60}")
-
-            # Build a single-date config so only this date is processed.
-            single_date_raw = {**raw}
-            single_date_raw["data"] = {
-                **raw.get("data", {}),
-                "date_iterations": [date_str],
-            }
-            cfg = _build_job_config(single_date_raw, subset_entry)
-
-            run_global_pipeline(
-                run_id=auto_run_id,
-                compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
-                cfg=cfg,
-                apply_icemask=apply_icemask,
-                s3_source=s3_source_cfg,
-            )
-
-        print(f"\nAll {len(date_iterations)} date(s) processed.")
-        return
-
-    # --- Single run (explicit run_id or range mode) --------------------------
-    cfg = _build_job_config(raw, subset_entry)
 
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
         cfg=cfg,
         apply_icemask=apply_icemask,
-        s3_source=s3_source_cfg,
     )

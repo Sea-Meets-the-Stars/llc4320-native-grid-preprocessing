@@ -1,0 +1,146 @@
+data_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "properties"
+
+# NOTE:
+# - This MUST exactly match the run_id used when generate-global-depth was run.
+# - All subsets from a session share this run_id and are stored in the same
+#   S3 directory:
+#     s3://{bucket}/{folder}/{run_id}/{subset}.zarr
+  run_id: "testing_013"
+
+# Per-subset zarr names and their channel lists.
+#
+# NOTE for feature_channels:
+# - This MUST exactly match the model_data_feature_channels + compute_features_channels
+#   stored during generation (from configs/global_depth.yaml, matching subset order).
+# - Ordering matters: channels are stored and read in this order.
+#
+# All outputs are surface-level (T, C, H, W).  Depth-resolved (T, K, C, H, W)
+# stores are no longer produced.  Derived diagnostics that depend on depth are
+# computed lazily and reduced to surface fields before writing.
+  subsets:
+
+    # ---- depth-resolved diagnostics (computed from depth, output as surface) ----
+
+    stratification:
+      dataset_name: "stratification.zarr"
+      feature_channels:
+        - "mixed_layer_depth"
+        - "N2_sfc"
+        - "N2_z25m"
+        - "N2_mld"
+        - "N2_mld_mean"
+        - "ml_heat_content"
+
+    vertical_shear:
+      dataset_name: "vertical_shear.zarr"
+      feature_channels:
+        - "vertical_shear_sfc"
+        - "vertical_shear_z25m"
+        - "vertical_shear_mld"
+        - "vertical_shear_mld_mean"
+        - "Ri_sfc"
+        - "Ri_z25m"
+        - "Ri_mld"
+        - "Ri_mld_mean"
+
+    mixing_parameters:
+      dataset_name: "mixing_parameters.zarr"
+      feature_channels:
+        - "Fr_sfc"
+        - "Fr_z25m"
+        - "Fr_mld"
+        - "Fr_mld_mean"
+        - "Ro_sfc"
+        - "Ro_z25m"
+        - "Ro_mld"
+        - "Ro_mld_mean"
+        - "Burger_number"
+
+    ertel_pv:
+      dataset_name: "ertel_pv.zarr"
+      feature_channels:
+        - "ertel_pv_sfc"
+        - "ertel_pv_z25m"
+        - "ertel_pv_mld"
+        - "ertel_pv_mld_mean"
+        - "ertel_pv_vertical_sfc"
+        - "ertel_pv_vertical_z25m"
+        - "ertel_pv_vertical_mld"
+        - "ertel_pv_vertical_mld_mean"
+        - "ertel_pv_tilt_sfc"
+        - "ertel_pv_tilt_z25m"
+        - "ertel_pv_tilt_mld"
+        - "ertel_pv_tilt_mld_mean"
+
+    buoyancy_fluxes:
+      dataset_name: "buoyancy_fluxes.zarr"
+      feature_channels:
+        - "uB_sfc"
+        - "uB_z25m"
+        - "uB_mld"
+        - "uB_mld_mean"
+        - "vB_sfc"
+        - "vB_z25m"
+        - "vB_mld"
+        - "vB_mld_mean"
+        - "wB_sfc"
+        - "wB_z25m"
+        - "wB_mld"
+        - "wB_mld_mean"
+
+    surface_wind:
+      dataset_name: "surface_wind.zarr"
+      feature_channels:
+        - "wind_stress_curl"
+        - "ekman_pumping"
+        - "u_ekman"
+        - "v_ekman"
+
+    # ---- legacy (backwards compatible) ----
+
+    derived_fields:
+      dataset_name: "derived_fields.zarr"
+      feature_channels:
+        - "mixed_layer_depth"
+        - "N2_mld_base"
+
+    # ---- surface-only model variables ----
+
+    native_surface:
+      dataset_name: "native_surface.zarr"
+      feature_channels:
+        - "Theta"
+        - "Salt"
+        - "Eta"
+        - "U"
+        - "V"
+        - "W"
+
+    eta:
+      dataset_name: "eta.zarr"
+      feature_channels:
+        - "Eta"
+
+    icearea:
+      dataset_name: "icearea.zarr"
+      feature_channels:
+        - "SIarea"
+
+    windstress:
+      dataset_name: "windstress.zarr"
+      feature_channels:
+        - "oceTAUX"
+        - "oceTAUY"
+
+
+# Grid Zarr store written by generate_grid_global.py.
+# NOTE: The grid is stored WITHOUT a run_id prefix (shared across all runs):
+#   s3://{bucket}/{folder}/{dataset_name}
+grid_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "native_grid_dbof_training_data"
+  dataset_name: "llc4320_grid.zarr"
