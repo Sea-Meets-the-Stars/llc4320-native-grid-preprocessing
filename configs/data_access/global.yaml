@@ -9,7 +9,7 @@ data_access:
 #   was run.  All subsets from a single session share this run_id and are stored
 #   in the same S3 directory:
 #     s3://{bucket}/{folder}/{run_id}/{subset}.zarr
-  run_id: "global_20111209_120000"
+  run_id: "testing_015"
 
 # Per-subset zarr names and their channel lists.
 #
