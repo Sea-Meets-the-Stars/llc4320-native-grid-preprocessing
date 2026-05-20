@@ -448,3 +448,7 @@ def main(
         cfg=cfg,
         apply_icemask=apply_icemask,
     )
+
+
+if __name__ == "__main__":
+    main()
