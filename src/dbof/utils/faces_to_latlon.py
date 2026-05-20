@@ -1,4 +1,17 @@
-# grid / face-to-latlon stitching
+"""
+LLC face-grid utilities: staggered→tracer interpolation, vector-pair
+metadata, face→lat-lon stitching, and masked ``(C, H, W)`` assembly.
+
+The low-level stitch (``faces_dataset_to_latlon``) wraps xmitgcm with an
+xarray-compatibility fix.  The higher-level helpers
+(``interp_staggered_to_tracer``, ``set_vector_pair_attrs``,
+``stitch_and_mask``) are used by the pipeline ``process_snapshot`` functions
+to prepare fields before and after the stitch.
+"""
+
+import logging
+
+import numpy as np
 import xarray as xr
 from xmitgcm.llcreader import llcmodel
 from xmitgcm.llcreader.llcmodel import (
@@ -93,3 +106,146 @@ def faces_dataset_to_latlon(ds, metric_vector_pairs):
     ds_out = xr.merge([ds_new, xr.Dataset(data_vars)])
     ds_out = ds_out.set_coords([c for c in coord_vars if c in ds_out])
     return ds_out
+
+
+# ---------------------------------------------------------------------------
+# Staggered → tracer interpolation
+# ---------------------------------------------------------------------------
+
+#: Maps staggered variable names to the xgcm axis along which they must be
+#: interpolated to reach the tracer-point (C-grid center) location.
+STAGGER_MAP = {
+    'V':       'Y',
+    'U':       'X',
+    'oceTAUY': 'Y',
+    'oceTAUX': 'X',
+}
+
+
+def interp_staggered_to_tracer(fields, grid, stagger_map=None):
+    """
+    Interpolate staggered-grid variables to tracer points (in-place update).
+
+    Parameters
+    ----------
+    fields : dict-like
+        Mapping of ``{var_name: DataArray}`` **or** an ``xr.Dataset``.
+        Staggered variables that are present in both *fields* and *stagger_map*
+        are replaced with their tracer-point interpolated versions.
+        Variables not in *stagger_map* (or absent from *fields*) are untouched.
+    grid : xgcm.Grid
+        The xgcm Grid object used for interpolation.
+    stagger_map : dict, optional
+        ``{variable_name: xgcm_axis}`` override.  Defaults to
+        ``STAGGER_MAP`` (U/V + oceTAUX/oceTAUY).
+    """
+    if stagger_map is None:
+        stagger_map = STAGGER_MAP
+
+    for var, axis in stagger_map.items():
+        if var in fields:
+            fields[var] = grid.interp(fields[var], axis, boundary='fill')
+
+
+# ---------------------------------------------------------------------------
+# Vector-pair metadata
+# ---------------------------------------------------------------------------
+
+#: Default vector pairs: ``(x_component, y_component)``.
+#: ``faces_dataset_to_latlon`` reads ``attrs['mate']`` on the *x*-component
+#: to know which variable is its meridional partner for sign-aware rotation.
+DEFAULT_VECTOR_PAIRS = [
+    ('U', 'V'),
+    ('oceTAUX', 'oceTAUY'),
+]
+
+
+def set_vector_pair_attrs(ds, vector_pairs=None):
+    """
+    Set ``mate`` attributes on vector-pair variables in *ds*.
+
+    For each ``(x_comp, y_comp)`` pair:
+
+    * Clear any existing ``mate`` attr on *y_comp*.
+    * Set ``mate = y_comp`` on *x_comp*.
+
+    Only pairs where **both** components are present in *ds* are touched.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Modified in-place (attribute mutation only — no data copy).
+    vector_pairs : list of (str, str), optional
+        Defaults to ``DEFAULT_VECTOR_PAIRS``.
+    """
+    if vector_pairs is None:
+        vector_pairs = DEFAULT_VECTOR_PAIRS
+
+    for x_comp, y_comp in vector_pairs:
+        if x_comp in ds.variables and y_comp in ds.variables:
+            ds[y_comp].attrs.pop('mate', None)
+            ds[x_comp].attrs['mate'] = y_comp
+
+
+# ---------------------------------------------------------------------------
+# Face stitch + mask + stack
+# ---------------------------------------------------------------------------
+
+def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
+    """
+    Stitch LLC faces to lat-lon, materialise, and return a masked ``(C, H, W)`` array.
+
+    Parameters
+    ----------
+    ds_to_convert : xr.Dataset
+        Face-gridded dataset containing all *channels* (already on the tracer
+        grid with vector-pair attrs set).
+    channels : list[str]
+        Ordered channel names to include in the output array.
+    mask_dict : dict[str, DataArray]
+        Boolean mask arrays (``True`` = masked / NaN) to attach before
+        stitching.  All masks are OR-combined after materialisation.
+        Common entries: ``{'_land_mask': ..., '_ice_mask': ...}``.
+    progress_bar : bool, default False
+        When ``True``, materialisation is wrapped in a
+        ``dask.diagnostics.ProgressBar`` context.
+
+    Returns
+    -------
+    data : np.ndarray, shape ``(C, H, W)``
+        Stacked channel array with masked pixels set to ``NaN``.
+    """
+    # Attach masks to the dataset so they ride along through the face stitch.
+    mask_names = list(mask_dict.keys())
+    ds_to_convert = ds_to_convert.assign(mask_dict)
+    all_vars = channels + mask_names
+
+    # Face → lat-lon stitch.
+    logging.info("Converting LLC faces -> rectangular lat/lon")
+    ds_rect = faces_dataset_to_latlon(
+        ds_to_convert[all_vars],
+        metric_vector_pairs=[],
+    )
+
+    # Materialise.
+    logging.info("Materialising stitched arrays")
+    if progress_bar:
+        from dask.diagnostics import ProgressBar
+        with ProgressBar():
+            mask_arrays = [ds_rect[m].values.astype(bool) for m in mask_names]
+            channel_arrays = [ds_rect[ch].values for ch in channels]
+    else:
+        mask_arrays = [ds_rect[m].values.astype(bool) for m in mask_names]
+        channel_arrays = [ds_rect[ch].values for ch in channels]
+
+    # Combine all masks with OR.
+    combined_mask = mask_arrays[0]
+    for m in mask_arrays[1:]:
+        combined_mask = combined_mask | m
+
+    # Stack into (C, H, W) and apply mask.
+    logging.info("Stacking into (C, H, W)")
+    data = np.stack(channel_arrays, axis=0)
+    data = np.where(combined_mask[np.newaxis], np.nan, data)
+
+    return data

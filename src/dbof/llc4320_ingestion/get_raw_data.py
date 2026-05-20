@@ -219,11 +219,22 @@ def get_remote_gridfile(endpoint_url):
 
 
 # ---------------------------------------------------------------------------
+# S3 shared helpers
+# ---------------------------------------------------------------------------
+
+def _build_s3_store_url(bucket: str, folder: str, dataset_name: str) -> str:
+    """Build a clean S3 URL from config parts."""
+    bucket = bucket.strip().strip("/")
+    folder = folder.strip().strip("/")
+    return f"s3://{bucket}/{folder}/{dataset_name}"
+
+
+# ---------------------------------------------------------------------------
 # S3 timestep store access - SURFACE ONLY
 # ---------------------------------------------------------------------------
 
 # Chunks matching the on-disk layout of stores written by transfer_llc4320.py
-s3_timestep_chunks = {"face": 1, "k": 51, "j": 720, "i": 720}
+s3_timestep_sfc_chunks = {"face": 1, "k": 51, "j": 720, "i": 720}
 
 
 def _s3_storage_options(s3_endpoint, anon=None):
@@ -253,9 +264,14 @@ def get_s3_timestep_data(
     date_str,
     face_range=None,
     vars_requested=None,
+    chunks=None,
+    storage_options=None,
 ):
     """
     Load a single-timestep snapshot from an S3 timestep store.
+
+    Works for both surface-only and full-depth reads — pass the
+    appropriate ``chunks`` and ``storage_options`` for your pipeline.
 
     Parameters
     ----------
@@ -271,6 +287,13 @@ def get_s3_timestep_data(
         LLC face indices to include.  ``None`` loads all.
     vars_requested : list[str] or None
         Variables to extract.  ``None`` returns all.
+    chunks : dict or None
+        Dask chunk specification.  Defaults to ``s3_timestep_sfc_chunks``.
+        Pass ``s3_timestep_3D_chunks`` for the depth pipeline.
+    storage_options : dict or None
+        S3 storage options for ``xr.open_zarr``.  Defaults to
+        ``_s3_storage_options(s3_endpoint)``.  Pass
+        ``_s3_storage_options_3D(s3_endpoint)`` for the depth pipeline.
 
     Returns
     -------
@@ -278,15 +301,20 @@ def get_s3_timestep_data(
     """
     from datetime import datetime as _dt
 
+    if chunks is None:
+        chunks = s3_timestep_sfc_chunks
+    if storage_options is None:
+        storage_options = _s3_storage_options(s3_endpoint)
+
     date_tag = _dt.strptime(date_str, '%Y-%m-%d %H:%M:%S').strftime("%Y%m%dT%H")
     store_name = f"{date_tag}.zarr"
-    s3_url = f"s3://{bucket}{folder}/{store_name}"
+    s3_url = _build_s3_store_url(bucket, folder, store_name)
 
     ds = xr.open_zarr(
         s3_url,
         consolidated=False,
-        chunks=s3_timestep_chunks,
-        storage_options=_s3_storage_options(s3_endpoint),
+        chunks=chunks,
+        storage_options=storage_options,
     )
 
     if vars_requested is not None:
@@ -301,3 +329,199 @@ def get_s3_timestep_data(
 
     print(f"S3 timestep data loaded: {store_name}, vars={list(ds.data_vars)}")
     return ds
+
+
+# ---------------------------------------------------------------------------
+# Timestamp cross-check: OSN vs. S3
+# ---------------------------------------------------------------------------
+
+def verify_osn_s3_timestamp(ds_osn, s3_source, date_str, face_range):
+    """
+    Verify that the OSN and S3 datasets refer to the same physical time.
+
+    OSN time is CF-encoded (``seconds since 2011-09-10``), decoded by xarray
+    to ``datetime64``.  MIT/S3 time is stored directly as ``datetime64[ns]``.
+    Both should resolve to the same datetime for a given date.
+
+    Parameters
+    ----------
+    ds_osn : xr.Dataset
+        The kerchunk dataset for this snapshot (after ``isel(time=0)``).
+    s3_source : dict
+        Keys: ``s3_endpoint``, ``bucket``, ``folder``.
+    date_str : str
+        The date being processed (e.g. ``'2012-11-09 12:00:00'``).
+    face_range : range or list
+        LLC faces to request.
+
+    Raises
+    ------
+    RuntimeError
+        If the timestamps do not match.
+    """
+    import logging
+    import numpy as np
+
+    try:
+        osn_time = np.datetime64(ds_osn['time'].values, 'ns')
+
+        ds_check = get_s3_timestep_data(
+            s3_source['s3_endpoint'],
+            s3_source['bucket'],
+            s3_source['folder'],
+            date_str,
+            face_range=face_range,
+            vars_requested=['time'],
+        )
+
+        if 'time' in ds_check:
+            mit_time = np.datetime64(ds_check['time'].values.flat[0], 'ns')
+
+            if osn_time == mit_time:
+                logging.info(
+                    f"TIMESTAMP CHECK PASSED: OSN time={osn_time}, "
+                    f"MIT time={mit_time}, date='{date_str}'"
+                )
+            else:
+                logging.error(
+                    f"TIMESTAMP MISMATCH: OSN time={osn_time}, "
+                    f"MIT time={mit_time} (date='{date_str}')"
+                )
+                raise RuntimeError(
+                    f"Timestep alignment failure for '{date_str}': "
+                    f"OSN time={osn_time} != MIT time={mit_time}."
+                )
+        else:
+            logging.warning(
+                f"Timestamp cross-check skipped for '{date_str}': "
+                f"no 'time' variable in S3 store. Re-run "
+                f"transfer_llc4320.py with --variables time to enable."
+            )
+
+        ds_check.close()
+    except Exception as exc:
+        if "alignment" in str(exc).lower():
+            raise  # re-raise our own RuntimeError
+        logging.warning(
+            f"Timestamp cross-check could not be completed for "
+            f"'{date_str}': {exc}"
+        )
+
+
+
+# ---------------------------------------------------------------------------
+# S3 timestep store access - DEPTH
+# ---------------------------------------------------------------------------
+# These functions read from the S3 timestep stores created by
+# ``cli.transfer_llc4320.py``.  Layout:
+#   {folder}/grid.zarr          — static grid variables
+#   {folder}/{YYYYMMDDTHH}.zarr — per-timestep model fields
+# ---------------------------------------------------------------------------
+
+
+# Each S3 GET now retrieves the full water column for one face tile.
+s3_timestep_3D_chunks = {"face": 1, "k": 51, "k_l": 51, "k_u": 51, "k_p1": 52, "i": 720, "j": 720, "i_g": 720, "j_g": 720}
+
+
+# ---------------------------------------------------------------------------
+# S3 storage_options for 3D stores
+# ---------------------------------------------------------------------------
+def _s3_storage_options_3D(s3_endpoint: str) -> dict:
+    """Return ``storage_options`` for ``xr.open_zarr`` on an S3-compatible store.
+
+    The Nautilus NRP S3 endpoint intermittently serves corrupt bytes
+    (HTTP 200 but garbled body).  We disable s3fs read caching so that
+    dask task retries always re-fetch from S3 rather than replaying
+    cached bad data.
+    """
+    return {
+        "client_kwargs": {"endpoint_url": s3_endpoint},
+        "config_kwargs": {
+            "signature_version": "s3v4",
+            "retries": {"max_attempts": 5, "mode": "adaptive"},
+            "s3": {"addressing_style": "path"},
+            # Timeout so hung reads fail fast instead of blocking forever.
+            # connect_timeout: max seconds to establish TCP connection.
+            # read_timeout: max seconds to wait for data on an open socket.
+            "connect_timeout": 30,
+            "read_timeout": 60,
+        },
+        # Cap per-filesystem async connections to limit S3 concurrency.
+        "max_concurrency": 10,
+        # Disable s3fs read caching so retries always re-fetch fresh bytes.
+        "default_cache_type": "none",
+    }
+
+
+def get_s3_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_store_name: str = "grid.zarr"):
+    """
+    Load LLC4320 grid variables from an S3 grid store written by
+    ``transfer_llc4320.py``.
+
+    Returns a Dataset compatible with
+    ``preproc_llc_core_data.process_llc4320_grid()``.
+
+    Parameters
+    ----------
+    s3_endpoint : str
+        S3-compatible endpoint URL.
+    bucket : str
+        S3 bucket name.
+    folder : str
+        S3 folder within the bucket.
+    grid_store_name : str
+        Name of the grid zarr store (default ``'grid.zarr'``).
+
+    Returns
+    -------
+    xarray.Dataset
+        Grid fields for all 13 faces, with xgcm comodo coordinate attributes.
+    """
+    s3_url = _build_s3_store_url(bucket, folder, grid_store_name)
+
+    # Grid store chunks: match on-disk layout to avoid rechunk overhead.
+    # 2D vars: (face=13, j=720, i=720).
+    # 3D vars (hFacC/S/W): on-disk k=1 — keep k=1 so isel(k=0) reads
+    # exactly one stored object per spatial tile instead of all 51.
+    _grid_chunks = {
+        "face": 13, "k": 1, "k_l": 1,
+        "j": 720, "i": 720, "j_g": 720, "i_g": 720,
+    }
+    grid = xr.open_zarr(
+        s3_url,
+        consolidated=False,
+        chunks=_grid_chunks,
+        storage_options=_s3_storage_options_3D(s3_endpoint),
+    )
+
+    # Select only the grid variables needed for processing.
+    # Vertical coordinates (Z, Zl, Zu, Zp1, drF) are required by the
+    # depth-diagnostic pipeline for MLD, vertical derivatives, etc.
+    grid_vars = ['XC', 'YC', 'dxC', 'dyC', 'dxG', 'dyG', 'rAz', 'rA',
+                 'Depth', 'hFacC', 'SN', 'CS',
+                 'Z', 'Zl', 'Zu', 'Zp1', 'drF']
+    available = [v for v in grid_vars if v in grid]
+    grid = grid[available]
+
+    # hFacC may have a k dimension; collapse to surface level.
+    if 'hFacC' in grid and 'k' in grid['hFacC'].dims:
+        grid = grid.assign(hFacC=grid['hFacC'].isel(k=0, drop=True))
+
+    # Add xgcm comodo coordinate attributes for grid operations.
+    coord_meta = {
+        'j':   {'axis': 'Y'},
+        'j_g': {'axis': 'Y', 'c_grid_axis_shift': 0.5},
+        'i':   {'axis': 'X'},
+        'i_g': {'axis': 'X', 'c_grid_axis_shift': 0.5},
+    }
+    coords_update = {}
+    for dim, attrs in coord_meta.items():
+        if dim in grid.dims:
+            existing = (grid.coords[dim] if dim in grid.coords
+                        else xr.DataArray(range(grid.sizes[dim]), dims=dim))
+            coords_update[dim] = existing.assign_attrs(attrs)
+    if coords_update:
+        grid = grid.assign_coords(coords_update)
+
+    print(f"S3 grid file loaded from {s3_url}.")
+    return grid
