@@ -99,7 +99,7 @@ import dbof.dataset_creation.config as config
 from dbof.utils.logging import generate_logging
 from dbof.utils.iterations import (
     LLC_FACES,
-    mit_date_to_iteration, calculate_iterations_for_llc as _calc_iters_shared,
+    osn_date_to_iteration, calculate_iterations_for_llc as _calc_iters_shared,
 )
 from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
 from dbof.utils.subset_config import resolve_subset, build_job_config
@@ -112,13 +112,13 @@ ENDPOINT_URL          = 'https://mghp.osn.xsede.org'
 # Helpers
 # ---------------------------------------------------------------------------
 
-# OSN pipeline uses MIT iterations (no OSN offset) in the date path.
-_date_to_iteration = mit_date_to_iteration
+# OSN pipeline uses OSN iterations (with OSN offset) in the date path.
+_date_to_iteration = osn_date_to_iteration
 
 
 def calculate_iterations_for_llc(cfg):
-    """OSN version: dates use MIT iterations (no OSN offset)."""
-    return _calc_iters_shared(cfg, use_osn_offset=False)
+    """OSN version: dates use OSN iterations."""
+    return _calc_iters_shared(cfg, use_osn_offset=True)
 
 
 def set_up_grid_data_and_masks(cfg: config.JobConfig, use_halo: bool = False):
