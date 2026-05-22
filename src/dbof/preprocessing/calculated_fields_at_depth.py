@@ -48,7 +48,11 @@ import numpy as np
 import xarray as xr
 
 import dbof.utils.native_gradient as ng
-from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
+from dbof.preprocessing.calculate_additional_fields import (
+    coriolis_parameter,
+    VelocityJacobian,
+    BuoyancyGradients,
+)
 
 from dbof.preprocessing.vertical_helpers import (
     _get_vertical_dim,
@@ -390,7 +394,7 @@ def ertel_pv_terms_3d(ds_merge, grid):
 
 
 # ===========================================================================
-#  GROUP 6: SCALAR GRADIENT & VELOCITY PROPERTIES (lazy 3D)
+#  GROUP 6: SCALAR GRADIENTS & FRONTAL STRUCTURE (lazy 3D)
 # ===========================================================================
 
 def _grad_squared_3d(scalar_3d, ds_merge, grid):
@@ -400,78 +404,183 @@ def _grad_squared_3d(scalar_3d, ds_merge, grid):
     return gx**2 + gy**2
 
 
-def _velocity_properties_3d(ds_merge, grid):
-    """Lazy 3D kinematic fields from the velocity Jacobian.
+def grad_theta2_3d(ds_merge, grid):
+    """Lazy 3D |∇θ|².  Units: (K/m)²."""
+    return _grad_squared_3d(ds_merge.Theta, ds_merge, grid)
 
-    Returns dict with keys: relative_vorticity, strain_n, strain_s,
-    strain_mag, divergence, okubo_weiss.
+
+def grad_salt2_3d(ds_merge, grid):
+    """Lazy 3D |∇S|².  Units: (PSU/m)²."""
+    return _grad_squared_3d(ds_merge.Salt, ds_merge, grid)
+
+
+def grad_rho2_3d(ds_merge, grid):
+    """Lazy 3D |∇ρ|².  Derives density via JMD95."""
+    rho = _density_lazy(ds_merge)
+    return _grad_squared_3d(rho, ds_merge, grid)
+
+
+def grad_b2_3d(ds_merge, grid):
+    """Lazy 3D |∇b|².  Units: s⁻⁴."""
+    b = buoyancy_field_3d(ds_merge)
+    return _grad_squared_3d(b, ds_merge, grid)
+
+
+def grad_eta2(ds_merge, grid):
+    """Lazy |∇η|² — inherently 2D (surface only)."""
+    gx, gy = ng.calculate_native_gradient_tracer(
+        ds_merge.Eta, ds_merge, grid=grid,
+    )
+    return gx**2 + gy**2
+
+
+def turner_angle_3d(ds_merge, grid, *, gradtheta2=None, gradsalt2=None,
+                    gradrho2=None):
+    """Lazy 3D horizontal Turner angle (degrees).
+
+    Tu_h = arctan(ρ₀(β²|∇S|² − α²|∇θ|²) / (−|∇ρ|²/ρ₀))
+
+    Optional kwargs accept pre-computed 3D gradient fields to avoid
+    recomputation when the caller already has them (e.g. Turner angle
+    shares gradtheta2/gradsalt2/gradrho2 with the frontal_structure subset).
     """
-    U = ds_merge.U
-    V = ds_merge.V
+    ALPHA = 2.0e-4    # thermal expansion coefficient (°C⁻¹)
+    BETA  = 7.4e-4    # haline contraction coefficient (PSU⁻¹)
+    RHO0_TU = 1025.0  # reference density (kg m⁻³)
 
-    du_dx, du_dy, dv_dx, dv_dy = ng.calculate_jacobian(U, V, ds_merge, grid)
+    if gradtheta2 is None:
+        gradtheta2 = grad_theta2_3d(ds_merge, grid)
+    if gradsalt2 is None:
+        gradsalt2 = grad_salt2_3d(ds_merge, grid)
+    if gradrho2 is None:
+        gradrho2 = grad_rho2_3d(ds_merge, grid)
 
-    omega = dv_dx - du_dy
-    strain_n = du_dx - dv_dy
-    strain_s = du_dy + dv_dx
-    strain_mag = np.sqrt(strain_n**2 + strain_s**2)
-    div = du_dx + dv_dy
-    ow = strain_n**2 + strain_s**2 - omega**2
+    numer = RHO0_TU * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
+    denom = xr.where(gradrho2 > 0, -gradrho2 / RHO0_TU, np.nan)
+    return np.degrees(np.arctan(numer / denom))
 
-    return {
-        "relative_vorticity": omega,
-        "strain_n": strain_n,
-        "strain_s": strain_s,
-        "strain_mag": strain_mag,
-        "divergence": div,
-        "okubo_weiss": ow,
-    }
+
+# ===========================================================================
+#  GROUP 6b: VELOCITY PROPERTIES (lazy 3D)
+# ===========================================================================
+
+def compute_velocity_jacobian_3d(ds_merge, grid):
+    """3D velocity Jacobian → VelocityJacobian(du_dx, du_dy, dv_dx, dv_dy)."""
+    du_dx, du_dy, dv_dx, dv_dy = ng.calculate_jacobian(
+        ds_merge.U, ds_merge.V, ds_merge, grid,
+    )
+    return VelocityJacobian(du_dx, du_dy, dv_dx, dv_dy)
+
+
+def relative_vorticity_3d(ds_merge, grid, *, jacobian=None):
+    """Lazy 3D ζ = dv/dx − du/dy.  Accepts optional *jacobian*."""
+    if jacobian is None:
+        jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
+    return jacobian.dv_dx - jacobian.du_dy
+
+
+def strain_3d(ds_merge, grid, *, jacobian=None):
+    """Lazy 3D strain → (strain_mag, strain_n, strain_s).  Accepts optional *jacobian*."""
+    if jacobian is None:
+        jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
+    sn = jacobian.du_dx - jacobian.dv_dy
+    ss = jacobian.du_dy + jacobian.dv_dx
+    sm = np.sqrt(sn**2 + ss**2)
+    return sm, sn, ss
+
+
+def divergence_3d(ds_merge, grid, *, jacobian=None):
+    """Lazy 3D divergence = du/dx + dv/dy.  Accepts optional *jacobian*."""
+    if jacobian is None:
+        jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
+    divergence = jacobian.du_dx + jacobian.dv_dy
+    return divergence
+
+
+def okubo_weiss_3d(ds_merge, grid, *, jacobian=None):
+    """Lazy 3D Okubo-Weiss = Sn² + Ss² − ζ².  Accepts optional *jacobian*."""
+    if jacobian is None:
+        jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
+    omega = relative_vorticity_3d(ds_merge, grid, jacobian=jacobian)
+    _, sn, ss = strain_3d(ds_merge, grid, jacobian=jacobian)
+    return sn**2 + ss**2 - omega**2
+
 
 
 # ===========================================================================
 #  GROUP 7: FRONTOGENESIS (lazy 3D)
 # ===========================================================================
 
-def _frontogenesis_fields_3d(ds_merge, grid):
-    """Lazy 3D frontogenesis tendency and geo/ageo decomposition.
-
-    Returns dict with keys: frontogenesis_tendency, frontogenesis_geo,
-    frontogenesis_ageo, ug, vg.
-    """
-    U = ds_merge.U
-    V = ds_merge.V
-
-    du_dx, du_dy, dv_dx, dv_dy = ng.calculate_jacobian(U, V, ds_merge, grid)
-
+def compute_buoyancy_gradients_3d(ds_merge, grid):
+    """3D buoyancy gradients → BuoyancyGradients(zonal, merid)."""
     b = buoyancy_field_3d(ds_merge)
-    grad_bx, grad_by = ng.calculate_native_gradient_tracer(
-        b, ds_merge, grid=grid)
+    zonal, merid = ng.calculate_native_gradient_tracer(
+        b, ds_merge, grid=grid,
+    )
+    return BuoyancyGradients(zonal, merid)
 
-    F_full = -(du_dx * grad_bx**2
-               + (du_dy + dv_dx) * grad_bx * grad_by
-               + dv_dy * grad_by**2)
 
-    f = coriolis_parameter(ds_merge, grid)
+def _frontogenesis_formula_3d(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
+    """Kinematic frontogenesis tendency from velocity and buoyancy gradients.
+
+    F = -(du/dx · bx² + (du/dy + dv/dx) · bx·by + dv/dy · by²)
+
+    Internal helper shared by ``frontogenesis_tendency_3d`` and
+    ``frontogenesis_geo_3d``.
+    """
+    return -(du_dx * grad_bx**2
+             + (du_dy + dv_dx) * grad_bx * grad_by
+             + dv_dy * grad_by**2)
+
+
+def frontogenesis_tendency_3d(ds_merge, grid, *, jacobian=None,
+                              buoyancy_gradients=None):
+    """Lazy 3D frontogenesis tendency F(u, v).  Accepts optional *jacobian* and *buoyancy_gradients*."""
+    if jacobian is None:
+        jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
+    if buoyancy_gradients is None:
+        buoyancy_gradients = compute_buoyancy_gradients_3d(ds_merge, grid)
+
+    return _frontogenesis_formula_3d(
+        jacobian.du_dx, jacobian.du_dy,
+        jacobian.dv_dx, jacobian.dv_dy,
+        buoyancy_gradients.zonal, buoyancy_gradients.merid,
+    )
+
+
+def geostrophic_velocity_3d(ds_merge, grid):
+    """Geostrophic velocity → (ug, vg) from ∂η/∂x, ∂η/∂y.
+
+    Eta is inherently 2D so ug/vg are surface-only; named ``_3d`` for
+    module consistency (they broadcast against 3D buoyancy gradients).
+    """
     g_accel = 9.81
+    f = coriolis_parameter(ds_merge, grid)
     eta_grad_x, eta_grad_y = ng.calculate_native_gradient_tracer(
-        ds_merge['Eta'], ds_merge, grid=grid)
+        ds_merge['Eta'], ds_merge, grid=grid,
+    )
     ug = -(g_accel / f) * eta_grad_y
-    vg = (g_accel / f) * eta_grad_x
+    vg =  (g_accel / f) * eta_grad_x
+    return ug, vg
 
-    gx_ug, gy_ug = ng.calculate_native_gradient_tracer(
-        ug, ds_merge, grid=grid)
-    gx_vg, gy_vg = ng.calculate_native_gradient_tracer(
-        vg, ds_merge, grid=grid)
-    F_geo = -(gx_ug * grad_bx**2
-              + (gy_ug + gx_vg) * grad_bx * grad_by
-              + gy_vg * grad_by**2)
 
-    F_ageo = F_full - F_geo
+def frontogenesis_geo_3d(ds_merge, grid, *, ug=None, vg=None,
+                         buoyancy_gradients=None):
+    """Lazy 3D geostrophic frontogenesis F(ug, vg).  Accepts optional *ug*, *vg*, *buoyancy_gradients*."""
+    if ug is None or vg is None:
+        ug, vg = geostrophic_velocity_3d(ds_merge, grid)
+    if buoyancy_gradients is None:
+        buoyancy_gradients = compute_buoyancy_gradients_3d(ds_merge, grid)
 
-    return {
-        "frontogenesis_tendency": F_full,
-        "frontogenesis_geo": F_geo,
-        "frontogenesis_ageo": F_ageo,
-        "ug": ug,
-        "vg": vg,
-    }
+    dug_dx, dug_dy = ng.calculate_native_gradient_tracer(
+        ug, ds_merge, grid=grid,
+    )
+    dvg_dx, dvg_dy = ng.calculate_native_gradient_tracer(
+        vg, ds_merge, grid=grid,
+    )
+    return _frontogenesis_formula_3d(
+        dug_dx, dug_dy,
+        dvg_dx, dvg_dy,
+        buoyancy_gradients.zonal, buoyancy_gradients.merid,
+    )
+
