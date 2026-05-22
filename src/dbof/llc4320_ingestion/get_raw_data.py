@@ -146,6 +146,96 @@ def get_remote_llc_data(endpoint_url, it, face_range):
     return ds
 
 
+def get_remote_llc_wind_data(endpoint_url, it, face_range):
+    """
+    Load wind / sea-ice variables for one LLC4320 iteration from OSN.
+
+    Uses kerchunk JSON references under ``llc_wind/`` which contain
+    KPPhbl, PhiBot, oceTAUX, oceTAUY, and SIarea (surface-only, k=0).
+
+    Parameters
+    ----------
+    endpoint_url : str
+        S3-compatible endpoint URL (e.g. ``'https://mghp.osn.xsede.org'``).
+    it : int
+        LLC model iteration number.
+    face_range : iterable of int
+        LLC face indices to load.
+
+    Returns
+    -------
+    xarray.Dataset
+        Wind / sea-ice variables for the requested faces, with ``time``
+        and depth dimensions already squeezed out.
+    """
+    pattern = (
+        "cnh-bucket-1/llc_wind/kerchunk_files/"
+        "llc4320_KPPhbl-PhiBot-oceTAUX-oceTAUY-SIarea_f{face}_k0_iter_{it}.json"
+    )
+    filelist = [pattern.format(face=face, it=it) for face in face_range]
+
+    print(f"Opening {len(filelist)} wind/sea-ice Kerchunk JSON files...")
+
+    fs = s3fs.S3FileSystem(
+        anon=True,
+        client_kwargs={"endpoint_url": endpoint_url},
+    )
+
+    mapper = [fs.open(f, mode="rb") for f in filelist]
+    reflist = [ujson.load(m) for m in mapper]
+
+    open_delayed = dask.delayed(xr.open_dataset)
+    getattr_delayed = dask.delayed(getattr)
+
+    backend_kwargs_list = [
+        {
+            "storage_options": {
+                "fo": ref,
+                "asynchronous": True,
+                "remote_protocol": "s3",
+                "remote_options": {
+                    "client_kwargs": {"endpoint_url": endpoint_url},
+                    "asynchronous": True,
+                    "anon": True,
+                },
+            },
+            "consolidated": False,
+        }
+        for ref in reflist
+    ]
+
+    datasets = [
+        open_delayed(
+            "reference://",
+            engine="zarr",
+            backend_kwargs=kwargs,
+            chunks=global_chunks,
+        )
+        for kwargs in backend_kwargs_list
+    ]
+    closers = [getattr_delayed(ds, "_close") for ds in datasets]
+    datasets, closers = dask.compute(datasets, closers)
+
+    ds = xr.combine_by_coords(
+        datasets,
+        compat="override",
+        coords="minimal",
+        combine_attrs="override",
+    )
+
+    for ds_local in datasets:
+        ds_local.close()
+    ds.set_close(partial(_multi_file_closer, closers))
+
+    # Squeeze out singleton dimensions (time, k, k_l) where present.
+    for dim in ("time", "k", "k_l"):
+        if dim in ds.dims and ds.sizes[dim] == 1:
+            ds = ds.isel({dim: 0})
+
+    print(f"Wind/sea-ice dataset combined: {list(ds.data_vars)}")
+    return ds
+
+
 def get_remote_gridfile(endpoint_url):
     """
     Load the LLC4320 grid variables for all 13 faces

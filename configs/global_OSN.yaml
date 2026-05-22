@@ -31,7 +31,7 @@ subsets:
 
   native_fields:
     # Raw model state variables — no derived quantities are computed.
-    # Output contains the 6 native model fields.
+    # 6 core model fields plus 3 surface-only fields from llc_wind kerchunk.
     dataset_name: "native_fields.zarr"
     model_data_feature_channels:
       - Theta
@@ -40,6 +40,9 @@ subsets:
       - U
       - V
       - W
+      - oceTAUX
+      - oceTAUY
+      - SIarea
     compute_features_channels: []
 
   frontal_structure:

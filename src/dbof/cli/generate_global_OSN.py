@@ -8,8 +8,10 @@ The subset of properties to compute is selected at runtime via ``--subset``
 Available subsets
 -----------------
 native_fields
-    Raw model state variables only (Theta, Salt, Eta, U, V, W).
-    No derived quantities are computed.
+    Raw model state variables only (Theta, Salt, Eta, U, V, W, oceTAUX,
+    oceTAUY, SIarea).
+    No derived quantities are computed.  Wind stress and sea-ice variables
+    are loaded from the ``llc_wind`` kerchunk endpoint.
 
 frontal_structure
     Scalar gradient magnitudes and the Turner angle characterising front
@@ -102,10 +104,15 @@ from dbof.utils.iterations import (
     osn_date_to_iteration, calculate_iterations_for_llc as _calc_iters_shared,
 )
 from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
+from dbof.utils.variable_selection import required_model_variables
 from dbof.utils.subset_config import resolve_subset, build_global_job_config, run_per_date
 
 # URL of the raw LLC4320 data store
 ENDPOINT_URL          = 'https://mghp.osn.xsede.org'
+
+# Variables available from each kerchunk endpoint.
+_SURF_KERCHUNK_VARS = {'Theta', 'Salt', 'Eta', 'U', 'V', 'W'}
+_WIND_KERCHUNK_VARS = {'KPPhbl', 'PhiBot', 'oceTAUX', 'oceTAUY', 'SIarea'}
 
 
 # ---------------------------------------------------------------------------
@@ -203,9 +210,8 @@ def process_time_snapshot(
 
     # Move non-tracer values to tracer points so all channels share the same
     # (face, j, i) grid before the face→latlon stitch.
-    # OSN endpoint has no wind stress variables, so only interpolate U/V.
-    interp_staggered_to_tracer(ds_merge, grid,
-                               stagger_map={'U': 'X', 'V': 'Y'})
+    # Default stagger_map handles U/V and oceTAUX/oceTAUY (skips missing vars).
+    interp_staggered_to_tracer(ds_merge, grid)
 
     # Assemble all channels into a single Dataset for a single conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels
@@ -214,8 +220,7 @@ def process_time_snapshot(
         | {ch: calculated_fields[ch] for ch in computed_feature_channels}
     )
     ds_to_convert = ds.assign(update_vars)[channels_to_convert]
-    set_vector_pair_attrs(ds_to_convert,
-                          vector_pairs=[('U', 'V')])
+    set_vector_pair_attrs(ds_to_convert)
 
     # Build mask dict: land (always) + optional ice mask.
     mask_dict = {'_land_mask': (ds_merge.hFacC == 0)}
@@ -353,6 +358,13 @@ def run_global_pipeline(
     rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
     logging.info(f"LLC rectangular output shape: {rectangular_shape}")
 
+    # Check whether any requested variables live in the wind kerchunk store.
+    all_needed = required_model_variables(model_feature_channels,
+                                          computed_feature_channels)
+    need_wind = bool(set(all_needed) & _WIND_KERCHUNK_VARS)
+    if need_wind:
+        logging.info(f"Will also load from llc_wind kerchunk endpoint")
+
     # Construct the zarr output store
     zarr_ds = zarr_dataset.GlobalZarrDataset(
         cfg.output.bucket,
@@ -367,9 +379,14 @@ def run_global_pipeline(
     logging.info("Zarr dataset created.")
 
     for it in tqdm.tqdm(iter_range):
-        # Fetch raw LLC4320 data for this iteration from S3/OSN
+        # Fetch raw LLC4320 data for this iteration from OSN.
         ds       = get_raw_data.get_remote_llc_data(ENDPOINT_URL, it, LLC_FACES)
         ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
+
+        if need_wind:
+            ds_wind = get_raw_data.get_remote_llc_wind_data(ENDPOINT_URL, it, LLC_FACES)
+            ds_merge = ds_merge.merge(ds_wind)
+
         logging.info(f"Data loaded for iteration: {it}")
 
         process_time_snapshot(
