@@ -403,15 +403,13 @@ def main(
         )
         return
 
-    # Single date — still use a date subdirectory for consistency.
-    from dbof.utils.iterations import date_to_run_id
-    date_prefix = date_to_run_id(date_iterations[0])
+    # Single date — date_prefix is derived inside run_global_pipeline
+    # from cfg.data.date_iterations.
     cfg = build_job_config(raw, subset_entry)
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
         cfg=cfg,
-        date_prefix=date_prefix,
         **pipeline_kwargs,
     )
 
