@@ -4,8 +4,13 @@ run:
 
 data:
   date_iterations:
-    - '2012-11-09 12:00:00'
+    - '2012-03-09 12:00:00'
   # --- specify exact timestamps in YYYY-MM-DD HH:MM:SS (ISO) format ---
+  # OSN kerchunk data availability:
+  #   llc_surf (Theta, Salt, Eta, U, V, W):                2011-09-13 - 2012-11-15
+  #   llc_wind (oceTAUX, oceTAUY, SIarea, KPPhbl, PhiBot): 2011-11-01 – 2012-07-15
+  # If the subset includes wind/sea-ice variables, dates must fall within
+  # the llc_wind window.
 
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"

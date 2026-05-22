@@ -8,8 +8,8 @@ data_access:
 # - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
 #   the pipeline for the snapshot you want to read.
 # - Full path: s3://{bucket}/{folder}/{run_id}/{date_prefix}/{subset}.zarr
-  run_id: "testing_015"
-  date_prefix: "20121109_120000"
+  run_id: "testing_018"
+  date_prefix: "20120309_120000"
 
 # Per-subset zarr names and their channel lists.
 #
