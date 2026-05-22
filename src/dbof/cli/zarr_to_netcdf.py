@@ -153,6 +153,7 @@ def zarr_to_netcdf(
     output_filename: str = None,    # override auto-generated name (single timestep)
     channels: list = None,          # subset of channel names to save; None = all
     fs=None,                        # reuse an existing s3fs filesystem; created if None
+    date_prefix: str = None,        # date subdirectory under run_id (e.g. '20121109_120000')
 ) -> None:
     """
     Convert a GlobalZarrDataset on S3 to per-timestep NetCDF files locally.
@@ -196,7 +197,9 @@ def zarr_to_netcdf(
     # ------------------------------------------------------------------
     # 1. Open Zarr reader
     # ------------------------------------------------------------------
-    store_path = f"s3://{bucket.strip('/')}/{folder.strip('/')}/{run_id}/{dataset_name}"
+    store_path = zarr_dataset_global.make_run_prefix(
+        bucket, folder, run_id, dataset_name, date_prefix=date_prefix,
+    )
     logging.info(f"Opening snapshot Zarr store: {store_path}")
     if fs is None:
         _, fs = create_s3_filesystems(s3_endpoint)
@@ -206,6 +209,7 @@ def zarr_to_netcdf(
         run_id=run_id,
         dataset_name=dataset_name,
         fs=fs,
+        date_prefix=date_prefix,
     )
 
     n_total = len(reader)
@@ -427,6 +431,7 @@ def main(
     channels: list = None,
     grid_dataset_name: str = 'llc4320_grid.zarr',
     grid_output_filename: str = 'llc4320_grid.nc',
+    date_prefix: str = None,
 ) -> None:
     """Entry point callable from other modules or the CLI.
 
@@ -484,6 +489,9 @@ def main(
         p.add_argument('--output-filename')
         p.add_argument('--channel', nargs='+', metavar='NAME', dest='channels')
         p.add_argument('--channels', nargs='+', metavar='NAME')
+        p.add_argument('--date-prefix',
+                       help=("[snapshots] Date subdirectory under run_id "
+                             "(e.g. '20121109_120000')."))
         p.add_argument('--grid-dataset-name', default='llc4320_grid.zarr')
         p.add_argument('--grid-output-filename', default='llc4320_grid.nc')
         args = p.parse_args()
@@ -501,6 +509,7 @@ def main(
         iterations          = args.iterations
         dates               = args.dates
         channels            = args.channels or getattr(args, 'channel', None)
+        date_prefix         = args.date_prefix
         grid_dataset_name   = args.grid_dataset_name
         grid_output_filename = args.grid_output_filename
 
@@ -532,6 +541,7 @@ def main(
                 run_id=run_id,
                 dataset_name=dataset_name,
                 fs=fs_synch,
+                date_prefix=date_prefix,
             )
             if dates is not None:
                 iters = [_date_to_iteration(d) for d in dates]
@@ -552,6 +562,7 @@ def main(
             output_filename=output_filename,
             channels=channels,
             fs=fs_synch,
+            date_prefix=date_prefix,
         )
 
 
@@ -605,6 +616,11 @@ if __name__ == '__main__':
                    help=("[snapshots] Save only the named channel(s) "
                          "(e.g. --channel log_gradb). Default: all channels."))
 
+    p.add_argument('--date-prefix',
+                   help=("[snapshots] Date subdirectory under run_id "
+                         "(e.g. '20121109_120000'). Matches the output layout "
+                         "produced by generate_global*.py when date_iterations is set."))
+
     # --- grid-mode args ---
     p.add_argument('--grid-dataset-name', default='llc4320_grid.zarr',
                    help="[grid] Zarr store name in --folder (default: llc4320_grid.zarr)")
@@ -631,4 +647,5 @@ if __name__ == '__main__':
         channels=args.channels,
         grid_dataset_name=args.grid_dataset_name,
         grid_output_filename=args.grid_output_filename,
+        date_prefix=args.date_prefix,
     )

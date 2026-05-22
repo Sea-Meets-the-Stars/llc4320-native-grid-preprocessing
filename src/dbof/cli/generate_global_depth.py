@@ -229,6 +229,7 @@ def run_global_pipeline(
     s3_source: dict = None,
     surface_only: bool = False,
     config_dir: Path = None,
+    date_prefix: str | None = None,
 ) -> None:
     """
     Main orchestration loop for the fully-lazy dask pipeline.
@@ -236,6 +237,12 @@ def run_global_pipeline(
     Uses the dask distributed scheduler for all computation: the lazy
     task graph built by the compute functions is materialised by the
     scheduler's workers.
+
+    Parameters
+    ----------
+    date_prefix : str or None, optional
+        Date subdirectory inserted between *run_id* and *dataset_name*
+        in the S3 output path (e.g. ``'20121109_120000'``).
     """
     wall_start = time.monotonic()
 
@@ -280,6 +287,7 @@ def run_global_pipeline(
         cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
         cfg.output.dataset_name, fs=fs,
         channel_names=channel_names, rectangular_shape=rectangular_shape,
+        date_prefix=date_prefix,
     )
     logging.info("Zarr dataset created.")
 
@@ -384,22 +392,26 @@ def main(
         config_dir=Path(config_file).resolve().parent,
     )
 
-    # Per-date looping: when no --run_id, each date gets its own output dir.
-    if run_id is None and len(date_iterations) > 1:
+    # Per-date looping: each date gets its own date subdirectory.
+    if len(date_iterations) > 1:
         run_per_date(
             raw, subset_entry, date_iterations,
             pipeline_fn=run_global_pipeline,
             compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
+            run_id=run_id,
             **pipeline_kwargs,
         )
         return
 
-    # Single run (explicit run_id, or only one date).
+    # Single date — still use a date subdirectory for consistency.
+    from dbof.utils.iterations import date_to_run_id
+    date_prefix = date_to_run_id(date_iterations[0])
     cfg = build_job_config(raw, subset_entry)
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
         cfg=cfg,
+        date_prefix=date_prefix,
         **pipeline_kwargs,
     )
 

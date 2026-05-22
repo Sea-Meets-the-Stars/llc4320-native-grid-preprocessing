@@ -118,13 +118,18 @@ def run_per_date(
     date_iterations: list[str],
     pipeline_fn,
     compute_fields_fn,
+    run_id: str | None = None,
     **pipeline_kwargs,
 ) -> None:
     """
-    Run the pipeline once per date with an auto-generated ``run_id``.
+    Run the pipeline once per date, each in its own date subdirectory.
 
-    Each date produces a separate output directory whose ``run_id`` is derived
-    from the date string (e.g. ``'2012-11-09 12:00:00'`` →
+    Output layout::
+
+        s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
+
+    where *date_prefix* is derived from each date string via
+    :func:`date_to_run_id` (e.g. ``'2012-11-09 12:00:00'`` →
     ``'20121109_120000'``).
 
     Parameters
@@ -139,18 +144,22 @@ def run_per_date(
         The ``run_global_pipeline`` function to call for each date.
     compute_fields_fn : callable
         The subset compute callback.
+    run_id : str or None, optional
+        Explicit run_id override.  If ``None``, the value from the YAML
+        config (``raw["run"]["run_id"]``) is used.
     **pipeline_kwargs
         Extra keyword arguments forwarded to *pipeline_fn* (e.g.
         ``apply_icemask``, ``s3_source``, ``surface_only``, ``config_dir``).
     """
+    effective_run_id = run_id or raw.get("run", {}).get("run_id", "default")
     print(
-        f"No --run_id provided; will create a separate output directory "
+        f"Will create a date subdirectory under run_id='{effective_run_id}' "
         f"for each of the {len(date_iterations)} date(s) in date_iterations."
     )
     for date_str in date_iterations:
-        auto_run_id = date_to_run_id(date_str)
+        date_prefix = date_to_run_id(date_str)
         print(f"\n{'='*60}")
-        print(f"Processing date: {date_str}  →  run_id: {auto_run_id}")
+        print(f"Processing date: {date_str}  →  date_prefix: {date_prefix}")
         print(f"{'='*60}")
 
         # Build a single-date config so only this date is processed.
@@ -162,9 +171,10 @@ def run_per_date(
         cfg = build_job_config(single_date_raw, subset_entry)
 
         pipeline_fn(
-            run_id=auto_run_id,
+            run_id=effective_run_id,
             compute_fields_fn=compute_fields_fn,
             cfg=cfg,
+            date_prefix=date_prefix,
             **pipeline_kwargs,
         )
 

@@ -4,11 +4,12 @@ data_access:
   folder: "properties"
 
 # NOTE:
-# - This MUST exactly match the run_id used when generate-global-depth was run.
-# - All subsets from a session share this run_id and are stored in the same
-#   S3 directory:
-#     s3://{bucket}/{folder}/{run_id}/{subset}.zarr
+# - run_id MUST exactly match the run_id used when generate-global-depth was run.
+# - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
+#   the pipeline for the snapshot you want to read.
+# - Full path: s3://{bucket}/{folder}/{run_id}/{date_prefix}/{subset}.zarr
   run_id: "testing_015"
+  date_prefix: "20121109_120000"
 
 # Per-subset zarr names and their channel lists.
 #

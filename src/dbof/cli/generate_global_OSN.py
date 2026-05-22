@@ -102,7 +102,7 @@ from dbof.utils.iterations import (
     osn_date_to_iteration, calculate_iterations_for_llc as _calc_iters_shared,
 )
 from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
-from dbof.utils.subset_config import resolve_subset, build_job_config
+from dbof.utils.subset_config import resolve_subset, build_job_config, run_per_date
 
 # URL of the raw LLC4320 data store
 ENDPOINT_URL          = 'https://mghp.osn.xsede.org'
@@ -301,6 +301,7 @@ def run_global_pipeline(
     compute_fields_fn = None,
     cfg: config.JobConfig = None,
     apply_icemask: bool = True,
+    date_prefix: str | None = None,
 ) -> None:
     """
     Main orchestration loop for global dataset generation.
@@ -325,6 +326,9 @@ def run_global_pipeline(
     apply_icemask : bool, default True
         When ``True``, pixels where ``Theta <= 0`` are NaN-ed out as sea ice.
         Pass ``False`` to retain sub-freezing surface values.
+    date_prefix : str or None, optional
+        Date subdirectory inserted between *run_id* and *dataset_name*
+        in the S3 output path (e.g. ``'20121109_120000'``).
     """
     cfg = resolve_config(cfg, config_file, run_id, config_module=config)
 
@@ -358,6 +362,7 @@ def run_global_pipeline(
         fs=fs,
         channel_names=model_feature_channels + computed_feature_channels,
         rectangular_shape=rectangular_shape,
+        date_prefix=date_prefix,
     )
     logging.info("Zarr dataset created.")
 
@@ -440,13 +445,30 @@ def main(
         raw = yaml.safe_load(fh) or {}
 
     subset, subset_entry = resolve_subset(raw, subset, SUBSET_COMPUTE_FNS)
-    cfg = build_job_config(raw, subset_entry)
 
+    # --- Per-date looping or single run --------------------------------------
+    date_iterations = raw.get("data", {}).get("date_iterations")
+    pipeline_kwargs = dict(
+        apply_icemask=apply_icemask,
+    )
+
+    if date_iterations is not None and len(date_iterations) > 0:
+        run_per_date(
+            raw, subset_entry, date_iterations,
+            pipeline_fn=run_global_pipeline,
+            compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
+            run_id=run_id,
+            **pipeline_kwargs,
+        )
+        return
+
+    # Single run (no date_iterations).
+    cfg = build_job_config(raw, subset_entry)
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
         cfg=cfg,
-        apply_icemask=apply_icemask,
+        **pipeline_kwargs,
     )
 
 

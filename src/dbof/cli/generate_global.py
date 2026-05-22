@@ -47,15 +47,14 @@ CLI usage
         [--run_id my_run] \\
         [--icemask]
 
-When ``--run_id`` is omitted and ``date_iterations`` is set in the YAML,
-each date is processed as a separate pipeline run with an auto-generated
-run_id in YYYYMMDD_HHMMSS format.  For example, two dates produce::
+When ``date_iterations`` is set in the YAML, each date is processed as a
+separate pipeline run, stored in a date subdirectory under the run_id::
 
-    s3://dbof/surface_fields/20111209_120000/native_fields.zarr
-    s3://dbof/surface_fields/20121109_120000/native_fields.zarr
+    s3://dbof/surface_fields/{run_id}/20111209_120000/native_fields.zarr
+    s3://dbof/surface_fields/{run_id}/20121109_120000/native_fields.zarr
 
-When ``--run_id`` is provided explicitly, all dates are written into a
-single zarr store under that run_id (original behaviour).
+When ``--run_id`` is provided it overrides the config value; otherwise the
+run_id from the YAML is used.
 
 Config design
 -------------
@@ -275,11 +274,18 @@ def run_global_pipeline(
     cfg: config.JobConfig = None,
     apply_icemask: bool = True,
     s3_source: dict = None,
+    date_prefix: str | None = None,
 ) -> None:
     """Orchestration loop: load grid, iterate snapshots, write zarr.
 
     Kerchunk variables come from OSN; anything else (oceTAUX, SIarea, …)
     is loaded from *s3_source* timestep stores when provided.
+
+    Parameters
+    ----------
+    date_prefix : str or None, optional
+        Date subdirectory inserted between *run_id* and *dataset_name*
+        in the S3 output path (e.g. ``'20121109_120000'``).
     """
     cfg = resolve_config(cfg, config_file, run_id, config_module=config)
 
@@ -335,6 +341,7 @@ def run_global_pipeline(
         fs=fs,
         channel_names=model_feature_channels + computed_feature_channels,
         rectangular_shape=rectangular_shape,
+        date_prefix=date_prefix,
     )
     logging.info("Zarr dataset created.")
 
@@ -432,16 +439,17 @@ def main(
         s3_source=s3_source_cfg,
     )
 
-    if run_id is None and date_iterations is not None and len(date_iterations) > 0:
+    if date_iterations is not None and len(date_iterations) > 0:
         run_per_date(
             raw, subset_entry, date_iterations,
             pipeline_fn=run_global_pipeline,
             compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
+            run_id=run_id,
             **pipeline_kwargs,
         )
         return
 
-    # Single run (explicit run_id or range mode).
+    # Single run (no date_iterations).
     cfg = build_job_config(raw, subset_entry)
     run_global_pipeline(
         run_id=run_id,
