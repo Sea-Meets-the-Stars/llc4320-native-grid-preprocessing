@@ -50,14 +50,24 @@ def resolve_config(cfg, config_file=None, run_id=None, *, config_module=None):
         cfg = config_module.load_config(config_file)
 
     if run_id is not None:
-        cfg = config_module.JobConfig(
-            run=config_module.RunConfig(run_id=run_id, log_dir=cfg.run.log_dir),
-            data=cfg.data,
-            sampling=cfg.sampling,
-            output=cfg.output,
-            features=cfg.features,
-            runtime=cfg.runtime,
-        )
+        new_run = config_module.RunConfig(run_id=run_id, log_dir=cfg.run.log_dir)
+        if isinstance(cfg, config_module.GlobalJobConfig):
+            cfg = config_module.GlobalJobConfig(
+                run=new_run,
+                data=cfg.data,
+                output=cfg.output,
+                features=cfg.features,
+                runtime=cfg.runtime,
+            )
+        else:
+            cfg = config_module.JobConfig(
+                run=new_run,
+                data=cfg.data,
+                sampling=cfg.sampling,
+                output=cfg.output,
+                features=cfg.features,
+                runtime=cfg.runtime,
+            )
 
     return cfg
 

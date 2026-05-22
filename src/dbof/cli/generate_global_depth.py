@@ -82,7 +82,7 @@ from dbof.utils.logging import generate_logging
 from dbof.utils.iterations import mit_date_to_iteration
 from dbof.utils.variable_selection import required_model_variables
 from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
-from dbof.utils.subset_config import resolve_subset, build_job_config, run_per_date
+from dbof.utils.subset_config import resolve_subset, build_global_job_config, run_per_date
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -91,7 +91,7 @@ from dbof.utils.subset_config import resolve_subset, build_job_config, run_per_d
 _date_to_iteration = mit_date_to_iteration
 
 
-def set_up_grid_data_and_masks_s3(cfg: config.JobConfig, s3_source: dict, use_halo: bool = False):
+def set_up_grid_data_and_masks_s3(cfg: config.GlobalJobConfig, s3_source: dict, use_halo: bool = False):
     """Load the LLC4320 grid and compute a static land mask from S3 grid store."""
     grid_folder = s3_source.get('grid_folder', s3_source['folder'])
     logging.info(f"Fetching grid file from S3 grid store (folder={grid_folder})")
@@ -130,7 +130,7 @@ def _select_surface(ds: xr.Dataset) -> xr.Dataset:
 # ---------------------------------------------------------------------------
 
 def process_snapshot(
-    cfg: config.JobConfig,
+    cfg: config.GlobalJobConfig,
     ds,
     ds_merge,
     grid,
@@ -225,7 +225,7 @@ def run_global_pipeline(
     config_file: str = None,
     run_id: str = None,
     compute_fields_fn=None,
-    cfg: config.JobConfig = None,
+    cfg: config.GlobalJobConfig = None,
     s3_source: dict = None,
     surface_only: bool = False,
     config_dir: Path = None,
@@ -405,7 +405,7 @@ def main(
 
     # Single date — date_prefix is derived inside run_global_pipeline
     # from cfg.data.date_iterations.
-    cfg = build_job_config(raw, subset_entry)
+    cfg = build_global_job_config(raw, subset_entry)
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],

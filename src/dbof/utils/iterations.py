@@ -5,12 +5,12 @@ Every pipeline needs to map human-readable dates to LLC4320 iteration numbers.
 This module centralises the conversion logic and the calendar constants that
 drive it.
 """
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone
 
 import numpy as np
-
-import dbof.dataset_creation.config as config
 
 # ---------------------------------------------------------------------------
 # LLC4320 calendar / model constants
@@ -84,50 +84,39 @@ def osn_date_to_iteration(date_str: str) -> int:
 # ---------------------------------------------------------------------------
 
 def calculate_iterations_for_llc(
-    cfg: config.JobConfig,
+    cfg,
     *,
     use_osn_offset: bool = True,
 ) -> np.ndarray:
     """
     Return the array of LLC4320 iteration numbers to process.
 
-    Two modes, in priority order:
-
-    1. **Date list** — ``cfg.data.date_iterations`` is a list of date strings.
-       Each is converted via the appropriate date-to-iteration converter.
-
-    2. **Range mode** (default, backwards-compatible) — a uniformly-spaced
-       range from ``start_record``, ``sampling_step``, and
-       ``timestep_hours``.  If ``timestep_hours`` is ``None`` the range runs
-       to ``MAX_ITER``.
+    ``cfg.data.date_iterations`` must be a list of date strings.
+    Each is converted via the appropriate date-to-iteration converter.
 
     Parameters
     ----------
-    cfg : config.JobConfig
-        Pipeline configuration.
+    cfg : GlobalJobConfig or JobConfig
+        Pipeline configuration.  Must have ``cfg.data.date_iterations``.
     use_osn_offset : bool, default True
         If True, use :func:`osn_date_to_iteration` (adds OSN offset);
         otherwise use :func:`mit_date_to_iteration`.
     """
     date_to_iter = osn_date_to_iteration if use_osn_offset else mit_date_to_iteration
 
-    if cfg.data.date_iterations is not None:
-        iterations = [date_to_iter(d) for d in cfg.data.date_iterations]
-        label = "OSN offset applied" if use_osn_offset else "MIT iterations"
-        logging.info(
-            f"Using date-derived iteration list ({label}): "
-            + ", ".join(
-                f"'{d}' → {it}"
-                for d, it in zip(cfg.data.date_iterations, iterations)
-            )
+    if cfg.data.date_iterations is None or len(cfg.data.date_iterations) == 0:
+        raise ValueError(
+            "cfg.data.date_iterations must be set.  The range-mode fallback "
+            "(sampling_step / start_record / timestep_hours) has been removed."
         )
-        return np.array(iterations, dtype=int)
 
-    # Range mode: convert hours → model iteration numbers
-    iter_step  = cfg.data.sampling_step * TS_PER_HOUR
-    start_iter = FIRST_WIND_RECORD_OFFSET + cfg.data.start_record * TS_PER_HOUR
-    end_iter   = (
-        MAX_ITER if cfg.data.timestep_hours is None
-        else start_iter + cfg.data.timestep_hours * TS_PER_HOUR
+    iterations = [date_to_iter(d) for d in cfg.data.date_iterations]
+    label = "OSN offset applied" if use_osn_offset else "MIT iterations"
+    logging.info(
+        f"Using date-derived iteration list ({label}): "
+        + ", ".join(
+            f"'{d}' → {it}"
+            for d, it in zip(cfg.data.date_iterations, iterations)
+        )
     )
-    return np.arange(start_iter, end_iter, iter_step)
+    return np.array(iterations, dtype=int)

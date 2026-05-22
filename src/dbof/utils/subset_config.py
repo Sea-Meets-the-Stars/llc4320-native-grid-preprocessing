@@ -76,9 +76,8 @@ def build_job_config(raw: dict, subset_entry: dict) -> config.JobConfig:
     """
     Build a ``JobConfig`` from the raw YAML dict and the resolved subset entry.
 
-    The ``subsets`` / ``active_subset`` keys live at the YAML top level but are
-    not known to ``config.load_config``, so the ``JobConfig`` is assembled
-    directly.
+    Used by ``generate_front_training_data.py`` and any pipeline that needs
+    the full config (sampling, range-mode iteration fields, etc.).
 
     Parameters
     ----------
@@ -96,6 +95,42 @@ def build_job_config(raw: dict, subset_entry: dict) -> config.JobConfig:
         data=config.DataConfig(**raw.get("data", {})),
         sampling=config.SamplingConfig(**raw.get("sampling", {})),
         output=config.OutputConfig(**output_dict),
+        features=config.FeaturesConfig(
+            model_data_feature_channels=subset_entry.get(
+                "model_data_feature_channels", []
+            ),
+            compute_features_channels=subset_entry.get(
+                "compute_features_channels", []
+            ),
+        ),
+        runtime=config.RuntimeConfig(**raw.get("runtime", {})),
+    )
+
+
+def build_global_job_config(raw: dict, subset_entry: dict) -> config.GlobalJobConfig:
+    """
+    Build a ``GlobalJobConfig`` from the raw YAML dict and the resolved subset.
+
+    This is the slim variant used by the three ``generate_global_*`` pipelines.
+    It requires only the sections those scripts actually use: ``run``, ``data``
+    (just ``date_iterations`` and ``endpoint_url``), ``output``, ``features``,
+    and ``runtime``.  No ``sampling`` section is needed.
+
+    Parameters
+    ----------
+    raw : dict
+        Full raw YAML dict.
+    subset_entry : dict
+        The specific subset block (e.g. ``raw["subsets"]["kinematic"]``).
+    """
+    output_dict = {**raw.get("output", {})}
+    if "dataset_name" in subset_entry:
+        output_dict["dataset_name"] = subset_entry["dataset_name"]
+
+    return config.GlobalJobConfig(
+        run=config.RunConfig(**raw.get("run", {})),
+        data=config.GlobalDataConfig(**raw.get("data", {})),
+        output=config.GlobalOutputConfig(**output_dict),
         features=config.FeaturesConfig(
             model_data_feature_channels=subset_entry.get(
                 "model_data_feature_channels", []
@@ -168,7 +203,7 @@ def run_per_date(
             **raw.get("data", {}),
             "date_iterations": [date_str],
         }
-        cfg = build_job_config(single_date_raw, subset_entry)
+        cfg = build_global_job_config(single_date_raw, subset_entry)
 
         pipeline_fn(
             run_id=effective_run_id,

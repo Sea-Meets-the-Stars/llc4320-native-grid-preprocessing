@@ -24,28 +24,11 @@ data:
   date_iterations:
     - '2012-11-09 12:00:00'
 
-  # Required by DataConfig defaults; not used by this pipeline.
-  endpoint_url: "https://mghp.osn.xsede.org"
-  sampling_step: 168
-  start_record: 1180
-
-sampling:
-  # Not used by this script; required by DataConfig.
-  bias_to_high_gradients: 1.0
-  sample_points_per_snapshot: 1
-
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
   folder: "properties/"
   dataset_name: "global_depth.zarr"    # overridden per-subset below
-  target_km_res: 150
-  down_sample_res: 64
-
-features:
-  # Overwritten at runtime by the selected subset's values below.
-  model_data_feature_channels: []
-  compute_features_channels: []
 
 runtime:
   zarr_async_concurrency: 8

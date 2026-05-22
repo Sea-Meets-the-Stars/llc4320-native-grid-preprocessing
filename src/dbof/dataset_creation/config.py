@@ -70,6 +70,36 @@ class JobConfig:
     runtime: RuntimeConfig
 
 
+# ---------------------------------------------------------------------------
+# Global pipeline config (slimmed down — no sampling, no range-mode fields)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GlobalDataConfig:
+    endpoint_url: str = "https://mghp.osn.xsede.org"
+    date_iterations: Optional[List[str]] = None
+    k_levels: Optional[List[int]] = None
+
+@dataclass(frozen=True)
+class GlobalOutputConfig:
+    s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
+    bucket: str = "dbof/"
+    folder: str = "surface_fields/"
+    dataset_name: str = "global.zarr"
+
+@dataclass(frozen=True)
+class GlobalJobConfig:
+    run: RunConfig
+    data: GlobalDataConfig
+    output: GlobalOutputConfig
+    features: FeaturesConfig
+    runtime: RuntimeConfig
+
+
+# ---------------------------------------------------------------------------
+# Config loaders
+# ---------------------------------------------------------------------------
+
 def load_config(path: str) -> JobConfig:
     with open(path, "r") as f:
         raw = yaml.safe_load(f) or {}

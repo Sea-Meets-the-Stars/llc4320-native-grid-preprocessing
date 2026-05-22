@@ -3,34 +3,15 @@ run:
   log_dir: "../test_logs/"
 
 data:
-  sampling_step: 168  # hours between snapshots (168 = weekly)
-  start_record: 1180
-  timestep_hours: 168  # total hours to process; overridden by date_iterations if set
-
   date_iterations:
     - '2012-11-09 12:00:00'
   # --- specify exact timestamps in YYYY-MM-DD HH:MM:SS (ISO) format ---
-  # If set, date_iterations overrides sampling_step / start_record / timestep_hours.
-
-sampling:
-  # not used by the global script but config.py still requires the section
-  bias_to_high_gradients: 1.0
-  sample_points_per_snapshot: 1
 
 output:
-  target_km_res: 150    # not used in the global script; kept for config compatibility
-  down_sample_res: 64   # not used in the global script; kept for config compatibility
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
   folder: "surface_fields/"
   dataset_name: "global.zarr"  # overridden per-subset (see subsets below)
-
-features:
-  # These two fields are required by load_config / FeaturesConfig.
-  # They are overwritten at runtime by the selected subset's values below —
-  # you do not need to edit them manually.
-  model_data_feature_channels: []
-  compute_features_channels: []
 
 runtime:
   zarr_async_concurrency: 128

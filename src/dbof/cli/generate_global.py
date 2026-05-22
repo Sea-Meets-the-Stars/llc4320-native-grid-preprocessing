@@ -110,7 +110,7 @@ from dbof.utils.logging import generate_logging
 from dbof.utils.iterations import LLC_FACES, calculate_iterations_for_llc
 from dbof.utils.variable_selection import required_model_variables
 from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
-from dbof.utils.subset_config import resolve_subset, build_job_config, run_per_date
+from dbof.utils.subset_config import resolve_subset, build_global_job_config, run_per_date
 
 # URL of the raw LLC4320 data store
 ENDPOINT_URL = 'https://mghp.osn.xsede.org'
@@ -124,7 +124,7 @@ _KERCHUNK_VARS = {'Theta', 'Salt', 'Eta', 'U', 'V', 'W'}
 # ---------------------------------------------------------------------------
 
 
-def set_up_grid_data_and_masks(cfg: config.JobConfig, use_halo: bool = False):
+def set_up_grid_data_and_masks(cfg: config.GlobalJobConfig, use_halo: bool = False):
     """
     Load the LLC4320 grid and compute a static land mask.
 
@@ -159,7 +159,7 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig, use_halo: bool = False):
 # ---------------------------------------------------------------------------
 
 def process_time_snapshot(
-    cfg: config.JobConfig,
+    cfg: config.GlobalJobConfig,
     zarr_ds,
     ds,
     ds_merge,
@@ -271,7 +271,7 @@ def run_global_pipeline(
     config_file: str = None,
     run_id: str = None,
     compute_fields_fn = None,
-    cfg: config.JobConfig = None,
+    cfg: config.GlobalJobConfig = None,
     apply_icemask: bool = True,
     s3_source: dict = None,
     date_prefix: str | None = None,
@@ -450,7 +450,7 @@ def main(
         return
 
     # Single run (no date_iterations).
-    cfg = build_job_config(raw, subset_entry)
+    cfg = build_global_job_config(raw, subset_entry)
     run_global_pipeline(
         run_id=run_id,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
