@@ -85,9 +85,8 @@ def apply_depth_strategies(field3d, field_base_name, ds_merge, mld=None,
                            requested=None):
     """Apply depth strategies to a lazy 3D field → dict of lazy 2D results.
 
-    Operates on the full lazy 3D array directly — no per-k loops or
-    ``field_at_k`` closures.  All returned DataArrays stay dask-backed
-    until the caller's final ``dask.compute()``.
+    Operates on the full lazy 3D array directly. All returned DataArrays 
+    stay dask-backed until the caller's final ``dask.compute()``.
 
     Parameters
     ----------

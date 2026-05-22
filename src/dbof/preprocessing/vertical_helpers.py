@@ -235,7 +235,7 @@ def _extract_at_mld(field3d, mld, ds_merge):
 
 def _interp_w_to_tracer_levels(ds_merge):
     """
-    Interpolate W from cell interfaces (k_p1 / Zp1) to tracer cell centres
+    Interpolate W from cell interfaces (k_l / Zl) to tracer cell centres
     (k / Z) by averaging adjacent interface levels.
 
     On the MITgcm C-grid, ``grid.interp(W, 'Z')`` is equivalent to

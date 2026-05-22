@@ -81,9 +81,7 @@ def _density_lazy(ds_merge):
     """Compute density lazily via apply_ufunc (no .persist()).
 
     Wraps the JMD95 equation of state, ensuring the result stays
-    dask-backed and lazy — no eager scheduling on workers.  This is
-    important for building a single fused task graph that dask.compute()
-    materialises all at once at the end of each subset function.
+    dask-backed and lazy — no eager scheduling on workers.  
     """
     chunk_spec = {'face': 1, 'j': 720, 'i': 720}
     for dim in ('k', 'k_l'):
@@ -217,7 +215,7 @@ def buoyancy_field_3d(ds_merge):
 
     b = (g * rho / ref_rho) * 1e3
     b.name = "buoyancy"
-    b.attrs["units"] = "m^2 s^-3"
+    b.attrs["units"] = "m^2 s^-2"
     return b
 
 
