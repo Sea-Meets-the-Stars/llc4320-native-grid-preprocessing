@@ -126,7 +126,7 @@ subsets:
       #- Ro_z25m
       - Ro_mld
       #- Ro_mld_mean
-      - Burger_number
+      - Bu_mld
 
   ertel_pv:
     dataset_name: "ertel_pv.zarr"

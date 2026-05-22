@@ -32,6 +32,11 @@ def _get_depth_coord(ds_merge, zdim=None):
     """
     Return a 1D depth coordinate in metres, **positive downward**.
 
+    The LLC4320 native convention stores depth as positive-upward
+    (Z < 0 below the surface).  This function converts to positive-
+    downward (0 at the surface, increasing with depth) by taking
+    the absolute value.
+
     For tracer-level fields (zdim='k') this returns ``|Z|``.
     For W-level fields (zdim='k_l') this returns ``|Zl|``.
 
@@ -88,11 +93,15 @@ def _get_vertical_spacing(ds_merge, zdim=None):
 def _nearest_k_to_depth(z_vals, target_depth):
     """Return the integer k-index whose depth is nearest to *target_depth*.
 
+    Both *z_vals* and *target_depth* must use the **positive-downward**
+    convention (0 at the surface, increasing with depth) — the same
+    convention returned by ``_get_depth_coord``.
+
     Parameters
     ----------
     z_vals : np.ndarray
-        1D depth coordinate, positive downward, in metres (same convention
-        as returned by ``_get_depth_coord``).
+        1D depth coordinate, positive downward, in metres (as returned
+        by ``_get_depth_coord``).
     target_depth : float
         Target depth in metres, positive downward.
 
@@ -114,8 +123,14 @@ def _vertical_derivative(field, ds_merge):
 
     Positive z is downward (so dθ/dz < 0 means θ decreases with depth).
 
-    Uses centered finite differences at interior levels and one-sided
-    differences at boundaries, matching MITgcm's discretisation style.
+    The stencil spans **two layers** at interior points (centered
+    difference between k-1 and k+1), and **one layer** at the top
+    and bottom boundaries (forward / backward difference respectively):
+
+    - k = 0      : forward   (f[1] - f[0])   / (z[1] - z[0])
+    - 1 ≤ k < N-1: centered  (f[k+1] - f[k-1]) / (z[k+1] - z[k-1])
+    - k = N-1    : backward  (f[N-1] - f[N-2]) / (z[N-1] - z[N-2])
+
     The spacing between levels comes from the positive-downward depth
     coordinate (``_get_depth_coord``).
 
@@ -196,12 +211,17 @@ def _extract_at_mld(field3d, mld, ds_merge):
     (the deepest Z where the density criterion holds), so nearest-k
     recovers the exact level.
 
-    Implementation note: ``apply_ufunc`` with ``input_core_dims=[[zdim], []]``
-    moves the vertical axis to the **last** position of the chunk before
-    calling the inner function.  The inner function therefore receives
-    ``field_chunk`` with shape ``(..., nk)`` and ``mld_chunk`` with the
-    spatial shape ``(...)``.  We work with the k-axis in last position
-    throughout (no moveaxis needed).
+    Implementation note
+    ~~~~~~~~~~~~~~~~~~~
+    ``apply_ufunc`` with ``input_core_dims=[[zdim], []]`` moves the
+    vertical axis to the **last** position of each chunk before calling
+    the inner function.  As a result the inner function receives:
+
+    - ``field_chunk`` with shape ``(..., nk)``  (k axis last)
+    - ``mld_chunk``   with shape ``(...)``      (2D spatial)
+
+    All indexing inside the inner function operates with k in the last
+    position — no ``moveaxis`` is needed.
     """
     zdim = _get_vertical_dim(field3d)
     z = _get_depth_coord(ds_merge, zdim=zdim)
@@ -270,6 +290,8 @@ def _masked_ml_mean(field3d, mld, ds_merge):
     Thickness-weighted mean of a 3D field over 0 ≤ z ≤ MLD.
 
     This is the standard depth-reduction for "mean over the mixed layer".
+    The vertical dimension is reduced by the weighted sum, so the output
+    is **2D** (face, j, i).
     """
     zdim = _get_vertical_dim(field3d)
     z = _get_depth_coord(ds_merge, zdim=zdim)

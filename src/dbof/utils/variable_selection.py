@@ -17,7 +17,7 @@ variables required to produce them, avoiding unnecessary I/O.
 _CHANNEL_VARIABLE_RULES = [
     # Tracers: any buoyancy/density/gradient-based diagnostic
     (
-        ('N2_', 'mixed_layer', 'ml_heat', 'Ri_', 'Fr_', 'Burger',
+        ('N2_', 'mixed_layer', 'ml_heat', 'Ri_', 'Fr_', 'Bu_',
          'ertel_pv', 'uB', 'vB', 'wB', 'Ro_', 'KE_',
          'gradb2_', 'gradtheta2_', 'gradsalt2_', 'gradrho2_',
          'turner_angle_', 'frontogenesis_'),
@@ -25,7 +25,7 @@ _CHANNEL_VARIABLE_RULES = [
     ),
     # Velocity: shear, dimensionless numbers, fluxes, kinematics
     (
-        ('vertical_shear', 'Ri_', 'Fr_', 'Ro_', 'Burger',
+        ('vertical_shear', 'Ri_', 'Fr_', 'Ro_', 'Bu_',
          'ertel_pv', 'uB', 'vB',
          'relative_vorticity_', 'strain_', 'divergence_',
          'okubo_weiss_', 'frontogenesis_', 'ug_', 'vg_'),

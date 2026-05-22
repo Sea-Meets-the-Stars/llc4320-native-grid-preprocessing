@@ -40,21 +40,31 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
         "gradrho2":   calculate_additional_fields.grad_rho2,
     }
 
+    # Turner angle depends on gradtheta2, gradsalt2, and gradrho2.
+    # If turner_angle is requested, ensure its dependencies are computed
+    # even if they are not individually requested as output channels.
+    turner_requested = "turner_angle" in computed_feature_channels
+    turner_deps = {"gradtheta2", "gradsalt2", "gradrho2"}
+
+    needed = set(computed_feature_channels) | (turner_deps if turner_requested else set())
+
     results = {
         name: fn(ds_merge, grid)
         for name, fn in _GRAD_FNS.items()
-        if name in computed_feature_channels
+        if name in needed
     }
 
-    results["turner_angle"] = calculate_additional_fields.turner_angle(
-        ds_merge,
-        grid,
-        gradtheta2=results["gradtheta2"],
-        gradsalt2=results["gradsalt2"],
-        gradrho2=results["gradrho2"],
-    )
+    if turner_requested:
+        results["turner_angle"] = calculate_additional_fields.turner_angle(
+            ds_merge,
+            grid,
+            gradtheta2=results["gradtheta2"],
+            gradsalt2=results["gradsalt2"],
+            gradrho2=results["gradrho2"],
+        )
 
-    return results
+    # Only return channels that were actually requested.
+    return {k: v for k, v in results.items() if k in computed_feature_channels}
 
 
 def compute_kinematic(ds_merge, grid, computed_feature_channels):

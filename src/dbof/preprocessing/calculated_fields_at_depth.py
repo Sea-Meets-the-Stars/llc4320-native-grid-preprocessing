@@ -239,7 +239,8 @@ def vertical_shear_components_3d(ds_merge, grid):
 def vertical_shear_magnitude_3d(ds_merge, grid):
     """Lazy 3D |S| = sqrt(uz² + vz²)."""
     uz, vz = vertical_shear_components_3d(ds_merge, grid)
-    return np.sqrt(uz**2 + vz**2)
+    shear_mag = np.sqrt(uz**2 + vz**2)
+    return shear_mag
 
 
 def richardson_number_3d(ds_merge, grid):
@@ -247,7 +248,8 @@ def richardson_number_3d(ds_merge, grid):
     n2 = buoyancy_frequency_squared_3d(ds_merge)
     uz, vz = vertical_shear_components_3d(ds_merge, grid)
     shear2 = uz**2 + vz**2
-    return xr.where(shear2 > 0, n2 / shear2, np.nan)
+    ri = xr.where(shear2 > 0, n2 / shear2, np.nan)
+    return ri
 
 
 def froude_number_3d(ds_merge, grid, mld=None):
@@ -262,7 +264,8 @@ def froude_number_3d(ds_merge, grid, mld=None):
     speed = np.sqrt(U_c**2 + V_c**2)
 
     denom = n_abs * mld
-    return xr.where(denom > 0, speed / denom, np.nan)
+    fr = xr.where(denom > 0, speed / denom, np.nan)
+    return fr
 
 
 def rossby_number_3d(ds_merge, grid):
@@ -271,18 +274,18 @@ def rossby_number_3d(ds_merge, grid):
         ds_merge.U, ds_merge.V, ds_merge, grid)
     zeta = dv_dx - du_dy
     f = coriolis_parameter(ds_merge, grid)
-    return zeta / f
+    ro = zeta / f
+    return ro
 
 
-def burger_number_2d(ds_merge, grid, mld=None):
-    """Lazy 2D Bu = (Ro / Fr)² evaluated at MLD."""
+def burger_number_3d(ds_merge, grid, mld=None):
+    """Lazy 3D Bu = (Ro / Fr)². """
     if mld is None:
         mld = mixed_layer_depth(ds_merge)
     ro_3d = rossby_number_3d(ds_merge, grid)
     fr_3d = froude_number_3d(ds_merge, grid, mld=mld)
-    ro_at_mld = _extract_at_mld(ro_3d, mld, ds_merge)
-    fr_at_mld = _extract_at_mld(fr_3d, mld, ds_merge)
-    return xr.where(fr_at_mld != 0, (ro_at_mld / fr_at_mld)**2, np.nan)
+    bu_3d = xr.where(fr_3d != 0, (ro_3d / fr_3d) ** 2, np.nan)
+    return bu_3d
 
 
 # ===========================================================================
@@ -295,14 +298,16 @@ def wind_stress_curl(ds_merge, grid):
     tauy = ds_merge.oceTAUY
     _, dtaux_dphi, dtauy_dlambda, _ = ng.calculate_jacobian(
         taux, tauy, ds_merge, grid)
-    return dtauy_dlambda - dtaux_dphi
+    curl_tau = dtauy_dlambda - dtaux_dphi
+    return curl_tau
 
 
 def ekman_pumping(ds_merge, grid, rho0=RHO0):
     """Lazy Ekman pumping w_E = curl(τ) / (ρ₀ f)."""
     curl_tau = wind_stress_curl(ds_merge, grid)
     f = coriolis_parameter(ds_merge, grid)
-    return xr.where(np.abs(f) > 0, curl_tau / (rho0 * f), np.nan)
+    w_e = xr.where(np.abs(f) > 0, curl_tau / (rho0 * f), np.nan)
+    return w_e
 
 
 def _wind_stress_geographic(ds_merge, grid):

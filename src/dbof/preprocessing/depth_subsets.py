@@ -34,7 +34,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     richardson_number_3d,
     froude_number_3d,
     rossby_number_3d,
-    burger_number_2d,
+    burger_number_3d,
     # -- wind --
     wind_stress_curl,
     ekman_pumping,
@@ -136,8 +136,10 @@ def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
         results.update(apply_depth_strategies(
             ro_3d, "Ro", ds_merge, mld=mld, requested=requested))
 
-    if "Burger_number" in requested:
-        results["Burger_number"] = burger_number_2d(ds_merge, grid, mld=mld)
+    if any(c.startswith("Bu_") for c in requested):
+        bu_3d = burger_number_3d(ds_merge, grid, mld=mld)   # lazy
+        results.update(apply_depth_strategies(
+            bu_3d, "Bu", ds_merge, mld=mld, requested=requested))
 
     return _materialise_results(results)
 
@@ -211,7 +213,12 @@ def compute_energetics(ds_merge, grid, computed_feature_channels):
 
 
 def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
-    """Subset: frontal_structure — scalar gradient magnitudes, Turner angle."""
+    """Subset: frontal_structure — scalar gradient magnitudes, Turner angle.
+
+    Gradient fields that the Turner angle depends on (gradtheta2, gradsalt2,
+    gradrho2) are computed once and reused, so no gradient is evaluated twice
+    even when both the gradient channels and Turner angle are requested.
+    """
     results = {}
     requested = set(computed_feature_channels)
     mld = None
@@ -222,23 +229,45 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
             mld = mixed_layer_depth(ds_merge)   # lazy
         return mld
 
-    zdim_t = _get_vertical_dim(ds_merge.Theta)
+    # Turner angle depends on gradtheta2, gradsalt2, gradrho2.
+    # Compute their 3D fields eagerly (but lazily in dask terms) if
+    # either the gradient itself or turner_angle is requested, so each
+    # gradient is built at most once.
+    turner_requested = any(c.startswith("turner_angle_") for c in requested)
+    turner_deps = {"gradtheta2", "gradsalt2", "gradrho2"}
+    needed_bases = {
+        base for base in turner_deps
+        if any(c.startswith(base + "_") for c in requested)
+    }
+    if turner_requested:
+        needed_bases |= turner_deps
 
-    # gradtheta2 — |∇Θ|²
-    if any(c.startswith("gradtheta2_") for c in requested):
+    # Cache of 3D gradient fields: base_name → lazy xr.DataArray
+    grad_3d_cache = {}
+
+    if "gradtheta2" in needed_bases:
         _ensure_mld()
-        gt2_3d = _grad_squared_3d(ds_merge.Theta, ds_merge, grid)
-        results.update(apply_depth_strategies(
-            gt2_3d, "gradtheta2", ds_merge, mld=mld, requested=requested))
+        grad_3d_cache["gradtheta2"] = _grad_squared_3d(
+            ds_merge.Theta, ds_merge, grid)
 
-    # gradsalt2 — |∇S|²
-    if any(c.startswith("gradsalt2_") for c in requested):
+    if "gradsalt2" in needed_bases:
         _ensure_mld()
-        gs2_3d = _grad_squared_3d(ds_merge.Salt, ds_merge, grid)
-        results.update(apply_depth_strategies(
-            gs2_3d, "gradsalt2", ds_merge, mld=mld, requested=requested))
+        grad_3d_cache["gradsalt2"] = _grad_squared_3d(
+            ds_merge.Salt, ds_merge, grid)
 
-    # gradb2 — |∇b|²
+    if "gradrho2" in needed_bases:
+        _ensure_mld()
+        rho = _density_lazy(ds_merge)
+        grad_3d_cache["gradrho2"] = _grad_squared_3d(rho, ds_merge, grid)
+
+    # Apply depth strategies for each requested gradient channel.
+    for base in ("gradtheta2", "gradsalt2", "gradrho2"):
+        if any(c.startswith(base + "_") for c in requested) and base in grad_3d_cache:
+            results.update(apply_depth_strategies(
+                grad_3d_cache[base], base, ds_merge, mld=mld,
+                requested=requested))
+
+    # gradb2 — |∇b|² (independent of Turner angle)
     if any(c.startswith("gradb2_") for c in requested):
         _ensure_mld()
         b = buoyancy_field_3d(ds_merge)
@@ -246,31 +275,23 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
         results.update(apply_depth_strategies(
             gb2_3d, "gradb2", ds_merge, mld=mld, requested=requested))
 
-    # gradrho2 — |∇ρ|²
-    if any(c.startswith("gradrho2_") for c in requested):
-        _ensure_mld()
-        rho = _density_lazy(ds_merge)
-        gr2_3d = _grad_squared_3d(rho, ds_merge, grid)
-        results.update(apply_depth_strategies(
-            gr2_3d, "gradrho2", ds_merge, mld=mld, requested=requested))
-
     # gradeta2 — |∇η|² (inherently 2D, surface only)
     if "gradeta2_sfc" in requested:
         eta = ds_merge.Eta
         gx, gy = ng.calculate_native_gradient_tracer(eta, ds_merge, grid=grid)
-        results["gradeta2_sfc"] = gx**2 + gy**2
+        gradeta2_sfc = gx**2 + gy**2
+        results["gradeta2_sfc"] = gradeta2_sfc
 
-    # Turner angle
-    if any(c.startswith("turner_angle_") for c in requested):
+    # Turner angle — reuses cached 3D gradient fields.
+    if turner_requested:
         _ensure_mld()
         ALPHA = 2.0e-4
         BETA = 7.4e-4
         RHO0_TU = 1025.0
 
-        gt2_3d = _grad_squared_3d(ds_merge.Theta, ds_merge, grid)
-        gs2_3d = _grad_squared_3d(ds_merge.Salt, ds_merge, grid)
-        rho = _density_lazy(ds_merge)
-        gr2_3d = _grad_squared_3d(rho, ds_merge, grid)
+        gt2_3d = grad_3d_cache["gradtheta2"]
+        gs2_3d = grad_3d_cache["gradsalt2"]
+        gr2_3d = grad_3d_cache["gradrho2"]
 
         numer = RHO0_TU * (BETA**2 * gs2_3d - ALPHA**2 * gt2_3d)
         denom = xr.where(gr2_3d > 0, -gr2_3d / RHO0_TU, np.nan)
