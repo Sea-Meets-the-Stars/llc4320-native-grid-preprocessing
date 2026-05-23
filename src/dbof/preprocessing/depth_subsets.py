@@ -77,6 +77,20 @@ def _materialise_results(results):
     return dict(zip(keys, materialised))
 
 
+def _needs_mld(requested):
+    """Return True if any requested channel uses a MLD-based depth strategy."""
+    return any(c.endswith("_mld") or c.endswith("_mld_mean")
+               or c == "mixed_layer_depth" or c == "ml_heat_content"
+               for c in requested)
+
+
+def _lazy_mld(ds_merge, requested):
+    """Return lazy MLD if any requested channel needs it, else None."""
+    if _needs_mld(requested):
+        return mixed_layer_depth(ds_merge)
+    return None
+
+
 # ===========================================================================
 #  COMPUTE FUNCTIONS
 # ===========================================================================
@@ -86,7 +100,7 @@ def compute_stratification(ds_merge, grid, computed_feature_channels):
     results = {}
     requested = set(computed_feature_channels)
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
     if "mixed_layer_depth" in requested:
         results["mixed_layer_depth"] = mld
 
@@ -112,7 +126,7 @@ def compute_vertical_shear(ds_merge, grid, computed_feature_channels):
     if not shear_requested and not ri_requested:
         return results
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
 
     if shear_requested:
         shear_3d = vertical_shear_magnitude_3d(ds_merge, grid)   # lazy
@@ -133,7 +147,7 @@ def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
     results = {}
     requested = set(computed_feature_channels)
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
 
     if any(c.startswith("Fr_") for c in requested):
         fr_3d = froude_number_3d(ds_merge, grid, mld=mld)   # lazy
@@ -164,7 +178,7 @@ def compute_ertel_pv(ds_merge, grid, computed_feature_channels):
     if not active_bases:
         return results
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
     pv_dict = ertel_pv_terms_3d(ds_merge, grid)   # lazy 3D fields
 
     for base in active_bases:
@@ -183,7 +197,7 @@ def compute_buoyancy_fluxes(ds_merge, grid, computed_feature_channels):
     if not any(ch.startswith(b) for ch in requested for b in flux_bases):
         return results
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
     uB, vB, wB = advective_buoyancy_fluxes_3d(ds_merge, grid)   # lazy
 
     if any(c.startswith("uB_") for c in requested):
@@ -207,7 +221,7 @@ def compute_energetics(ds_merge, grid, computed_feature_channels):
     if not any(c.startswith("KE_") for c in requested):
         return results
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
     b = buoyancy_field_3d(ds_merge)   # lazy
     f = coriolis_parameter(ds_merge, grid)
 
@@ -230,7 +244,7 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
 
     def _ensure_mld():
         nonlocal mld
-        if mld is None:
+        if mld is None and _needs_mld(requested):
             mld = mixed_layer_depth(ds_merge)   # lazy
         return mld
 
@@ -305,7 +319,7 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     if not any(any(c.startswith(b + "_") for c in requested) for b in bases):
         return results
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
     jac = compute_velocity_jacobian_3d(ds_merge, grid)   # lazy — shared
 
     if any(c.startswith("relative_vorticity_") for c in requested):
@@ -363,7 +377,7 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     if not (need_tendency or need_geo or need_ugvg):
         return results
 
-    mld = mixed_layer_depth(ds_merge)   # lazy
+    mld = _lazy_mld(ds_merge, requested)
 
     # -- shared intermediates --
     bg = compute_buoyancy_gradients_3d(ds_merge, grid)

@@ -63,11 +63,22 @@ subsets:
   # Depth-resolved diagnostic subsets
   # (depth -> compute -> reduce -> save; full water column used lazily)
   #
-  # Fields with four depth variants use the suffixes:
-  #   _sfc      z = 0 (surface, k=0)
-  #   _z25m     z = 25 m (fixed depth, ~k=3)
-  #   _mld      interpolated to the mixed-layer depth
-  #   _mld_mean thickness-weighted mean over 0 <= z <= MLD
+  # Each subset lists base channel names in compute_features_channels and
+  # the desired depth variants in depth_suffixes.  The pipeline expands
+  # every base × suffix combination at load time:
+  #
+  #   compute_features_channels: [N2]
+  #   depth_suffixes: [sfc, mld]
+  #   →  N2_sfc, N2_mld
+  #
+  # Available depth suffixes:
+  #   sfc      z = 0 (surface, k=0)
+  #   z25m     z = 25 m (fixed depth, ~k=3)
+  #   mld      interpolated to the mixed-layer depth
+  #   mld_mean thickness-weighted mean over 0 <= z <= MLD
+  #
+  # Standalone diagnostics that have no depth variants (e.g.
+  # mixed_layer_depth, ml_heat_content) go in extra_channels.
   # ===========================================================================
 
   stratification:
@@ -75,11 +86,10 @@ subsets:
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
+      - N2
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
+    extra_channels:
       - mixed_layer_depth
-      - N2_sfc
-      - N2_z25m
-      - N2_mld
-      - N2_mld_mean
       - ml_heat_content
 
   vertical_shear:
@@ -87,65 +97,43 @@ subsets:
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      #- vertical_shear_sfc
-      #- vertical_shear_z25m
-      - vertical_shear_mld
-      #- vertical_shear_mld_mean
-      #- Ri_sfc
-      #- Ri_z25m
-      - Ri_mld
-      #- Ri_mld_mean
+      - vertical_shear
+      - Ri
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [mld]
 
   mixing_parameters:
     dataset_name: "mixing_parameters.zarr"
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      #- Fr_sfc
-      #- Fr_z25m
-      - Fr_mld
-      #- Fr_mld_mean
-      #- Ro_sfc
-      #- Ro_z25m
-      - Ro_mld
-      #- Ro_mld_mean
-      - Bu_mld
+      - Fr
+      - Ro
+      - Bu
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [mld]
 
   ertel_pv:
     dataset_name: "ertel_pv.zarr"
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      #- ertel_pv_sfc
-      #- ertel_pv_z25m
-      - ertel_pv_mld
-      #- ertel_pv_mld_mean
-      #- ertel_pv_vertical_sfc
-      #- ertel_pv_vertical_z25m
-      - ertel_pv_vertical_mld
-      #- ertel_pv_vertical_mld_mean
-      #- ertel_pv_tilt_sfc
-      #- ertel_pv_tilt_z25m
-      - ertel_pv_tilt_mld
-      #- ertel_pv_tilt_mld_mean
+      - ertel_pv
+      - ertel_pv_vertical
+      - ertel_pv_tilt
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [mld]
 
   buoyancy_fluxes:
     dataset_name: "buoyancy_fluxes.zarr"
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      #- uB_sfc
-      #- uB_z25m
-      - uB_mld
-      #- uB_mld_mean
-      #- vB_sfc
-      #- vB_z25m
-      - vB_mld
-      #- vB_mld_mean
-      #- wB_sfc
-      #- wB_z25m
-      - wB_mld
-      #- wB_mld_mean
+      - uB
+      - vB
+      - wB
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [mld]
 
   surface_wind:
     dataset_name: "surface_wind.zarr"
@@ -165,87 +153,49 @@ subsets:
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      - KE_sfc
-      - KE_z25m
-      - KE_mld
-      - KE_mld_mean
+      - KE
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
 
   frontal_structure:
     dataset_name: "frontal_structure.zarr"
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      - gradb2_sfc
-      #- gradb2_z25m
-      #- gradb2_mld
-      #- gradb2_mld_mean
-      - gradtheta2_sfc
-      #- gradtheta2_z25m
-      #- gradtheta2_mld
-      #- gradtheta2_mld_mean
-      - gradsalt2_sfc
-      #- gradsalt2_z25m
-      #- gradsalt2_mld
-      #- gradsalt2_mld_mean
-      - gradrho2_sfc
-      #- gradrho2_z25m
-      #- gradrho2_mld
-      #- gradrho2_mld_mean
-      - gradeta2_sfc
-      - turner_angle_sfc
-      #- turner_angle_z25m
-      #- turner_angle_mld
-      #- turner_angle_mld_mean
+      - gradb2
+      - gradtheta2
+      - gradsalt2
+      - gradrho2
+      - gradeta2
+      - turner_angle
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [sfc]
 
   kinematic:
     dataset_name: "kinematic.zarr"
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      - relative_vorticity_sfc
-      #- relative_vorticity_z25m
-      #- relative_vorticity_mld
-      #- relative_vorticity_mld_mean
-      - strain_n_sfc
-      #- strain_n_z25m
-      #- strain_n_mld
-      #- strain_n_mld_mean
-      - strain_s_sfc
-      #- strain_s_z25m
-      #- strain_s_mld
-      #- strain_s_mld_mean
-      - strain_mag_sfc
-      #- strain_mag_z25m
-      #- strain_mag_mld
-      #- strain_mag_mld_mean
-      - divergence_sfc
-      #- divergence_z25m
-      #- divergence_mld
-      #- divergence_mld_mean
-      - okubo_weiss_sfc
-      #- okubo_weiss_z25m
-      #- okubo_weiss_mld
-      #- okubo_weiss_mld_mean
+      - relative_vorticity
+      - strain_n
+      - strain_s
+      - strain_mag
+      - divergence
+      - okubo_weiss
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [sfc]
 
   frontogenesis:
     dataset_name: "frontogenesis.zarr"
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      - frontogenesis_tendency_sfc
-      #- frontogenesis_tendency_z25m
-      #- frontogenesis_tendency_mld
-      #- frontogenesis_tendency_mld_mean
-      - frontogenesis_geo_sfc
-      #- frontogenesis_geo_z25m
-      #- frontogenesis_geo_mld
-      #- frontogenesis_geo_mld_mean
-      - frontogenesis_ageo_sfc
-      #- frontogenesis_ageo_z25m
-      #- frontogenesis_ageo_mld
-      #- frontogenesis_ageo_mld_mean
-      - ug_sfc
-      - vg_sfc
+      - frontogenesis_tendency
+      - frontogenesis_geo
+      - frontogenesis_ageo
+      - ug
+      - vg
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [sfc]
 
   # ===========================================================================
   # Native model fields at depth
@@ -257,27 +207,14 @@ subsets:
     surface_only: false
     model_data_feature_channels: []
     compute_features_channels:
-      - Theta_sfc
-      #- Theta_z25m
-      #- Theta_mld
-      #- Theta_mld_mean
-      - Salt_sfc
-      #- Salt_z25m
-      #- Salt_mld
-      #- Salt_mld_mean
-      - Eta_sfc
-      - U_sfc
-      #- U_z25m
-      #- U_mld
-      #- U_mld_mean
-      - V_sfc
-      #- V_z25m
-      #- V_mld
-      #- V_mld_mean
-      - W_sfc
-      #- W_z25m
-      #- W_mld
-      #- W_mld_mean
+      - Theta
+      - Salt
+      - Eta
+      - U
+      - V
+      - W
+    # Available: sfc, z25m, mld, mld_mean
+    depth_suffixes: [sfc]
 
   # ===========================================================================
   # Surface-only subsets

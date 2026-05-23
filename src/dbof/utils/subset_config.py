@@ -12,6 +12,7 @@ import logging
 
 import dbof.dataset_creation.config as config
 from dbof.utils.iterations import date_to_run_id
+from dbof.utils.runtime import expand_channels_with_suffixes
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +70,23 @@ def resolve_subset(raw: dict, subset: str | None, valid_subsets: dict) -> tuple[
 
 
 # ---------------------------------------------------------------------------
+# Subset entry helpers
+# ---------------------------------------------------------------------------
+
+def _expanded_computed_channels(subset_entry: dict) -> list[str]:
+    """
+    Return the fully-expanded ``compute_features_channels`` list from a
+    subset entry, applying ``depth_suffixes`` × base-name expansion when
+    the key is present.
+    """
+    return expand_channels_with_suffixes(
+        channels=subset_entry.get("compute_features_channels", []),
+        depth_suffixes=subset_entry.get("depth_suffixes"),
+        extra_channels=subset_entry.get("extra_channels"),
+    )
+
+
+# ---------------------------------------------------------------------------
 # JobConfig construction
 # ---------------------------------------------------------------------------
 
@@ -99,9 +117,7 @@ def build_job_config(raw: dict, subset_entry: dict) -> config.JobConfig:
             model_data_feature_channels=subset_entry.get(
                 "model_data_feature_channels", []
             ),
-            compute_features_channels=subset_entry.get(
-                "compute_features_channels", []
-            ),
+            compute_features_channels=_expanded_computed_channels(subset_entry),
         ),
         runtime=config.RuntimeConfig(**raw.get("runtime", {})),
     )
@@ -135,9 +151,7 @@ def build_global_job_config(raw: dict, subset_entry: dict) -> config.GlobalJobCo
             model_data_feature_channels=subset_entry.get(
                 "model_data_feature_channels", []
             ),
-            compute_features_channels=subset_entry.get(
-                "compute_features_channels", []
-            ),
+            compute_features_channels=_expanded_computed_channels(subset_entry),
         ),
         runtime=config.RuntimeConfig(**raw.get("runtime", {})),
     )

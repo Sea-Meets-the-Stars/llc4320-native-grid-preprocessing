@@ -54,6 +54,11 @@ _CHANNEL_VARIABLE_RULES = [
     (('W_',),     ['W']),
 ]
 
+# MLD / mld_mean depth strategies always need Theta + Salt for density.
+# Checked via endswith (not startswith) so it catches ANY channel regardless
+# of base name (e.g. relative_vorticity_mld, Theta_mld_mean, etc.).
+_MLD_SUFFIXES = ('_mld', '_mld_mean')
+
 
 def required_model_variables(
     model_feature_channels: list[str],
@@ -81,5 +86,11 @@ def required_model_variables(
             for v in variables:
                 if v not in needed:
                     needed.append(v)
+
+    # Any _mld or _mld_mean channel needs Theta + Salt for MLD (density).
+    if any(ch.endswith(_MLD_SUFFIXES) for ch in computed_feature_channels):
+        for v in ('Theta', 'Salt'):
+            if v not in needed:
+                needed.append(v)
 
     return needed

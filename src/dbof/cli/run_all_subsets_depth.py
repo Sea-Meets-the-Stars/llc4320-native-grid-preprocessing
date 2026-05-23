@@ -131,9 +131,21 @@ def parse_subsets_from_config(config_path: Path) -> dict:
 
 
 def get_channels_for_subset(subset_entry: dict) -> list[str]:
-    """Extract the ordered channel list from a subset config entry."""
+    """Extract the ordered channel list from a subset config entry.
+
+    Handles ``depth_suffixes`` expansion: if the entry contains a
+    ``depth_suffixes`` key, each base name in ``compute_features_channels``
+    is expanded to ``{base}_{suffix}`` for every suffix.  Entries in
+    ``extra_channels`` are appended unchanged.
+    """
+    from dbof.utils.runtime import expand_channels_with_suffixes
+
     model_channels = subset_entry.get("model_data_feature_channels", []) or []
-    computed_channels = subset_entry.get("compute_features_channels", []) or []
+    computed_channels = expand_channels_with_suffixes(
+        channels=subset_entry.get("compute_features_channels", []) or [],
+        depth_suffixes=subset_entry.get("depth_suffixes"),
+        extra_channels=subset_entry.get("extra_channels"),
+    )
     return model_channels + computed_channels
 
 
