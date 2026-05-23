@@ -53,17 +53,17 @@ Usage — snapshots
       --output-dir /scratch/llc4320_netcdf/
 
   # Single channel with custom output filename:
-  zarr-to-netcdf \\
-      --mode snapshots \\
-      --s3-endpoint https://s3-west.nrp-nautilus.io \\
-      --bucket dbof \\
-      --folder properties \\
-      --run-id global_depth_test00 \\
-      --dataset-name stratification.zarr \\
-      --dates '2012-11-09 12:00:00' \\
-      --channels N2_sfc \\
-      --output-dir /scratch/llc4320_netcdf/ \\
-      --output-filename N2_sfc.nc
+  zarr-to-netcdf \
+      --mode snapshots \
+      --s3-endpoint https://s3-west.nrp-nautilus.io \
+      --bucket dbof \
+      --folder properties \
+      --run-id testing_019 \
+      --dataset-name native_fields.zarr \
+      --dates '2012-11-09 12:00:00' \
+      --channels Theta_sfc \
+      --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/vtest/20121109_120000 \
+      --output-filename LLC4320_2012-11-09T12_00_00_Theta_sfc.nc
 
   # All dates (reads all date_prefix subdirectories from the store):
   zarr-to-netcdf \\
