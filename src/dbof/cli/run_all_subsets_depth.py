@@ -520,6 +520,19 @@ def main():
                 log.exception("FAILED to generate subset '%s' from %s",
                               subset_name, info["config_path"])
 
+    # ---- Clear stale S3 filesystem cache between phases ----
+    # Phase 1 uses Dask distributed, which creates its own asyncio event
+    # loop.  After the Dask cluster shuts down, any s3fs instances cached
+    # by fsspec are still bound to that (now-dead) loop.  Clearing the
+    # cache forces Phase 2 to create fresh connections.
+    if not args.export_only and not args.generate_only:
+        try:
+            from s3fs import S3FileSystem
+            S3FileSystem.clear_instance_cache()
+            log.info("Cleared s3fs instance cache between phases.")
+        except Exception:
+            pass  # Best-effort; not all installations expose this.
+
     # ---- Phase 2: Export ----
     if not args.generate_only:
         # Warn early if ice masking was requested but icearea may be missing.
