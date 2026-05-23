@@ -100,7 +100,7 @@ subsets:
       - vertical_shear
       - Ri
     # Available: sfc, z25m, mld, mld_mean
-    depth_suffixes: [mld]
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
 
   mixing_parameters:
     dataset_name: "mixing_parameters.zarr"
@@ -111,7 +111,7 @@ subsets:
       - Ro
       - Bu
     # Available: sfc, z25m, mld, mld_mean
-    depth_suffixes: [mld]
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
 
   ertel_pv:
     dataset_name: "ertel_pv.zarr"
@@ -122,7 +122,7 @@ subsets:
       - ertel_pv_vertical
       - ertel_pv_tilt
     # Available: sfc, z25m, mld, mld_mean
-    depth_suffixes: [mld]
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
 
   buoyancy_fluxes:
     dataset_name: "buoyancy_fluxes.zarr"
@@ -133,7 +133,7 @@ subsets:
       - vB
       - wB
     # Available: sfc, z25m, mld, mld_mean
-    depth_suffixes: [mld]
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
 
   surface_wind:
     dataset_name: "surface_wind.zarr"
@@ -182,7 +182,7 @@ subsets:
       - divergence
       - okubo_weiss
     # Available: sfc, z25m, mld, mld_mean
-    depth_suffixes: [sfc]
+    depth_suffixes: [sfc, z25m, mld, mld_mean]
 
   frontogenesis:
     dataset_name: "frontogenesis.zarr"
