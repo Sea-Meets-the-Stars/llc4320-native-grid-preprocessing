@@ -158,6 +158,67 @@ def get_channels_for_subset(subset_entry: dict) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Ice-mask dependency: ensure icearea.zarr exists
+# ---------------------------------------------------------------------------
+
+ICE_MASK_DATASET = "icearea.zarr"
+
+
+def _icearea_store_exists(
+    s3_endpoint: str, bucket: str, folder: str, run_id: str, date_prefix: str,
+) -> bool:
+    """Check whether icearea.zarr exists at the expected S3 path."""
+    from dbof.dataset_creation.zarr_dataset_global import make_run_prefix
+    from dbof.io.filesystems import create_s3_filesystems
+
+    path = make_run_prefix(bucket, folder, run_id, ICE_MASK_DATASET,
+                           date_prefix=date_prefix)
+    # Strip s3:// for fs.exists()
+    s3_key = path.removeprefix("s3://")
+    _, fs_sync = create_s3_filesystems(s3_endpoint)
+    return fs_sync.exists(s3_key)
+
+
+def ensure_icearea(
+    config_info: dict,
+    run_id: str,
+    dry_run: bool = False,
+) -> None:
+    """Generate the icearea subset if its Zarr store is missing for any date.
+
+    Called automatically when ``--ice-mask`` is set so that the export
+    phase can always find ``icearea.zarr``.
+    """
+    output = config_info["output"]
+    s3_endpoint = output.get("s3_endpoint", "https://s3-west.nrp-nautilus.io")
+    bucket = output.get("bucket", "dbof/")
+    folder = output.get("folder", "properties/")
+    date_iterations = config_info["date_iterations"]
+
+    date_prefixes = [_date_to_prefix(d) for d in date_iterations]
+
+    missing = [
+        dp for dp in date_prefixes
+        if not _icearea_store_exists(s3_endpoint, bucket, folder, run_id, dp)
+    ]
+
+    if not missing:
+        log.info("icearea.zarr already exists for all %d date(s) — skipping.",
+                 len(date_prefixes))
+        return
+
+    log.info("icearea.zarr missing for %d/%d date(s) — generating now.",
+             len(missing), len(date_prefixes))
+
+    run_generate(
+        config_path=str(config_info["config_path"]),
+        subset="icearea",
+        run_id=run_id,
+        dry_run=dry_run,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Phase 1: Generate zarr stores
 # ---------------------------------------------------------------------------
 
@@ -411,6 +472,31 @@ def main():
 
     wall_start = time.monotonic()
 
+    # ---- Pre-flight: ensure icearea.zarr exists when ice masking ----
+    if args.ice_mask and not args.export_only:
+        # Check every config in the work plan for missing icearea stores.
+        # Use a set to avoid duplicate checks when multiple subsets share
+        # the same config.
+        checked_configs = set()
+        for info, subset_name, subset_entry, can_generate in work:
+            config_key = str(info["config_path"])
+            if config_key in checked_configs:
+                continue
+            checked_configs.add(config_key)
+
+            run_id = args.run_id or info["run_id"]
+            try:
+                ensure_icearea(
+                    config_info=info,
+                    run_id=run_id,
+                    dry_run=args.dry_run,
+                )
+            except Exception:
+                log.exception(
+                    "FAILED to ensure icearea.zarr for config %s. "
+                    "Ice masking may fail during export.", config_key
+                )
+
     # ---- Phase 1: Generate ----
     if not args.export_only:
         log.info("")
@@ -436,6 +522,15 @@ def main():
 
     # ---- Phase 2: Export ----
     if not args.generate_only:
+        # Warn early if ice masking was requested but icearea may be missing.
+        if args.ice_mask and args.export_only:
+            log.warning(
+                "Ice masking requested with --export-only.  If icearea.zarr "
+                "has not been generated yet, every channel export will fail.  "
+                "Run without --export-only to auto-generate it, or generate "
+                "it separately with --subsets icearea --generate-only."
+            )
+
         log.info("")
         log.info("=" * 60)
         log.info("PHASE 2: EXPORT ZARR -> PER-VARIABLE NETCDF")

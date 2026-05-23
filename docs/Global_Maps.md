@@ -221,6 +221,11 @@ store (same bucket/folder/run_id/date_prefix) and sets all points where
 `SIarea > 0` to NaN in the exported NetCDF. The `icearea` subset itself is
 never self-masked.
 
+The batch driver automatically checks whether `icearea.zarr` exists before
+Phase 1 when `--ice-mask` is set. If it is missing for any date, the driver
+generates it first so that the export phase can proceed. This check is
+skipped in `--export-only` mode (a warning is logged instead).
+
 ---
 
 ## Preprocessing: `transfer_llc4320.py`
