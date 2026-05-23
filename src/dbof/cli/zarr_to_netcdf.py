@@ -75,6 +75,30 @@ Usage — snapshots
       --dataset-name stratification.zarr \\
       --output-dir /scratch/llc4320_netcdf/
 
+  # With ice mask — mask all points where SIarea > 0 (from icearea.zarr):
+  zarr-to-netcdf \\
+      --mode snapshots \\
+      --s3-endpoint https://s3-west.nrp-nautilus.io \\
+      --bucket dbof \\
+      --folder properties \\
+      --run-id global_depth_test00 \\
+      --dataset-name stratification.zarr \\
+      --dates '2012-11-09 12:00:00' \\
+      --output-dir /scratch/llc4320_netcdf/ \\
+      --ice-mask
+
+  # Ice mask with a custom SIarea store name:
+  zarr-to-netcdf \\
+      --mode snapshots \\
+      --s3-endpoint https://s3-west.nrp-nautilus.io \\
+      --bucket dbof \\
+      --folder properties \\
+      --run-id global_depth_test00 \\
+      --dataset-name stratification.zarr \\
+      --dates '2012-11-09 12:00:00' \\
+      --output-dir /scratch/llc4320_netcdf/ \\
+      --ice-mask --ice-mask-dataset-name my_siarea.zarr
+
 Usage — grid
 ------------
   zarr-to-netcdf \\
@@ -98,6 +122,7 @@ import xarray as xr
 from dbof.io.filesystems import create_s3_filesystems
 import dbof.dataset_creation.zarr_dataset_global as zarr_dataset_global
 import dbof.dataset_creation.zarr_grid_global as zarr_grid_global
+from dbof.preprocessing.ice_mask import load_siarea_mask, apply_ice_mask
 
 
 # ---------------------------------------------------------------------------
@@ -166,6 +191,7 @@ def zarr_to_netcdf(
     output_filename: str = None,
     channels: list = None,
     fs=None,
+    ice_mask_dataset_name: str = None,
 ) -> None:
     """
     Convert a single date_prefix snapshot from S3 Zarr to a NetCDF file.
@@ -196,6 +222,10 @@ def zarr_to_netcdf(
         If None, all channels are written.  Unknown names raise ValueError.
     fs : s3fs filesystem, optional
         Reuse an existing s3fs filesystem; created if None.
+    ice_mask_dataset_name : str, optional
+        If provided (e.g. ``"icearea.zarr"``), load SIarea from this
+        zarr store (same bucket/folder/run_id/date_prefix) and mask all
+        exported channels: points where SIarea > 0 are set to NaN.
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -233,6 +263,24 @@ def zarr_to_netcdf(
         f"{all_channel_names}  |  spatial shape: {H} × {W}"
     )
 
+    # ------------------------------------------------------------------
+    # 1b. Optionally load the SIarea ice mask
+    # ------------------------------------------------------------------
+    ice_mask = None
+    if ice_mask_dataset_name:
+        logging.info(
+            f"Loading ice mask from {ice_mask_dataset_name} "
+            f"(date_prefix={date_prefix})"
+        )
+        ice_mask = load_siarea_mask(
+            bucket=bucket,
+            folder=folder,
+            run_id=run_id,
+            date_prefix=date_prefix,
+            fs=fs,
+            dataset_name=ice_mask_dataset_name,
+        )
+
     # Resolve channel subset
     if channels is None:
         channel_names = all_channel_names
@@ -260,14 +308,15 @@ def zarr_to_netcdf(
         y_coord = np.arange(n_y, dtype=np.int32)
         x_coord = np.arange(n_x, dtype=np.int32)
 
-        data_vars = {
-            ch: xr.DataArray(
-                reader.get_channel_snapshot(t, ch).astype(np.float32),
-                dims=['y', 'x'],
+        data_vars = {}
+        for ch in channel_names:
+            arr = reader.get_channel_snapshot(t, ch).astype(np.float32)
+            if ice_mask is not None:
+                arr = apply_ice_mask(arr, ice_mask)
+            data_vars[ch] = xr.DataArray(
+                arr, dims=['y', 'x'],
                 coords={'y': y_coord, 'x': x_coord},
             )
-            for ch in channel_names
-        }
 
         ds = xr.Dataset(
             data_vars,
@@ -413,6 +462,8 @@ def main(
     grid_dataset_name: str = 'llc4320_grid.zarr',
     grid_output_filename: str = 'llc4320_grid.nc',
     date_prefix: str = None,
+    ice_mask: bool = False,
+    ice_mask_dataset_name: str = 'icearea.zarr',
 ) -> None:
     """Entry point callable from other modules or the CLI.
 
@@ -446,6 +497,12 @@ def main(
         [grid] Zarr store name within folder (default: 'llc4320_grid.zarr').
     grid_output_filename : str
         [grid] Output NetCDF filename (default: 'llc4320_grid.nc').
+    ice_mask : bool
+        [snapshots] If True, mask ice-covered points (SIarea > 0) with
+        NaN before writing NetCDF.  Default: False.
+    ice_mask_dataset_name : str
+        [snapshots] Zarr store containing SIarea (default: 'icearea.zarr').
+        Only used when *ice_mask* is True.
     """
     if output_dir is None:
         p = argparse.ArgumentParser(
@@ -472,22 +529,30 @@ def main(
         p.add_argument('--channels', nargs='+', metavar='NAME')
         p.add_argument('--grid-dataset-name', default='llc4320_grid.zarr')
         p.add_argument('--grid-output-filename', default='llc4320_grid.nc')
+        p.add_argument('--ice-mask', action='store_true', default=False,
+                       help=("[snapshots] Mask ice-covered points (SIarea > 0) "
+                             "with NaN before writing NetCDF."))
+        p.add_argument('--ice-mask-dataset-name', default='icearea.zarr',
+                       help=("[snapshots] Zarr store containing SIarea "
+                             "(default: icearea.zarr)."))
         args = p.parse_args()
         if args.mode == 'snapshots' and not args.run_id:
             p.error("--run-id is required when --mode snapshots")
-        output_dir           = args.output_dir
-        output_filename      = args.output_filename
-        mode                 = args.mode
-        s3_endpoint          = args.s3_endpoint
-        bucket               = args.bucket
-        folder               = args.folder
-        run_id               = args.run_id
-        dataset_name         = args.dataset_name
-        dates                = args.dates
-        channels             = args.channels or getattr(args, 'channel', None)
-        date_prefix          = args.date_prefix
-        grid_dataset_name    = args.grid_dataset_name
-        grid_output_filename = args.grid_output_filename
+        output_dir              = args.output_dir
+        output_filename         = args.output_filename
+        mode                    = args.mode
+        s3_endpoint             = args.s3_endpoint
+        bucket                  = args.bucket
+        folder                  = args.folder
+        run_id                  = args.run_id
+        dataset_name            = args.dataset_name
+        dates                   = args.dates
+        channels                = args.channels or getattr(args, 'channel', None)
+        date_prefix             = args.date_prefix
+        grid_dataset_name       = args.grid_dataset_name
+        grid_output_filename    = args.grid_output_filename
+        ice_mask                = args.ice_mask
+        ice_mask_dataset_name   = args.ice_mask_dataset_name
 
     if mode == 'grid':
         grid_zarr_to_netcdf(
@@ -534,6 +599,9 @@ def main(
             f"{dataset_name} (run_id={run_id})"
         )
 
+        # Resolve ice mask: pass the dataset name when enabled, None when not.
+        _ice_mask_ds = ice_mask_dataset_name if ice_mask else None
+
         for dp in date_prefixes:
             zarr_to_netcdf(
                 s3_endpoint=s3_endpoint,
@@ -546,6 +614,7 @@ def main(
                 output_filename=output_filename,
                 channels=channels,
                 fs=fs_synch,
+                ice_mask_dataset_name=_ice_mask_ds,
             )
 
 
@@ -604,6 +673,14 @@ if __name__ == '__main__':
     p.add_argument('--grid-output-filename', default='llc4320_grid.nc',
                    help="[grid] Output NetCDF filename (default: llc4320_grid.nc)")
 
+    # --- ice mask ---
+    p.add_argument('--ice-mask', action='store_true', default=False,
+                   help=("[snapshots] Mask ice-covered points (SIarea > 0) "
+                         "with NaN before writing NetCDF."))
+    p.add_argument('--ice-mask-dataset-name', default='icearea.zarr',
+                   help=("[snapshots] Zarr store containing SIarea "
+                         "(default: icearea.zarr)."))
+
     args = p.parse_args()
 
     if args.mode == 'snapshots' and not args.run_id:
@@ -623,4 +700,6 @@ if __name__ == '__main__':
         grid_dataset_name=args.grid_dataset_name,
         grid_output_filename=args.grid_output_filename,
         date_prefix=args.date_prefix,
+        ice_mask=args.ice_mask,
+        ice_mask_dataset_name=args.ice_mask_dataset_name,
     )

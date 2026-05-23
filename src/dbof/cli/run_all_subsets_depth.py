@@ -45,6 +45,14 @@ CLI usage
 
     # Dry run — print what would be done without running anything:
     python -m dbof.cli.run_all_subsets --dry-run
+
+    # Export with ice mask — mask points where SIarea > 0 with NaN.
+    # Reads SIarea from icearea.zarr (same bucket/folder/run_id/date_prefix).
+    # The icearea subset itself is never self-masked.
+    python -m dbof.cli.run_all_subsets --export-only --ice-mask
+
+    # Generate + export everything with ice masking:
+    python -m dbof.cli.run_all_subsets --ice-mask
 """
 
 import argparse
@@ -190,6 +198,7 @@ def run_export_channel(
     channel: str,
     output_dir: str,
     dry_run: bool = False,
+    ice_mask: bool = False,
 ):
     """Call zarr_to_netcdf.main() for a single channel, producing one .nc file."""
     os.makedirs(output_dir, exist_ok=True)
@@ -213,6 +222,7 @@ def run_export_channel(
         dataset_name=dataset_name,
         date_prefix=date_prefix,
         channels=[channel],
+        ice_mask=ice_mask,
     )
 
 
@@ -223,6 +233,7 @@ def run_export_subset(
     netcdf_base: str,
     run_id_override: str = None,
     dry_run: bool = False,
+    ice_mask: bool = False,
 ):
     """Export all channels in one subset to individual NetCDF files.
 
@@ -245,9 +256,14 @@ def run_export_subset(
         log.warning("  No channels for subset '%s' — skipping export.", subset_name)
         return
 
+    # Don't self-mask the icearea subset.
+    apply_ice_mask = ice_mask and subset_name != "icearea"
+    mask_label = " [ice-masked]" if apply_ice_mask else ""
+
     log.info("-" * 60)
-    log.info("EXPORT subset=%s  dataset=%s  channels=%d  dates=%d",
-             subset_name, dataset_name, len(channels), len(date_prefixes))
+    log.info("EXPORT subset=%s  dataset=%s  channels=%d  dates=%d%s",
+             subset_name, dataset_name, len(channels), len(date_prefixes),
+             mask_label)
     log.info("-" * 60)
 
     for dp in date_prefixes:
@@ -266,6 +282,7 @@ def run_export_subset(
                     channel=channel,
                     output_dir=output_dir,
                     dry_run=dry_run,
+                    ice_mask=apply_ice_mask,
                 )
             except Exception:
                 log.exception("  FAILED to export channel '%s' from subset '%s' "
@@ -316,6 +333,11 @@ def _parse_args():
     p.add_argument(
         "--dry-run", action="store_true",
         help="Print what would be done without running anything.",
+    )
+    p.add_argument(
+        "--ice-mask", action="store_true", default=False,
+        help=("Mask ice-covered points (SIarea > 0) with NaN before "
+              "writing NetCDF.  The icearea subset itself is never masked."),
     )
     return p.parse_args()
 
@@ -412,6 +434,7 @@ def main():
                     netcdf_base=args.netcdf_base,
                     run_id_override=args.run_id,
                     dry_run=args.dry_run,
+                    ice_mask=args.ice_mask,
                 )
             except Exception:
                 log.exception("FAILED to export subset '%s' from %s",
