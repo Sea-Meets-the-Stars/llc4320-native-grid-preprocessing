@@ -346,6 +346,17 @@ def run_global_pipeline(
     logging.info(f"  Snapshots       : {len(cfg.data.date_iterations)}")
     logging.info("=" * 60)
 
+    # Shut down the Dask cluster and clear the s3fs instance cache so that
+    # the next subset (or the export phase) gets a fresh event loop and
+    # fresh S3 connections.
+    dask_client.close()
+    logging.info("Dask client closed.")
+    try:
+        from s3fs import S3FileSystem
+        S3FileSystem.clear_instance_cache()
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Entry point
