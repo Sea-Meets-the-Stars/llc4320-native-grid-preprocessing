@@ -229,6 +229,13 @@ Both `generate_global.py` and `generate_global_depth.py` read from S3
 timestep stores. These stores must be created by transferring data from the
 MIT Zarr store using `transfer_llc4320.py`.
 
+**`transfer_llc4320.py` must be run on the MIT machines**, since it reads
+from a local Zarr store that is only accessible there. Each date you want
+to process downstream must be transferred before running the generate
+pipelines — there is currently no pre-flight check that the timestep store
+exists in S3, so a missing transfer will surface as an S3 read error at
+runtime.
+
 Console command: `transfer-timestep`. Config: `configs/transfer.yaml`.
 
 The transfer writes two stores per timestep:
