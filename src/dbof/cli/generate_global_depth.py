@@ -392,24 +392,14 @@ def main(
         config_dir=Path(config_file).resolve().parent,
     )
 
-    # Per-date looping: each date gets its own date subdirectory.
-    if len(date_iterations) > 1:
-        run_per_date(
-            raw, subset_entry, date_iterations,
-            pipeline_fn=run_global_pipeline,
-            compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
-            run_id=run_id,
-            **pipeline_kwargs,
-        )
-        return
-
-    # Single date — date_prefix is derived inside run_global_pipeline
-    # from cfg.data.date_iterations.
-    cfg = build_global_job_config(raw, subset_entry)
-    run_global_pipeline(
-        run_id=run_id,
+    # Every date gets its own date subdirectory via run_per_date, even when
+    # there is only a single date.  This keeps the output layout consistent:
+    #   s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
+    run_per_date(
+        raw, subset_entry, date_iterations,
+        pipeline_fn=run_global_pipeline,
         compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
-        cfg=cfg,
+        run_id=run_id,
         **pipeline_kwargs,
     )
 

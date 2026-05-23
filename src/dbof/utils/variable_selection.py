@@ -1,79 +1,417 @@
 """
-Determine which raw LLC4320 variables must be loaded from storage based
-on the requested output channels.
+run_all_subsets.py
+------------------
+Batch driver that:
 
-The depth pipeline reads from S3 zarr stores and only fetches the variables
-it actually needs.  This module maps computed-channel names to the raw model
-variables required to produce them, avoiding unnecessary I/O.
+1. **Generates** all subsets listed in every config YAML found under
+   ``configs/`` (excluding ``configs/data_access/``), by calling
+   ``generate_global_depth.main()`` serially for each subset.
+
+2. **Exports** each channel to its own NetCDF file by calling
+   ``zarr_to_netcdf.main()`` once per channel per subset.
+
+Output layout
+~~~~~~~~~~~~~
+::
+
+    {netcdf_base}/{run_id}/{subset_name}/{channel}.nc
+
+where *netcdf_base* defaults to
+``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived``.
+
+CLI usage
+---------
+::
+
+    python -m dbof.cli.run_all_subsets [OPTIONS]
+
+    # Generate + export everything (all configs, all subsets):
+    python -m dbof.cli.run_all_subsets
+
+    # Only run one config:
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml
+
+    # Only run specific subsets (across whichever configs contain them):
+    python -m dbof.cli.run_all_subsets --subsets stratification native_fields
+
+    # Skip the generate step (export only — assumes zarr stores already exist):
+    python -m dbof.cli.run_all_subsets --export-only
+
+    # Skip the export step (generate only):
+    python -m dbof.cli.run_all_subsets --generate-only
+
+    # Override run_id for all configs:
+    python -m dbof.cli.run_all_subsets --run-id my_run_01
+
+    # Dry run — print what would be done without running anything:
+    python -m dbof.cli.run_all_subsets --dry-run
 """
 
+import argparse
+import logging
+import os
+import sys
+import time
+from pathlib import Path
+
+import yaml
+
 
 # ---------------------------------------------------------------------------
-# Keyword → required-variable mappings
+# Logging
 # ---------------------------------------------------------------------------
-# Each entry is (tuple_of_channel_prefixes, list_of_raw_variables).
-# A channel matches if it starts with any prefix in the tuple.
 
-_CHANNEL_VARIABLE_RULES = [
-    # Tracers: any buoyancy/density/gradient-based diagnostic
-    (
-        ('N2_', 'mixed_layer', 'ml_heat', 'Ri_', 'Fr_', 'Bu_',
-         'ertel_pv', 'uB', 'vB', 'wB', 'Ro_', 'KE_',
-         'gradb2_', 'gradtheta2_', 'gradsalt2_', 'gradrho2_',
-         'turner_angle_', 'frontogenesis_'),
-        ['Theta', 'Salt'],
-    ),
-    # Velocity: shear, dimensionless numbers, fluxes, kinematics
-    (
-        ('vertical_shear', 'Ri_', 'Fr_', 'Ro_', 'Bu_',
-         'ertel_pv', 'uB', 'vB',
-         'relative_vorticity_', 'strain_', 'divergence_',
-         'okubo_weiss_', 'frontogenesis_', 'ug_', 'vg_'),
-        ['U', 'V'],
-    ),
-    # Vertical velocity: PV and wB
-    (
-        ('ertel_pv', 'wB'),
-        ['W'],
-    ),
-    # Wind stress
-    (
-        ('wind_stress_curl', 'ekman_pumping', 'u_ekman', 'v_ekman'),
-        ['oceTAUX', 'oceTAUY'],
-    ),
-    # Sea-surface height
-    (
-        ('gradeta2_', 'frontogenesis_', 'ug_', 'vg_'),
-        ['Eta'],
-    ),
-]
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger(__name__)
 
 
-def required_model_variables(
-    model_feature_channels: list[str],
-    computed_feature_channels: list[str],
-) -> list[str]:
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+DEFAULT_NETCDF_BASE = "/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived"
+DEFAULT_CONFIGS_DIR = "configs"
+
+
+# ---------------------------------------------------------------------------
+# Config discovery
+# ---------------------------------------------------------------------------
+
+def discover_configs(configs_dir: str) -> list[Path]:
+    """Return sorted list of YAML config files in *configs_dir* (non-recursive).
+
+    Skips the ``data_access/`` subdirectory and any dotfiles.
     """
-    Return the list of raw model variables needed from storage.
+    configs_path = Path(configs_dir)
+    if not configs_path.is_dir():
+        log.warning("Configs directory does not exist: %s", configs_dir)
+        return []
 
-    Parameters
-    ----------
-    model_feature_channels : list[str]
-        Raw model fields to include directly in the output (e.g. ``['Theta']``).
-    computed_feature_channels : list[str]
-        Names of derived fields to compute (e.g. ``['N2_sfc', 'Ri_z25m']``).
+    yamls = sorted(
+        p for p in configs_path.glob("*.yaml")
+        if not p.name.startswith(".")
+    )
+    return yamls
+
+
+def parse_subsets_from_config(config_path: Path) -> dict:
+    """Parse a config YAML and return its metadata.
 
     Returns
     -------
-    list[str]
-        De-duplicated list of raw variable names.
+    dict with keys:
+        config_path : Path
+        run_id      : str
+        s3_source   : dict
+        output      : dict   (s3_endpoint, bucket, folder)
+        date_iterations : list[str]
+        subsets     : dict[str, dict]  (subset_name -> subset entry)
     """
-    needed = list(dict.fromkeys(model_feature_channels))   # preserve order, dedupe
+    with open(config_path) as fh:
+        raw = yaml.safe_load(fh) or {}
 
-    for prefixes, variables in _CHANNEL_VARIABLE_RULES:
-        if any(ch.startswith(prefixes) for ch in computed_feature_channels):
-            for v in variables:
-                if v not in needed:
-                    needed.append(v)
+    run_id = raw.get("run", {}).get("run_id", "unknown_run")
+    s3_source = raw.get("s3_source", {})
+    output = raw.get("output", {})
+    date_iterations = raw.get("data", {}).get("date_iterations", [])
+    subsets = raw.get("subsets", {})
 
-    return needed
+    return {
+        "config_path": config_path,
+        "run_id": run_id,
+        "s3_source": s3_source,
+        "output": output,
+        "date_iterations": date_iterations,
+        "subsets": subsets,
+    }
+
+
+def get_channels_for_subset(subset_entry: dict) -> list[str]:
+    """Extract the ordered channel list from a subset config entry."""
+    model_channels = subset_entry.get("model_data_feature_channels", []) or []
+    computed_channels = subset_entry.get("compute_features_channels", []) or []
+    return model_channels + computed_channels
+
+
+# ---------------------------------------------------------------------------
+# Phase 1: Generate zarr stores
+# ---------------------------------------------------------------------------
+
+def run_generate(config_path: str, subset: str, run_id: str = None,
+                 dry_run: bool = False):
+    """Call generate_global_depth.main() for one subset."""
+    log.info("=" * 60)
+    log.info("GENERATE  config=%s  subset=%s", config_path, subset)
+    log.info("=" * 60)
+
+    if dry_run:
+        log.info("[DRY RUN] Would run generate_global_depth.main("
+                 "config_file=%r, subset=%r, run_id=%r)", config_path, subset, run_id)
+        return
+
+    from dbof.cli.generate_global_depth import main as generate_main
+    generate_main(config_file=str(config_path), run_id=run_id, subset=subset)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Export zarr → per-variable NetCDF
+# ---------------------------------------------------------------------------
+
+def _date_to_prefix(date_str: str) -> str:
+    """Convert 'YYYY-MM-DD HH:MM:SS' → date_prefix '20121109_120000'."""
+    from datetime import datetime
+    dt = datetime.strptime(date_str.strip(), '%Y-%m-%d %H:%M:%S')
+    return dt.strftime("%Y%m%d_%H%M%S")
+
+
+def run_export_channel(
+    s3_endpoint: str,
+    bucket: str,
+    folder: str,
+    run_id: str,
+    dataset_name: str,
+    date_prefix: str,
+    channel: str,
+    output_dir: str,
+    dry_run: bool = False,
+):
+    """Call zarr_to_netcdf.main() for a single channel, producing one .nc file."""
+    os.makedirs(output_dir, exist_ok=True)
+    output_filename = f"{channel}.nc"
+
+    log.info("  EXPORT  %s -> %s/%s", channel, output_dir, output_filename)
+
+    if dry_run:
+        return
+
+    from dbof.cli.zarr_to_netcdf import main as netcdf_main
+
+    netcdf_main(
+        output_dir=output_dir,
+        output_filename=output_filename,
+        mode="snapshots",
+        s3_endpoint=s3_endpoint,
+        bucket=bucket,
+        folder=folder,
+        run_id=run_id,
+        dataset_name=dataset_name,
+        date_prefix=date_prefix,
+        channels=[channel],
+    )
+
+
+def run_export_subset(
+    config_info: dict,
+    subset_name: str,
+    subset_entry: dict,
+    netcdf_base: str,
+    run_id_override: str = None,
+    dry_run: bool = False,
+):
+    """Export all channels in one subset to individual NetCDF files.
+
+    Iterates over each date_prefix (derived from date_iterations in the
+    config) and exports each channel as a separate .nc file.
+    """
+    run_id = run_id_override or config_info["run_id"]
+    output = config_info["output"]
+    s3_endpoint = output.get("s3_endpoint", "https://s3-west.nrp-nautilus.io")
+    bucket = output.get("bucket", "dbof/")
+    folder = output.get("folder", "properties/")
+    dataset_name = subset_entry.get("dataset_name", f"{subset_name}.zarr")
+    date_iterations = config_info["date_iterations"]
+
+    # Convert date strings to date_prefix strings.
+    date_prefixes = [_date_to_prefix(d) for d in date_iterations]
+
+    channels = get_channels_for_subset(subset_entry)
+    if not channels:
+        log.warning("  No channels for subset '%s' — skipping export.", subset_name)
+        return
+
+    log.info("-" * 60)
+    log.info("EXPORT subset=%s  dataset=%s  channels=%d  dates=%d",
+             subset_name, dataset_name, len(channels), len(date_prefixes))
+    log.info("-" * 60)
+
+    for dp in date_prefixes:
+        output_dir = os.path.join(netcdf_base, run_id, dp, subset_name)
+        log.info("  date_prefix=%s  -> %s", dp, output_dir)
+
+        for channel in channels:
+            try:
+                run_export_channel(
+                    s3_endpoint=s3_endpoint,
+                    bucket=bucket,
+                    folder=folder,
+                    run_id=run_id,
+                    dataset_name=dataset_name,
+                    date_prefix=dp,
+                    channel=channel,
+                    output_dir=output_dir,
+                    dry_run=dry_run,
+                )
+            except Exception:
+                log.exception("  FAILED to export channel '%s' from subset '%s' "
+                              "(date_prefix=%s)", channel, subset_name, dp)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+def _parse_args():
+    p = argparse.ArgumentParser(
+        description=(
+            "Batch driver: generate all zarr subsets then export each "
+            "channel to a separate NetCDF file."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--config", nargs="+", metavar="YAML",
+        help=("One or more config YAML paths. Default: auto-discover "
+              f"all .yaml files in {DEFAULT_CONFIGS_DIR}/."),
+    )
+    p.add_argument(
+        "--configs-dir", default=DEFAULT_CONFIGS_DIR,
+        help=f"Directory to scan for config YAMLs (default: {DEFAULT_CONFIGS_DIR}).",
+    )
+    p.add_argument(
+        "--subsets", nargs="+", metavar="NAME",
+        help="Only process these subset(s). Default: all subsets in each config.",
+    )
+    p.add_argument(
+        "--run-id", default=None,
+        help="Override run_id from config (applies to all configs).",
+    )
+    p.add_argument(
+        "--netcdf-base", default=DEFAULT_NETCDF_BASE,
+        help=f"Base directory for NetCDF output (default: {DEFAULT_NETCDF_BASE}).",
+    )
+    p.add_argument(
+        "--generate-only", action="store_true",
+        help="Only run the generate step (skip NetCDF export).",
+    )
+    p.add_argument(
+        "--export-only", action="store_true",
+        help="Only run the NetCDF export step (skip generate).",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="Print what would be done without running anything.",
+    )
+    return p.parse_args()
+
+
+def main():
+    args = _parse_args()
+
+    # ---- Discover configs ----
+    if args.config:
+        config_paths = [Path(c) for c in args.config]
+    else:
+        config_paths = discover_configs(args.configs_dir)
+
+    if not config_paths:
+        log.error("No config YAML files found.")
+        sys.exit(1)
+
+    log.info("Found %d config file(s): %s",
+             len(config_paths), [str(p) for p in config_paths])
+
+    # ---- Parse all configs ----
+    configs = []
+    for cp in config_paths:
+        try:
+            info = parse_subsets_from_config(cp)
+            configs.append(info)
+        except Exception:
+            log.exception("Failed to parse config: %s", cp)
+
+    if not configs:
+        log.error("No valid configs parsed.")
+        sys.exit(1)
+
+    # ---- Build the work plan ----
+    # Import the dispatch table to know which subsets are valid for
+    # generate_global_depth.  Subsets not in the table are export-only
+    # (they were generated by a different pipeline).
+    from dbof.preprocessing.depth_subsets import SUBSET_COMPUTE_FNS
+
+    work = []  # list of (config_info, subset_name, subset_entry, can_generate)
+    for info in configs:
+        for subset_name, subset_entry in info["subsets"].items():
+            if args.subsets and subset_name not in args.subsets:
+                continue
+            can_generate = subset_name in SUBSET_COMPUTE_FNS
+            work.append((info, subset_name, subset_entry, can_generate))
+
+    log.info("Work plan: %d subset(s) across %d config(s)",
+             len(work), len(configs))
+    for info, sn, se, cg in work:
+        channels = get_channels_for_subset(se)
+        tag = "generate+export" if cg else "export-only"
+        log.info("  [%s] %s :: %s  (%d channels)",
+                 tag, info["config_path"].name, sn, len(channels))
+
+    wall_start = time.monotonic()
+
+    # ---- Phase 1: Generate ----
+    if not args.export_only:
+        log.info("")
+        log.info("=" * 60)
+        log.info("PHASE 1: GENERATE ZARR STORES")
+        log.info("=" * 60)
+
+        for info, subset_name, subset_entry, can_generate in work:
+            if not can_generate:
+                log.info("Skipping generate for '%s' (not in SUBSET_COMPUTE_FNS)",
+                         subset_name)
+                continue
+            try:
+                run_generate(
+                    config_path=str(info["config_path"]),
+                    subset=subset_name,
+                    run_id=args.run_id,
+                    dry_run=args.dry_run,
+                )
+            except Exception:
+                log.exception("FAILED to generate subset '%s' from %s",
+                              subset_name, info["config_path"])
+
+    # ---- Phase 2: Export ----
+    if not args.generate_only:
+        log.info("")
+        log.info("=" * 60)
+        log.info("PHASE 2: EXPORT ZARR -> PER-VARIABLE NETCDF")
+        log.info("=" * 60)
+
+        for info, subset_name, subset_entry, can_generate in work:
+            try:
+                run_export_subset(
+                    config_info=info,
+                    subset_name=subset_name,
+                    subset_entry=subset_entry,
+                    netcdf_base=args.netcdf_base,
+                    run_id_override=args.run_id,
+                    dry_run=args.dry_run,
+                )
+            except Exception:
+                log.exception("FAILED to export subset '%s' from %s",
+                              subset_name, info["config_path"])
+
+    wall_elapsed = time.monotonic() - wall_start
+    log.info("")
+    log.info("=" * 60)
+    log.info("All done.  Total wall-clock time: %.1f s (%.2f h)",
+             wall_elapsed, wall_elapsed / 3600)
+    log.info("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

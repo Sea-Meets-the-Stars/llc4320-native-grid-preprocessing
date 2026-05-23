@@ -248,40 +248,41 @@ subsets:
       - vg_sfc
 
   # ===========================================================================
-  # Surface-only subsets
-  # (read from the same S3 timestep stores but only use surface data)
+  # Native model fields at depth
+  # (raw tracers/velocities through the depth-strategy machinery)
   # ===========================================================================
 
   native_fields:
     dataset_name: "native_fields.zarr"
-    surface_only: true
-    model_data_feature_channels:
-      - Theta
-      - Salt
-      - Eta
-      - U
-      - V
-      - W
-    compute_features_channels: []
+    surface_only: false
+    model_data_feature_channels: []
+    compute_features_channels:
+      - Theta_sfc
+      #- Theta_z25m
+      #- Theta_mld
+      #- Theta_mld_mean
+      - Salt_sfc
+      #- Salt_z25m
+      #- Salt_mld
+      #- Salt_mld_mean
+      - Eta_sfc
+      - U_sfc
+      #- U_z25m
+      #- U_mld
+      #- U_mld_mean
+      - V_sfc
+      #- V_z25m
+      #- V_mld
+      #- V_mld_mean
+      - W_sfc
+      #- W_z25m
+      #- W_mld
+      #- W_mld_mean
 
-  native_surface:
-    dataset_name: "native_surface.zarr"
-    surface_only: true
-    model_data_feature_channels:
-      - Theta
-      - Salt
-      - Eta
-      - U
-      - V
-      - W
-    compute_features_channels: []
-
-  eta:
-    dataset_name: "eta.zarr"
-    surface_only: true
-    model_data_feature_channels:
-      - Eta
-    compute_features_channels: []
+  # ===========================================================================
+  # Surface-only subsets
+  # (read from the same S3 timestep stores but only use surface data)
+  # ===========================================================================
 
   icearea:
     dataset_name: "icearea.zarr"
@@ -290,10 +291,3 @@ subsets:
       - SIarea
     compute_features_channels: []
 
-  windstress:
-    dataset_name: "windstress.zarr"
-    surface_only: true
-    model_data_feature_channels:
-      - oceTAUX
-      - oceTAUY
-    compute_features_channels: []

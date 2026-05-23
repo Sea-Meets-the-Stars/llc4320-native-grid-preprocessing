@@ -8,7 +8,7 @@ data_access:
 # - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
 #   the pipeline for the snapshot you want to read.
 # - Full path: s3://{bucket}/{folder}/{run_id}/{date_prefix}/{subset}.zarr
-  run_id: "testing_015"
+  run_id: "testing_019"
   date_prefix: "20121109_120000"
 
 # Per-subset zarr names and their channel lists.
@@ -95,47 +95,109 @@ data_access:
     surface_wind:
       dataset_name: "surface_wind.zarr"
       feature_channels:
+        - "oceTAUX"
+        - "oceTAUY"
+        - "oceQnet"
         - "wind_stress_curl"
         - "ekman_pumping"
         - "u_ekman"
         - "v_ekman"
-
-    # ---- legacy (backwards compatible) ----
-
-    derived_fields:
-      dataset_name: "derived_fields.zarr"
+    
+    energetics:
+      dataset_name: "energetics.zarr"
       feature_channels:
-        - "mixed_layer_depth"
-        - "N2_mld_base"
+        - KE_sfc
+        - KE_z25m
+        - KE_mld
+        - KE_mld_mean
 
     # ---- surface-only model variables ----
 
-    native_surface:
-      dataset_name: "native_surface.zarr"
+    native_fields:
+      dataset_name: "native_fields.zarr"
       feature_channels:
-        - "Theta"
-        - "Salt"
-        - "Eta"
-        - "U"
-        - "V"
-        - "W"
-
-    eta:
-      dataset_name: "eta.zarr"
-      feature_channels:
-        - "Eta"
+        - "Theta_sfc"
+        - "Salt_sfc"
+        - "Eta_sfc"
+        - "U_sfc"
+        - "V_sfc"
+        - "W_sfc"
 
     icearea:
       dataset_name: "icearea.zarr"
       feature_channels:
         - "SIarea"
 
-    windstress:
-      dataset_name: "windstress.zarr"
+    frontal_structure:
+      dataset_name: "frontal_structure.zarr"
       feature_channels:
-        - "oceTAUX"
-        - "oceTAUY"
+        - gradb2_sfc
+        - gradb2_z25m
+        - gradb2_mld
+        - gradb2_mld_mean
+        - gradtheta2_sfc
+        - gradtheta2_z25m
+        - gradtheta2_mld
+        - gradtheta2_mld_mean
+        - gradsalt2_sfc
+        - gradsalt2_z25m
+        - gradsalt2_mld
+        - gradsalt2_mld_mean
+        - gradrho2_sfc
+        - gradrho2_z25m
+        - gradrho2_mld
+        - gradrho2_mld_mean
+        - gradeta2_sfc
+        - turner_angle_sfc
+        - turner_angle_z25m
+        - turner_angle_mld
+        - turner_angle_mld_mean
 
+    kinematic:
+      dataset_name: "kinematic.zarr"
+      feature_channels:
+        - relative_vorticity_sfc
+        - relative_vorticity_z25m
+        - relative_vorticity_mld
+        - relative_vorticity_mld_mean
+        - strain_n_sfc
+        - strain_n_z25m
+        - strain_n_mld
+        - strain_n_mld_mean
+        - strain_s_sfc
+        - strain_s_z25m
+        - strain_s_mld
+        - strain_s_mld_mean
+        - strain_mag_sfc
+        - strain_mag_z25m
+        - strain_mag_mld
+        - strain_mag_mld_mean
+        - divergence_sfc
+        - divergence_z25m
+        - divergence_mld
+        - divergence_mld_mean
+        - okubo_weiss_sfc
+        - okubo_weiss_z25m
+        - okubo_weiss_mld
+        - okubo_weiss_mld_mean
+
+    frontogenesis:
+      dataset_name: "frontogenesis.zarr"
+      feature_channels:
+        - frontogenesis_tendency_sfc
+        - frontogenesis_tendency_z25m
+        - frontogenesis_tendency_mld
+        - frontogenesis_tendency_mld_mean
+        - frontogenesis_geo_sfc
+        - frontogenesis_geo_z25m
+        - frontogenesis_geo_mld
+        - frontogenesis_geo_mld_mean
+        - frontogenesis_ageo_sfc
+        - frontogenesis_ageo_z25m
+        - frontogenesis_ageo_mld
+        - frontogenesis_ageo_mld_mean
+        - ug_sfc
+        - vg_sfc
 
 # Grid Zarr store written by generate_grid_global.py.
 # NOTE: The grid is stored WITHOUT a run_id prefix (shared across all runs):

@@ -433,19 +433,76 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
 #  DISPATCH TABLE
 # ===========================================================================
 
-def compute_native_fields(ds_merge, grid, computed_feature_channels):
+def _compute_no_op(ds_merge, grid, computed_feature_channels):
     """No-op callback for subsets that only output raw model variables."""
     return {}
 
 
+def compute_native_fields(ds_merge, grid, computed_feature_channels):
+    """Subset: native_fields — raw tracers & velocities at depth.
+
+    Feeds the raw 3D model variables through ``apply_depth_strategies``
+    so they can be extracted at _sfc, _z25m, _mld, and _mld_mean.
+
+    U and V live on staggered grids (i_g / j_g) and are interpolated to
+    tracer points before the depth reduction.  Eta is inherently 2D
+    (surface only) and is handled as a special case.
+    """
+    results = {}
+    requested = set(computed_feature_channels)
+    if not requested:
+        return results
+
+    # Lazy MLD — only computed when a _mld or _mld_mean channel is requested.
+    mld = None
+    need_mld = any(c.endswith("_mld") or c.endswith("_mld_mean")
+                   for c in requested)
+
+    def _ensure_mld():
+        nonlocal mld
+        if mld is None and need_mld:
+            mld = mixed_layer_depth(ds_merge)
+        return mld
+
+    # -- Scalar tracers (already on tracer grid) --
+    for base in ("Theta", "Salt"):
+        if any(c.startswith(base + "_") for c in requested):
+            _ensure_mld()
+            results.update(apply_depth_strategies(
+                ds_merge[base], base, ds_merge, mld=mld,
+                requested=requested))
+
+    # -- Eta (inherently 2D — no vertical dimension) --
+    if "Eta_sfc" in requested:
+        results["Eta_sfc"] = ds_merge["Eta"]
+
+    # -- Velocity: interpolate staggered → tracer points, then apply depths --
+    if any(c.startswith("U_") for c in requested):
+        _ensure_mld()
+        U_c = grid.interp(ds_merge.U, 'X', boundary='fill')
+        results.update(apply_depth_strategies(
+            U_c, "U", ds_merge, mld=mld, requested=requested))
+
+    if any(c.startswith("V_") for c in requested):
+        _ensure_mld()
+        V_c = grid.interp(ds_merge.V, 'Y', boundary='fill')
+        results.update(apply_depth_strategies(
+            V_c, "V", ds_merge, mld=mld, requested=requested))
+
+    # -- W (on k_l vertical grid, tracer horizontal grid) --
+    if any(c.startswith("W_") for c in requested):
+        _ensure_mld()
+        results.update(apply_depth_strategies(
+            ds_merge.W, "W", ds_merge, mld=mld, requested=requested))
+
+    return _materialise_results(results)
+
+
 SUBSET_COMPUTE_FNS = {
     # Surface-only subsets (no depth computation — raw model fields only).
-    "native_fields":     compute_native_fields,
-    "native_surface":    compute_native_fields,
-    "eta":               compute_native_fields,
-    "icearea":           compute_native_fields,
-    "windstress":        compute_native_fields,
+    "icearea":           _compute_no_op,
     # Depth-resolved diagnostic subsets.
+    "native_fields":     compute_native_fields,
     "stratification":    compute_stratification,
     "surface_wind":      compute_surface_wind,
     "vertical_shear":    compute_vertical_shear,
