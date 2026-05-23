@@ -2,118 +2,41 @@
 
 **Build global LLC4320 maps on the native curvilinear grid.**
 
-This document describes the current pipeline for turning raw LLC4320 model
-output (13 curvilinear faces) into stitched 2D `(12960, 17280)` arrays written
-to S3-backed Zarr stores, plus the NetCDF export step. The native grid geometry
-is preserved — no interpolation to a regular lat/lon grid is performed.
+This document describes the pipelines for turning raw LLC4320 model output
+(13 curvilinear faces) into stitched 2D `(12960, 17280)` arrays written to
+S3-backed Zarr stores, plus the NetCDF export step. The native grid geometry is
+preserved — no interpolation to a regular lat/lon grid is performed.
 
 ---
 
-## Main pipeline
+## Pipelines at a glance
 
-Three scripts, run in this order, make up the supported workflow:
+There are three `generate_global` pipelines, each suited to different input
+sources and depth handling:
 
-1. `cli.generate_grid_global` — build the static grid Zarr (run once).
-2. `cli.generate_global` — build per-timestep snapshot Zarr stores (run per dataset).
-3. `cli.zarr_to_netcdf` — export selected snapshots or the grid to NetCDF.
+| Pipeline                  | Depth support           | Input source                       | Prerequisite               |
+|---------------------------|-------------------------|------------------------------------|----------------------------|
+| `generate_global.py`      | Surface only            | S3 timestep stores (from MIT)      | `transfer_llc4320.py`      |
+| `generate_global_OSN.py`  | Surface only            | OSN kerchunk (direct)              | None                       |
+| `generate_global_depth.py`| Surface + depth-aware   | S3 timestep stores (from MIT)      | `transfer_llc4320.py`      |
 
-The CLI entry points defined in `pyproject.toml` are:
-
-| Script                         | Console command              | Config                                 |
-|--------------------------------|------------------------------|----------------------------------------|
-| `cli.generate_grid_global`     | `generate-global-grid-zarr`  | CLI flags only                         |
-| `cli.generate_global`          | `generate-global`            | `configs/global.yaml` (+ `--subset`)   |
-| `cli.zarr_to_netcdf`           | `zarr-to-netcdf`             | CLI flags only                         |
-
-All three target the same S3 bucket/folder. `run_id` ties snapshot stores to a
-specific generation run; the grid store is shared across runs.
+All three share the same output format: S3 Zarr stores shaped
+`(T, C, 12960, 17280)` with chunk shape `(1, 1, 12960, 17280)`.
 
 ---
 
-### 1. `generate_grid_global.py` — static grid (one-time)
+## 1. `generate_global.py` — Surface-only (S3 source)
 
-Extracts LLC4320 static grid variables, stitches the 13 faces into a single
-`(12960, 17280)` array per variable, and writes them to a single Zarr store at
-`s3://{bucket}/{folder}/{dataset_name}` (default `llc4320_grid.zarr`). There is
-no `run_id` in the grid path — this store is shared by every downstream run.
+Surface-only global maps. Reads raw LLC4320 fields from the OSN kerchunk
+endpoint for core variables (`Theta`, `Salt`, `Eta`, `U`, `V`, `W`) and from
+S3 timestep stores for additional variables not available via kerchunk
+(e.g. `oceTAUX`, `SIarea`).
 
-Variables written (all shape `(12960, 17280)`):
+**The desired timestep must first be transferred from MIT using
+`transfer_llc4320.py`** (see below) before any S3-sourced variables can be
+read.
 
-| Variable      | Description                                   |
-|---------------|-----------------------------------------------|
-| `XC`, `YC`    | Longitude / latitude of T-grid cell centres   |
-| `Depth`       | Ocean bathymetric depth (m)                   |
-| `hFacC`       | Fractional open cell thickness (land mask)    |
-| `rA`, `rAz`   | T-grid and Z-grid cell areas (m²)             |
-| `SN`, `CS`    | Sine / cosine of grid rotation angle          |
-| `dxC`, `dyG`  | U-grid spacing                                |
-| `dyC`, `dxG`  | V-grid spacing                                |
-
-Run:
-
-```bash
-generate-global-grid-zarr \
-    --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof \
-    --folder native_grid_dbof_training_data \
-    --dataset-name llc4320_grid.zarr
-```
-
-Raw grid variables are read from OSN
-(`https://mghp.osn.xsede.org`, anonymous, kerchunk JSON references).
-
-You only need to re-run this when:
-- The grid store does not yet exist in the target S3 folder, **or**
-- The variable list / stitching logic has changed.
-
----
-
-### 2. `generate_global.py` — snapshot generation
-
-Single-entry-point script for all per-timestep global outputs. A `--subset`
-flag selects which group of fields is computed and written for each iteration.
-The subsets are defined in `configs/global.yaml` under the top-level `subsets:`
-key; each subset has its own `dataset_name` and channel lists.
-
-Available subsets (see `SUBSET_COMPUTE_FNS` in `cli/generate_global.py`):
-
-| Subset              | What it writes                                                                                                                  |
-|---------------------|----------------------------------------------------------------------------------------------------------------------------------|
-| `native_fields`     | Raw model fields only: `Theta`, `Salt`, `Eta`, `U`, `V`, `W`. No derived quantities.                                             |
-| `frontal_structure` | Scalar gradient magnitudes: `gradsalt2`, `gradtheta2`, `gradeta2`,`gradb2`, `gradrho2`,`turner_angle`.                             |
-| `kinematic`         | Single Jacobian pass over U/V: `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss`. |
-| `frontogenesis`     | Kinematic frontogenesis + geostrophic decomposition: `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`. Materialised with a single `dask.compute()` to fuse the shared subgraph. |
-
-
-Properties: 
-
-| Field | Subset | Units | Equation | Description |
-|---|---|---|---|---|
-| `Theta` | `native_fields` | °C | — | Potential temperature (LLC4320 native field) |
-| `Salt` | `native_fields` | PSU | — | Salinity (LLC4320 native field) |
-| `Eta` | `native_fields` | m | — | Sea surface height (LLC4320 native field) |
-| `U` | `native_fields` | m/s | — | Zonal velocity (LLC4320 native field) |
-| `V` | `native_fields` | m/s | — | Meridional velocity (LLC4320 native field) |
-| `W` | `native_fields` | m/s | — | Vertical velocity (LLC4320 native field) |
-| `gradb2` | `frontal_structure` | s⁻⁴ | \|∇b\|² = (∂b/∂x)² + (∂b/∂y)² | Squared surface buoyancy gradient magnitude |
-| `gradsalt2` | `frontal_structure` | (PSU/m)² | \|∇S\|² = (∂S/∂x)² + (∂S/∂y)² | Squared salinity gradient magnitude |
-| `gradtheta2` | `frontal_structure` | (K/m)² | \|∇θ\|² = (∂θ/∂x)² + (∂θ/∂y)² | Squared temperature gradient magnitude |
-| `gradeta2` | `frontal_structure` | (m/m)² | \|∇η\|² = (∂η/∂x)² + (∂η/∂y)² | Squared SSH gradient magnitude |
-| `relative_vorticity` | `kinematic` | s⁻¹ | ω = ∂v/∂x − ∂u/∂y | Relative vorticity |
-| `strain_n` | `kinematic` | s⁻¹ | σ_n = ∂u/∂x − ∂v/∂y | Normal (stretching) strain |
-| `strain_s` | `kinematic` | s⁻¹ | σ_s = ∂u/∂y + ∂v/∂x | Shear strain |
-| `strain_mag` | `kinematic` | s⁻¹ | \|σ\| = √(σ_n² + σ_s²) | Strain magnitude |
-| `divergence` | `kinematic` | s⁻¹ | δ = ∂u/∂x + ∂v/∂y | Horizontal velocity divergence |
-| `coriolis_f` | `kinematic` | s⁻¹ | f = 2Ω sin(φ) | Coriolis parameter |
-| `rossby_number` | `kinematic` | dimensionless | Ro = ω/f | Rossby number |
-| `okubo_weiss` | `kinematic` | s⁻² | OW = σ_n² + σ_s² − ω² | Okubo-Weiss parameter |
-| `frontogenesis_tendency` | `frontogenesis` | s⁻⁵ | F = −(∂u/∂x · b_x² + (∂u/∂y + ∂v/∂x) · b_x b_y + ∂v/∂y · b_y²) | Kinematic frontogenesis tendency |
-| `ug` | `frontogenesis` | m/s | u_g = −(g/f) ∂η/∂y | Geostrophic zonal velocity |
-| `vg` | `frontogenesis` | m/s | v_g = (g/f) ∂η/∂x | Geostrophic meridional velocity |
-| `frontogenesis_geo` | `frontogenesis` | s⁻⁵ | F(u_g, v_g) | Geostrophic frontogenesis tendency |
-| `frontogenesis_ageo` | `frontogenesis` | s⁻⁵ | F − F_geo | Ageostrophic frontogenesis tendency |
-
-Run:
+Config: `configs/global.yaml`. Console command: `generate-global`.
 
 ```bash
 generate-global \
@@ -122,107 +45,260 @@ generate-global \
     --run_id kinematic_$(date +%Y%m%d_%H%M%S)
 ```
 
-Other flags:
-- `--subset` — overrides `active_subset:` in the YAML.
-- `--run_id` — overrides `run:run_id:` in the YAML.
-- `--no-icemask` — disables the `Theta <= 0` sea-ice mask (land mask is always applied).
+Flags: `--subset`, `--run_id`, `--no-icemask` (ice mask off by default).
 
-Output layout: `s3://{bucket}/{folder}/{run_id}/{dataset_name}`, shaped
-`(T, C, 12960, 17280)` with chunk shape `(1, 1, 12960, 17280)` — one chunk per
-timestep per channel.
+---
 
-Key config shape:
+## 2. `generate_global_OSN.py` — Surface-only (OSN direct)
+
+Surface-only global maps using inputs directly from the OSN S3 store via
+kerchunk. Uses two OSN endpoints: the standard one for core variables and a
+second (`llc_wind`) for wind stress and sea-ice variables (`KPPhbl`,
+`PhiBot`, `oceTAUX`, `oceTAUY`, `SIarea`).
+
+**No transfer step is required** — all data is read directly from OSN.
+However, the wind/sea-ice endpoint has a limited date range, so not all
+timesteps are available for all variables.
+
+Config: `configs/global_OSN.yaml`. Console command: `generate-global-osn`.
+
+Key differences from `generate_global.py`:
+
+- Uses OSN-native iteration offsets (`osn_date_to_iteration`).
+- Ice mask is on by default (`--no-icemask` to disable).
+- No S3 timestep store fallback — all data comes from OSN.
+
+---
+
+## 3. `generate_global_depth.py` — Depth-aware pipeline
+
+Fully-lazy Dask pipeline for depth-resolved diagnostics. Reads full 3D
+(depth-resolved) data from S3 timestep stores, computes derived fields using
+xgcm on dask arrays, reduces each field to a 2D surface using one or more
+depth strategies, stitches the 13 LLC faces, and writes to S3 Zarr.
+
+**Requires data transferred from the MIT Zarr store using
+`transfer_llc4320.py`.**
+
+Config: `configs/global_depth.yaml`. Console command: `generate-global-depth`.
+
+```bash
+generate-global-depth \
+    --config configs/global_depth.yaml \
+    --subset stratification
+```
+
+### Depth strategies (suffixes)
+
+Each subset can request one or more depth strategies. A depth strategy
+controls how the pipeline reduces a full-depth 3D field to a single 2D
+layer for output. The available strategies are:
+
+| Suffix      | Meaning                                                   |
+|-------------|-----------------------------------------------------------|
+| `sfc`       | Surface (k=0)                                             |
+| `z25m`      | Nearest model level to 25 m (configurable, e.g. `z50m`)   |
+| `mld`       | Value at the mixed-layer depth                            |
+| `mld_mean`  | Thickness-weighted mean over 0 ≤ z ≤ MLD                 |
+
+In the config, each subset lists its base channel names in
+`compute_features_channels` and the desired depth variants in
+`depth_suffixes`. The pipeline expands every base × suffix combination:
 
 ```yaml
-run:
-  run_id: "kinematic_test00"
-
-data:
-  # Option A: explicit ISO timestamps (overrides range mode).
-  date_iterations:
-    - '2012-11-09 12:00:00'
-  # Option B: range mode (used when date_iterations is unset).
-  sampling_step: 168       # hours between snapshots
-  start_record: 1180
-  timestep_hours: 168
-
-output:
-  s3_endpoint: "https://s3-west.nrp-nautilus.io"
-  bucket: "dbof/"
-  folder: "native_grid_dbof_training_data/"
-
-active_subset: kinematic
-
-subsets:
-  kinematic:
-    dataset_name: "kinematic.zarr"
-    model_data_feature_channels: [Theta, Salt, Eta, U, V]
-    compute_features_channels:
-      - relative_vorticity
-      - strain_n
-      # ...
-  frontogenesis:
-    dataset_name: "frontogenesis.zarr"
-    # ...
+compute_features_channels: [N2]
+depth_suffixes: [sfc, z25m, mld, mld_mean]
+# → channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean
 ```
+
+Standalone diagnostics with no depth variants (e.g. `mixed_layer_depth`)
+go in `extra_channels` and are appended unchanged.
+
+### Surface vs. depth-aware within the depth pipeline
+
+Subset entries can set `surface_only: true` to skip depth processing entirely.
+These subsets (e.g. `surface_wind`, `icearea`) read only surface-level data
+from the S3 timestep stores — they use the depth pipeline's S3 data access but
+not its 3D computation machinery.
 
 ---
 
-### 3. `zarr_to_netcdf.py` — NetCDF export
+## Subsets
 
-Exports either snapshot data or the static grid from S3 Zarr to local NetCDF.
-Two modes, selected with `--mode`.
+A **subset** is a named group of related calculated fields/properties that are
+computed and written together as a single Zarr store. Each subset has its own
+`dataset_name` (e.g. `stratification.zarr`) and channel list defined in the
+config YAML.
 
-Snapshots:
+Subsets exist because the full set of derived fields is large — grouping
+related fields together lets you generate and export only what you need.
 
-```bash
-zarr-to-netcdf \
-    --mode snapshots \
-    --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof \
-    --folder native_grid_dbof_training_data \
-    --run-id kinematic_20260306_174221 \
-    --dates '2012-11-09 12:00:00' \
-    --output-dir /path/to/output \
-    --output-filename LLC4320_2012-11-09T12_kin.nc
+### Surface pipeline subsets (`generate_global.py` / `generate_global_OSN.py`)
+
+| Subset              | Fields                                                                                      |
+|---------------------|---------------------------------------------------------------------------------------------|
+| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      |
+| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  |
+| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              |
+
+### Depth pipeline subsets (`generate_global_depth.py`)
+
+| Subset              | Base fields                                        | Depth suffixes              | Extra channels                          |
+|---------------------|----------------------------------------------------|-----------------------------|-----------------------------------------|
+| `stratification`    | `N2`                                               | sfc, z25m, mld, mld_mean   | `mixed_layer_depth`, `ml_heat_content`  |
+| `vertical_shear`    | `vertical_shear`, `Ri`                             | mld                         |                                         |
+| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | mld                         |                                         |
+| `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | mld                         |                                         |
+| `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | mld                         |                                         |
+| `energetics`        | `KE`                                               | sfc, z25m, mld, mld_mean   |                                         |
+| `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc |                                         |
+| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `okubo_weiss` | sfc |                           |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc |                                   |
+| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc                         |                                         |
+| `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
+| `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
+
+---
+
+## Batch driver: `run_all_subsets.py`
+
+The batch driver (`dbof.cli.run_all_subsets`) automates the two-phase
+workflow across all subsets and configs:
+
+1. **Phase 1 — Generate:** calls `generate_global_depth.main()` for each
+   subset, producing Zarr stores on S3.
+2. **Phase 2 — Export:** calls `zarr_to_netcdf.main()` once per channel,
+   writing individual NetCDF files.
+
+### NetCDF output layout
+
+```
+{netcdf_base}/{run_id}/{date_prefix}/LLC4320_{date}_{channel}_{run_id}.nc
 ```
 
-Select timesteps with `--dates` (ISO strings), `--iterations`, or `--indices`.
-Select a subset of channels with repeated `--channel NAME`. Omitting these
-writes every timestep in the store, all channels.
+where `netcdf_base` defaults to `/mnt/tank/Oceanography/data/OGCM/LLC/Fronts`,
+and `date` is formatted as `2012-11-09T12_00_00`.
 
-Grid:
-
-```bash
-zarr-to-netcdf \
-    --mode grid \
-    --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof \
-    --folder native_grid_dbof_training_data \
-    --grid-dataset-name llc4320_grid.zarr \
-    --output-dir /path/to/output \
-    --grid-output-filename LLC4320_grid.nc
+Example:
+```
+/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/global_depth_test00/20121109_120000/LLC4320_2012-11-09T12_00_00_N2_sfc_global_depth_test00.nc
 ```
 
-Snapshot files do **not** include lat/lon or grid spacings — load the grid
+### CLI usage
+
+```bash
+# Generate + export all subsets:
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml
+
+# Only specific subsets:
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml \
+    --subsets stratification native_fields
+
+# Export only (assumes Zarr stores already exist):
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --export-only
+
+# Generate only (skip NetCDF export):
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --generate-only
+
+# Override run_id:
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --run-id my_run_01
+
+# Dry run:
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --dry-run
+
+# With ice masking:
+python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --ice-mask
+```
+
+### Ice masking
+
+Ice masking is **not** applied during the generate step — the Zarr stores
+contain unmasked data. Instead, ice masking is applied as a post-processing
+step during the NetCDF export (Phase 2), via `zarr_to_netcdf.py`. When
+`--ice-mask` is passed, the exporter reads `SIarea` from the `icearea.zarr`
+store (same bucket/folder/run_id/date_prefix) and sets all points where
+`SIarea > 0` to NaN in the exported NetCDF. The `icearea` subset itself is
+never self-masked.
+
+---
+
+## Preprocessing: `transfer_llc4320.py`
+
+Both `generate_global.py` and `generate_global_depth.py` read from S3
+timestep stores. These stores must be created by transferring data from the
+MIT Zarr store using `transfer_llc4320.py`.
+
+Console command: `transfer-timestep`. Config: `configs/transfer.yaml`.
+
+The transfer writes two stores per timestep:
+
+- **Static grid:** `s3://{bucket}/{folder}/grid.zarr` (one-time).
+- **Timestep data:** `s3://{bucket}/{folder}/{YYYYMMDDTHH}.zarr` (per date,
+  includes full-depth 3D fields).
+
+Only `generate_global_OSN.py` does not require this step — it reads directly
+from OSN kerchunk endpoints.
+
+---
+
+## Static grid: `generate_grid_global.py`
+
+Extracts LLC4320 static grid variables, stitches the 13 faces, and writes to
+`s3://{bucket}/{folder}/{dataset_name}` (default `llc4320_grid.zarr`). Run
+once per S3 folder. No `run_id` — the grid store is shared across runs.
+
+Console command: `generate-global-grid-zarr`.
+
+Variables: `XC`, `YC`, `Depth`, `hFacC`, `rA`, `rAz`, `SN`, `CS`, `dxC`,
+`dyG`, `dyC`, `dxG` — all shape `(12960, 17280)`.
+
+---
+
+## NetCDF export: `zarr_to_netcdf.py`
+
+Exports S3 Zarr data to local NetCDF. Two modes:
+
+- **`snapshots`** — per-timestep data. Select timesteps with `--dates`,
+  `--iterations`, or `--indices`. Select channels with `--channel`.
+- **`grid`** — the static grid store.
+
+Snapshot files do not include lat/lon or grid spacings — load the grid
 NetCDF alongside them.
 
+```bash
+# Snapshots
+zarr-to-netcdf --mode snapshots \
+    --s3-endpoint https://s3-west.nrp-nautilus.io \
+    --bucket dbof --folder properties \
+    --run-id global_depth_test00 \
+    --dates '2012-11-09 12:00:00' \
+    --output-dir /path/to/output
+
+# Grid
+zarr-to-netcdf --mode grid \
+    --s3-endpoint https://s3-west.nrp-nautilus.io \
+    --bucket dbof --folder properties \
+    --grid-dataset-name llc4320_grid.zarr \
+    --output-dir /path/to/output
+```
+
 ---
 
-## Typical workflow
+## Zarr output layout
 
-1. **Once per S3 folder:** `generate-global-grid-zarr` → `llc4320_grid.zarr`.
-2. **Once per dataset you want:** `generate-global --config configs/global.yaml --subset <name> --run_id <id>`.
-3. **When you need NetCDF locally:** `zarr-to-netcdf --mode snapshots ...` (and, if you don't have it yet, `--mode grid`).
+All pipelines write to the same S3 path structure:
 
-Snapshot and grid stores live in the same S3 folder; the `run_id` path segment
-separates runs.
+```
+s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
+```
+
+Each store is shaped `(T, C, 12960, 17280)` with one chunk per
+channel-slice per timestep.
 
 ---
 
 ## Iteration / date conventions
-
-LLC4320 reference:
 
 ```
 LLC4320_START_DATE    = 2011-09-13 00:00:00 UTC
@@ -248,7 +324,7 @@ fs = get_filesystem(s3_endpoint, anon=False)
 
 reader = GlobalZarrDatasetReader(bucket, folder, run_id, dataset_name, fs)
 snap   = reader.get_snapshot(t=0)                          # (C, H, W)
-field  = reader.get_channel_snapshot(t=0, channel="okubo_weiss")  # (H, W)
+field  = reader.get_channel_snapshot(t=0, channel="N2_sfc") # (H, W)
 t_idx  = reader.iteration_to_index(iteration=1463616)
 
 grid   = GlobalGridZarrReader(bucket, folder, dataset_name="llc4320_grid.zarr", fs=fs)
@@ -259,36 +335,14 @@ ds_grid  = grid.to_dataset()
 
 ---
 
-## Side notes / special-case scripts
-
-These scripts exist in `src/dbof/cli/` but are **not** part of the main
-pipeline above.
-
-### `transfer_llc4320.py` — MIT → S3 Zarr transfer
-
-Console command: `transfer-timestep`. Config: `configs/transfer.yaml`.
-
-- Transfers LLC4320 variables from a local (MIT) Zarr store into S3 with a
-  unified tiled layout.
-- Writes two separate stores:
-  `{folder}/grid.zarr` (static grid, one-time) and
-  `{folder}/{YYYYMMDDTHH}.zarr` (per-timestep, including full-depth fields).
-- These timestep stores are the input that `generate_global_depth.py` reads.
-
-It is purely a data-movement utility — it does not generate maps and is not
-part of the "generate maps / export NetCDF" pipeline described above.
-
----
-
 ## Known issues
 
 ### `utils.faces_to_latlon.faces_dataset_to_latlon` re-implementation
 
 `llcreader.llcmodel` provides a function for stitching the 13 LLC faces into a
-rectangular lat/lon array, but two lines in the upstream implementation are
-incompatible with recent xarray versions. Rather than pin xarray, the function
-is re-implemented locally in `utils.faces_to_latlon` and is used by every
-generate script.
+rectangular array, but two lines in the upstream implementation are
+incompatible with recent xarray versions. The function is re-implemented
+locally in `utils.faces_to_latlon`.
 
 ### Asyncio cleanup traceback
 
@@ -300,12 +354,9 @@ output files.
 
 `faces_dataset_to_latlon` promotes `XC` / `YC` to coordinates. The current
 `GlobalGridZarrWriter` calls `ds.reset_coords()` and filters to 2D arrays
-before writing. Older stores written before this fix should be regenerated with
-`generate-global-grid-zarr`.
+before writing. Older stores written before this fix should be regenerated.
 
 ### Geostrophic velocity near the equator
 
-`ug`, `vg` are `±(g/f) ∂η/∂x,y`; as `f → 0` at the equator both diverge in a
-narrow band. Physically correct, but may require masking downstream.
-
----
+`ug`, `vg` are `±(g/f) ∂η/∂{x,y}`; as `f → 0` at the equator both diverge
+in a narrow band. Physically correct, but may require masking downstream.

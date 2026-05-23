@@ -14,45 +14,45 @@ Output layout
 ~~~~~~~~~~~~~
 ::
 
-    {netcdf_base}/{run_id}/{subset_name}/{channel}.nc
+    {netcdf_base}/{run_id}/{date_prefix}/LLC4320_{date}_{channel}_{run_id}.nc
 
 where *netcdf_base* defaults to
-``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived``.
+``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts`` and *date* is formatted
+as ``2012-11-09T12_00_00``.
 
 CLI usage
 ---------
 ::
 
-    python -m dbof.cli.run_all_subsets [OPTIONS]
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml [OPTIONS]
 
-    # Generate + export everything (all configs, all subsets):
-    python -m dbof.cli.run_all_subsets
-
-    # Only run one config:
+    # Generate + export all subsets:
     python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml
 
-    # Only run specific subsets (across whichever configs contain them):
-    python -m dbof.cli.run_all_subsets --subsets stratification native_fields
+    # Only run specific subsets:
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml \
+        --subsets stratification native_fields
 
     # Skip the generate step (export only — assumes zarr stores already exist):
-    python -m dbof.cli.run_all_subsets --export-only
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --export-only
 
     # Skip the export step (generate only):
-    python -m dbof.cli.run_all_subsets --generate-only
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --generate-only
 
-    # Override run_id for all configs:
-    python -m dbof.cli.run_all_subsets --run-id my_run_01
+    # Override run_id:
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --run-id my_run_01
 
     # Dry run — print what would be done without running anything:
-    python -m dbof.cli.run_all_subsets --dry-run
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --dry-run
 
-    # Export with ice mask — mask points where SIarea > 0 with NaN.
-    # Reads SIarea from icearea.zarr (same bucket/folder/run_id/date_prefix).
+    # Export with ice mask — mask points where SIarea > 0 with NaN during
+    # the NetCDF export step (via zarr_to_netcdf).  Reads SIarea from
+    # icearea.zarr (same bucket/folder/run_id/date_prefix).
     # The icearea subset itself is never self-masked.
-    python -m dbof.cli.run_all_subsets --export-only --ice-mask
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --export-only --ice-mask
 
-    # Generate + export everything with ice masking:
-    python -m dbof.cli.run_all_subsets --ice-mask
+    # Generate + export with ice masking:
+    python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --ice-mask
 """
 
 import argparse
@@ -81,7 +81,7 @@ log = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_NETCDF_BASE = "/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/derived"
+DEFAULT_NETCDF_BASE = "/mnt/tank/Oceanography/data/OGCM/LLC/Fronts"
 DEFAULT_CONFIGS_DIR = "configs"
 
 
@@ -188,6 +188,13 @@ def _date_to_prefix(date_str: str) -> str:
     return dt.strftime("%Y%m%d_%H%M%S")
 
 
+def _prefix_to_filename_date(date_prefix: str) -> str:
+    """Convert date_prefix '20121109_120000' → filename date '2012-11-09T12_00_00'."""
+    from datetime import datetime
+    dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
+    return dt.strftime("%Y-%m-%dT%H_%M_%S")
+
+
 def run_export_channel(
     s3_endpoint: str,
     bucket: str,
@@ -200,9 +207,18 @@ def run_export_channel(
     dry_run: bool = False,
     ice_mask: bool = False,
 ):
-    """Call zarr_to_netcdf.main() for a single channel, producing one .nc file."""
+    """Call zarr_to_netcdf.main() for a single channel, producing one .nc file.
+
+    Output filename follows the convention::
+
+        LLC4320_{date}_{channel}_{run_id}.nc
+
+    where *date* is formatted as ``2012-11-09T12_00_00`` from the
+    *date_prefix*.
+    """
     os.makedirs(output_dir, exist_ok=True)
-    output_filename = f"{channel}.nc"
+    filename_date = _prefix_to_filename_date(date_prefix)
+    output_filename = f"LLC4320_{filename_date}_{channel}_{run_id}.nc"
 
     log.info("  EXPORT  %s -> %s/%s", channel, output_dir, output_filename)
 
@@ -267,7 +283,7 @@ def run_export_subset(
     log.info("-" * 60)
 
     for dp in date_prefixes:
-        output_dir = os.path.join(netcdf_base, run_id, dp, subset_name)
+        output_dir = os.path.join(netcdf_base, run_id, dp)
         log.info("  date_prefix=%s  -> %s", dp, output_dir)
 
         for channel in channels:
