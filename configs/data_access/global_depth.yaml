@@ -51,9 +51,8 @@ data_access:
       feature_channels:
         - Fr
         - Ro
+        - Bu
       depth_suffixes: [sfc, z25m, mld, mld_mean]
-      extra_channels:
-        - Bu_mld
 
     ertel_pv:
       dataset_name: "ertel_pv.zarr"
