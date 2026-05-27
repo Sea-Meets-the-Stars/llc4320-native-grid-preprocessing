@@ -573,6 +573,7 @@ def run(
     property: str = "density",
     output: str | None = None,
     config_path: Path = DEFAULT_CONFIG,
+    clobber: bool = False,
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
@@ -588,6 +589,8 @@ def run(
         Output path -- see :func:`_build_output_path`.
     config_path : Path
         Path to the YAML with an ``s3_source`` block.
+    clobber: bool = False,
+        If True, overwrite existing output files.
 
     Returns
     -------
@@ -617,6 +620,15 @@ def run(
         f"property={prop.name}"
     )
 
+    # Create out_path
+    out_path = _build_output_path(
+        output, tile.tile_idx, timestamp, filename_prefix=prop.filename_prefix,
+    )
+    if out_path.exists() and not clobber:
+        logging.info(f"Output file {out_path} already exists. Skipping.")
+        return
+
+    # Proceed
     s3_cfg = _load_s3_config(Path(config_path))
 
     # 3: load grid for the tile (used purely for output coords now -- no mask).
@@ -643,9 +655,7 @@ def run(
     )
 
     # 8: resolve filename and save.
-    out_path = _build_output_path(
-        output, tile.tile_idx, timestamp, filename_prefix=prop.filename_prefix,
-    )
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     logging.info(f"Saving NetCDF: {out_path}")
     ds_out.to_netcdf(
