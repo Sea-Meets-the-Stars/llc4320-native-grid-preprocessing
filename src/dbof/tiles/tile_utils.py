@@ -64,7 +64,7 @@ DATE_FMT              = "%Y-%m-%d %H:%M:%S"
 
 # configs/global_depth.yaml at the repo root -- 3 levels up from this file.
 DEFAULT_CONFIG = (
-    Path(__file__).resolve().parents[2] / "configs" / "global_depth.yaml"
+    Path(__file__).resolve().parents[3] / "configs" / "global_depth.yaml"
 )
 
 
