@@ -643,7 +643,7 @@ def run(
     )
 
     # 6: compute property (no masking).
-    from IPython import embed; embed(header='compute_tile_property 643')
+    #from IPython import embed; embed(header='compute_tile_property 643')
     field = compute_tile_property(ds_tracers_tile, prop)
 
     # 7: assemble output dataset with coords + provenance.
