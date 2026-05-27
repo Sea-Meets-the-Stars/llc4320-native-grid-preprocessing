@@ -574,6 +574,7 @@ def run(
     output: str | None = None,
     config_path: Path = DEFAULT_CONFIG,
     clobber: bool = False,
+    gen_qa_plot: bool = False,
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
@@ -591,6 +592,8 @@ def run(
         Path to the YAML with an ``s3_source`` block.
     clobber: bool = False,
         If True, overwrite existing output files.
+    gen_qa_plot: bool = False,
+        If True, generate a QA plot next to the NetCDF.
 
     Returns
     -------
@@ -668,8 +671,9 @@ def run(
     )
 
     # 9: surface QA plot next to the NetCDF.
-    png_path = out_path.with_suffix(".png")
-    logging.info(f"Saving QA plot: {png_path}")
-    _qa_plot(ds_out, prop, png_path)
+    if gen_qa_plot:
+        png_path = out_path.with_suffix(".png")
+        logging.info(f"Saving QA plot: {png_path}")
+        _qa_plot(ds_out, prop, png_path)
 
     return out_path
