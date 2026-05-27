@@ -1,0 +1,188 @@
+"""
+Rect-grid (i, j) -> LLC4320 tile mapping.
+
+A "tile" is one 720x720 block on the rectangular LLC4320 output grid
+(12960 x 17280 = 3*4320 x 4*4320).  There are 18*24 = 432 tiles in row-major
+order; tile_idx = tile_j_rect * 24 + tile_i_rect, range 0..431.
+
+Because the rect grid is built by xmitgcm's faces_to_latlon stitching of
+13 4320x4320 faces (with per-face rotations), each rect tile maps to one
+720x720 chunk on a specific LLC face -- possibly with the face-local j and i
+axes swapped or reversed relative to the rect tile.  This module resolves
+that mapping by synthesising three int arrays (face_id, j_face, i_face) of
+shape (13, 4320, 4320), running them through the same stitching routine the
+real data uses, then reading off the face index and the face-local index
+range over the rect tile region.
+
+The stitched lookup arrays cost a few seconds to build, so they're cached at
+module level.
+"""
+
+# stdlib
+from dataclasses import dataclass
+
+# numerical
+import numpy as np
+import xarray as xr
+
+# repo
+import dbof.utils.faces_to_latlon as faces_to_latlon
+
+
+# LLC4320 native-grid constants.
+N_FACES   = 13
+FACE_SIZE = 4320
+TILE_SIZE = 720
+RECT_H    = 3 * FACE_SIZE          # 12960
+RECT_W    = 4 * FACE_SIZE          # 17280
+N_TILE_J  = RECT_H // TILE_SIZE    # 18
+N_TILE_I  = RECT_W // TILE_SIZE    # 24
+N_TILES   = N_TILE_J * N_TILE_I    # 432
+
+
+@dataclass(frozen=True)
+class TileInfo:
+    """Resolved LLC4320 tile metadata for one rect-grid (i, j) input."""
+    tile_idx:     int    # 0..431 flat row-major rect tile index
+    tile_j_rect:  int    # 0..17 rect-tile row
+    tile_i_rect:  int    # 0..23 rect-tile column
+    rect_j_slice: slice  # rect-grid j range (720 wide)
+    rect_i_slice: slice  # rect-grid i range (720 wide)
+    face_idx:     int    # 0..12 LLC face that holds the data
+    j_face_slice: slice  # face-local j range (always 720 wide)
+    i_face_slice: slice  # face-local i range (always 720 wide)
+
+
+# Module-level cache: stitched lookup arrays are deterministic and small,
+# so we build them once per process.
+_LOOKUP_CACHE = None
+
+
+def _build_lookup_arrays():
+    """Build the stitched (face_id, j_face, i_face) rect-grid lookup maps.
+
+    Synthesises three small int arrays of shape (N_FACES, FACE_SIZE, FACE_SIZE)
+    -- each pixel holds, respectively, its face index, its face-local j, and
+    its face-local i -- then runs them through the same xmitgcm stitching
+    that the real data uses, yielding three rect-grid 2D arrays of shape
+    (RECT_H, RECT_W).  Sampling these by (j_rect, i_rect) tells us which face
+    and face-local (j, i) any rect pixel belongs to, transparently handling
+    per-face rotations.
+    """
+    # face_id: every pixel holds the face index it belongs to.  int8 is
+    # plenty since face index is 0..12.
+    face_id = np.broadcast_to(
+        np.arange(N_FACES, dtype=np.int8)[:, None, None],
+        (N_FACES, FACE_SIZE, FACE_SIZE),
+    ).copy()
+    # j_face: every pixel holds its face-local j index.  int16 covers 0..4319.
+    j_face = np.broadcast_to(
+        np.arange(FACE_SIZE, dtype=np.int16)[None, :, None],
+        (N_FACES, FACE_SIZE, FACE_SIZE),
+    ).copy()
+    # i_face: every pixel holds its face-local i index.
+    i_face = np.broadcast_to(
+        np.arange(FACE_SIZE, dtype=np.int16)[None, None, :],
+        (N_FACES, FACE_SIZE, FACE_SIZE),
+    ).copy()
+
+    ds = xr.Dataset(
+        {
+            "face_id": (("face", "j", "i"), face_id),
+            "j_face":  (("face", "j", "i"), j_face),
+            "i_face":  (("face", "j", "i"), i_face),
+        },
+        coords={"face": np.arange(N_FACES)},
+    )
+
+    # No vector pairs -- all three vars are scalar fields.
+    ds_rect = faces_to_latlon.faces_dataset_to_latlon(ds, metric_vector_pairs=[])
+
+    return (
+        ds_rect["face_id"].values,
+        ds_rect["j_face"].values,
+        ds_rect["i_face"].values,
+    )
+
+
+def _get_lookup_arrays():
+    """Return the (face_id, j_face, i_face) lookup maps, building on first call."""
+    global _LOOKUP_CACHE
+    if _LOOKUP_CACHE is None:
+        _LOOKUP_CACHE = _build_lookup_arrays()
+    return _LOOKUP_CACHE
+
+
+def rect_ij_to_tile(i_rect: int, j_rect: int) -> TileInfo:
+    """Resolve a rect-grid pixel into its enclosing 720x720 LLC tile.
+
+    Parameters
+    ----------
+    i_rect : int
+        Pixel column on the rectangular LLC4320 output grid (0..17279).
+    j_rect : int
+        Pixel row on the rectangular LLC4320 output grid (0..12959).
+
+    Returns
+    -------
+    TileInfo
+        Tile metadata including the flat tile index, rect-grid extent, face
+        index, and face-local 720x720 slice on that face.
+
+    Raises
+    ------
+    ValueError
+        If (i_rect, j_rect) is out of range, or if the rect tile straddles
+        multiple LLC faces (should not happen given chunk alignment), or if
+        the face-local span is not exactly TILE_SIZE in each direction.
+    """
+    if not (0 <= i_rect < RECT_W):
+        raise ValueError(f"i_rect={i_rect} outside [0, {RECT_W})")
+    if not (0 <= j_rect < RECT_H):
+        raise ValueError(f"j_rect={j_rect} outside [0, {RECT_H})")
+
+    # --- Step A: rect-grid tile math (pure integer arithmetic, no I/O). ---
+    tile_j_rect = j_rect // TILE_SIZE
+    tile_i_rect = i_rect // TILE_SIZE
+    tile_idx    = tile_j_rect * N_TILE_I + tile_i_rect
+    rect_j_slice = slice(tile_j_rect * TILE_SIZE, (tile_j_rect + 1) * TILE_SIZE)
+    rect_i_slice = slice(tile_i_rect * TILE_SIZE, (tile_i_rect + 1) * TILE_SIZE)
+
+    # --- Step B: face mapping via stitched lookup arrays. ---
+    face_id_map, j_face_map, i_face_map = _get_lookup_arrays()
+    face_block = face_id_map[rect_j_slice, rect_i_slice]
+    j_block    = j_face_map[rect_j_slice, rect_i_slice]
+    i_block    = i_face_map[rect_j_slice, rect_i_slice]
+
+    # --- Step C: sanity checks. ---
+    # An LLC rect tile must live on exactly one face (chunk alignment).
+    unique_faces = np.unique(face_block)
+    if unique_faces.size != 1:
+        raise ValueError(
+            f"Tile at rect (j={j_rect}, i={i_rect}) straddles faces "
+            f"{unique_faces.tolist()} -- unexpected for an LLC4320 rect tile."
+        )
+    face_idx = int(unique_faces[0])
+
+    # Face-local index span must be exactly TILE_SIZE in each direction.  Note
+    # that 'j' on the face may correspond to 'i' on the rect (and vice versa)
+    # for rotated faces -- the min/max approach is rotation-agnostic.
+    j_min, j_max = int(j_block.min()), int(j_block.max())
+    i_min, i_max = int(i_block.min()), int(i_block.max())
+    if (j_max - j_min + 1) != TILE_SIZE or (i_max - i_min + 1) != TILE_SIZE:
+        raise ValueError(
+            f"Tile at rect (j={j_rect}, i={i_rect}) does not span exactly "
+            f"{TILE_SIZE} face-local pixels in each direction: "
+            f"j span = {j_max - j_min + 1}, i span = {i_max - i_min + 1}."
+        )
+
+    return TileInfo(
+        tile_idx=tile_idx,
+        tile_j_rect=tile_j_rect,
+        tile_i_rect=tile_i_rect,
+        rect_j_slice=rect_j_slice,
+        rect_i_slice=rect_i_slice,
+        face_idx=face_idx,
+        j_face_slice=slice(j_min, j_max + 1),
+        i_face_slice=slice(i_min, i_max + 1),
+    )
