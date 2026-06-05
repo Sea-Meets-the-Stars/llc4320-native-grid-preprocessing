@@ -411,7 +411,10 @@ def main(
         model_channels = list(defn["model_data_feature_channels"])
 
         # Expand depth suffixes: YAML override > subset definition default.
-        depth_suffixes = yaml_depth_suffixes or defn.get("depth_suffixes")
+        # Only apply the YAML override when the subset definition itself
+        # declares depth_suffixes — surface subsets must never get suffixes.
+        defn_suffixes = defn.get("depth_suffixes")
+        depth_suffixes = (yaml_depth_suffixes or defn_suffixes) if defn_suffixes is not None else None
         extra_channels = defn.get("extra_channels")
         compute_channels = expand_channels_with_suffixes(
             defn["compute_features_channels"],
