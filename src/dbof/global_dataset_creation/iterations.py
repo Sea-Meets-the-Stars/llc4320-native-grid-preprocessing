@@ -57,16 +57,6 @@ def mit_date_to_iteration(date_str: str) -> int:
     return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
 
 
-def date_to_run_id(date_str: str) -> str:
-    """
-    Convert a date string to a directory-safe run-id.
-
-    ``'2011-12-09 12:00:00'`` → ``'20111209_120000'``
-    """
-    dt = datetime.strptime(date_str.strip(), DATE_FMT)
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
 def osn_date_to_iteration(date_str: str) -> int:
     """
     Convert a date string to an **OSN** iteration number.
@@ -77,3 +67,40 @@ def osn_date_to_iteration(date_str: str) -> int:
     (i.e. the effective OSN start date is 2011-09-10 00:00:00 UTC).
     """
     return mit_date_to_iteration(date_str) + FIRST_WIND_RECORD_OFFSET
+
+
+# ---------------------------------------------------------------------------
+# Prefix ↔ display / filename converters
+# ---------------------------------------------------------------------------
+
+def date_to_run_id(date_str: str) -> str:
+    """
+    Convert a date string to a directory-safe run-id.
+
+    ``'2011-12-09 12:00:00'`` → ``'20111209_120000'``
+    """
+    dt = datetime.strptime(date_str.strip(), DATE_FMT)
+    return dt.strftime("%Y%m%d_%H%M%S")
+
+
+def prefix_to_display(date_prefix: str) -> str:
+    """
+    Convert a date prefix back to a human-readable date string.
+
+    ``'20121109_120000'`` → ``'2012-11-09 12:00:00'``
+    """
+    try:
+        dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
+        return dt.strftime(DATE_FMT)
+    except ValueError:
+        return date_prefix
+
+
+def prefix_to_filename_date(date_prefix: str) -> str:
+    """
+    Convert a date prefix to the filename-safe date format used by NetCDF exports.
+
+    ``'20121109_120000'`` → ``'2012-11-09T12_00_00'``
+    """
+    dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
+    return dt.strftime("%Y-%m-%dT%H_%M_%S")

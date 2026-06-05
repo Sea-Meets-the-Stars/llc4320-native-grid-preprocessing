@@ -242,18 +242,10 @@ def run_generate(config_path: str, subset: str, run_id: str = None,
 # Phase 2: Export zarr → per-variable NetCDF
 # ---------------------------------------------------------------------------
 
-def _date_to_prefix(date_str: str) -> str:
-    """Convert 'YYYY-MM-DD HH:MM:SS' → date_prefix '20121109_120000'."""
-    from datetime import datetime
-    dt = datetime.strptime(date_str.strip(), '%Y-%m-%d %H:%M:%S')
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
-def _prefix_to_filename_date(date_prefix: str) -> str:
-    """Convert date_prefix '20121109_120000' → filename date '2012-11-09T12_00_00'."""
-    from datetime import datetime
-    dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
-    return dt.strftime("%Y-%m-%dT%H_%M_%S")
+from dbof.global_dataset_creation.iterations import (
+    date_to_run_id as _date_to_prefix,
+    prefix_to_filename_date as _prefix_to_filename_date,
+)
 
 
 def run_export_channel(

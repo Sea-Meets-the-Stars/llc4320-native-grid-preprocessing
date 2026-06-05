@@ -113,39 +113,24 @@ Usage — grid
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
 from dbof.io.filesystems import create_s3_filesystems
+from dbof.global_dataset_creation.iterations import (
+    date_to_run_id as _date_to_prefix,
+    prefix_to_display as _prefix_to_display,
+)
 import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset_global
 import dbof.global_dataset_creation.zarr_grid_global as zarr_grid_global
 from dbof.preprocessing.ice_mask import load_siarea_mask, apply_ice_mask
 
 
 # ---------------------------------------------------------------------------
-# Date ↔ date_prefix helpers
+# S3 date-prefix discovery
 # ---------------------------------------------------------------------------
-
-DATE_FMT = '%Y-%m-%d %H:%M:%S'
-
-
-def _date_to_prefix(date_str: str) -> str:
-    """Convert 'YYYY-MM-DD HH:MM:SS' → date_prefix '20121109_120000'."""
-    dt = datetime.strptime(date_str.strip(), DATE_FMT)
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
-def _prefix_to_display(date_prefix: str) -> str:
-    """Convert '20121109_120000' → '2012-11-09 12:00:00' for display."""
-    try:
-        dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
-        return dt.strftime(DATE_FMT)
-    except ValueError:
-        return date_prefix
-
 
 def _discover_date_prefixes(bucket, folder, run_id, dataset_name, fs):
     """List available date_prefix subdirectories for a given run_id.
