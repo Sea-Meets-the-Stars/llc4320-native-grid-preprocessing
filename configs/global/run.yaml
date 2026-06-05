@@ -15,7 +15,7 @@ pipeline: "DEPTH"
 
 run:
   run_id: "global_test00"
-  log_dir: "../test_logs/"
+  log_dir: "notebooks/notebooks_global/test_logs"
 
 data:
   # Each entry must be in ISO format: 'YYYY-MM-DD HH:MM:SS'

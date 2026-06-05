@@ -80,6 +80,7 @@ from dbof.global_dataset_creation.iterations import (
     osn_date_to_iteration,
 )
 from dbof.global_dataset_creation.dask import create_dask_client
+from dbof.global_dataset_creation.logging import setup_logging, save_run_metadata
 from dbof.global_dataset_creation.subset_definitions import (
     expand_channels_with_suffixes,
     get_compute_fn,
@@ -89,7 +90,6 @@ from dbof.global_dataset_creation.subset_definitions import (
 from dbof.global_dataset_creation.variable_selection import required_model_variables
 import dbof.global_dataset_creation.process_surface as process_surface
 import dbof.global_dataset_creation.process_depth as process_depth
-from dbof.utils.logging import generate_logging
 
 
 # ---------------------------------------------------------------------------
@@ -296,21 +296,19 @@ def main(
         subset = subset or cli.subset
         pipeline = pipeline or cli.pipeline
 
-    config_dir = Path(config_file).resolve().parent
-
     with open(config_file, "r") as fh:
         raw = yaml.safe_load(fh) or {}
 
     # ------------------------------------------------------------------
     # 2. Resolve pipeline and active_subsets
     # ------------------------------------------------------------------
-    pipeline = pipeline or raw.get("pipeline")
-    if pipeline is None:
+    pipeline_str = pipeline or raw.get("pipeline")
+    if pipeline_str is None:
         raise ValueError(
             "No pipeline specified.  Set 'pipeline' in the YAML config "
             "or pass --pipeline on the command line."
         )
-    pipeline = pipeline.upper()
+    pipeline_str = pipeline_str.upper()
 
     if subset is not None:
         active_subsets = [subset]
@@ -328,21 +326,16 @@ def main(
             )
 
     # Validate subsets early.
-    valid = valid_subsets(pipeline)
+    valid = valid_subsets(pipeline_str)
     for s in active_subsets:
         if s not in valid:
             raise ValueError(
-                f"Subset '{s}' is not valid for pipeline '{pipeline}'.  "
+                f"Subset '{s}' is not valid for pipeline '{pipeline_str}'.  "
                 f"Valid subsets: {valid}"
             )
 
     # ------------------------------------------------------------------
-    # 3. Data source (from code, not YAML)
-    # ------------------------------------------------------------------
-    data_source = get_data_source(pipeline)
-
-    # ------------------------------------------------------------------
-    # 4. Date iterations (from YAML)
+    # 3. Date iterations (from YAML)
     # ------------------------------------------------------------------
     date_iterations = raw.get("data", {}).get("date_iterations")
     if not date_iterations:
@@ -353,54 +346,56 @@ def main(
         )
 
     # ------------------------------------------------------------------
-    # 5. Build a base config for logging / dask setup
-    #    (features are set per-subset below; this just needs run/runtime)
+    # 4. Build GlobalJobConfig
     # ------------------------------------------------------------------
     run_cfg = config.RunConfig(**(raw.get("run") or {}))
     if run_id is not None:
         run_cfg = config.RunConfig(run_id=run_id, log_dir=run_cfg.log_dir)
 
-    runtime_cfg = config.RuntimeConfig(**(raw.get("runtime") or {}))
-
-    # Minimal config for generate_logging.
-    base_cfg = config.GlobalJobConfig(
+    cfg = config.GlobalJobConfig(
         run=run_cfg,
         data=config.GlobalDataConfig(**(raw.get("data") or {})),
         output=config.GlobalOutputConfig(**(raw.get("output") or {})),
-        features=config.FeaturesConfig(),
-        runtime=runtime_cfg,
+        runtime=config.RuntimeConfig(**(raw.get("runtime") or {})),
+        pipeline=pipeline_str,
+        active_subsets=active_subsets,
+        depth_suffixes=raw.get("depth_suffixes"),
     )
 
-    generate_logging(base_cfg, config_dir=config_dir,
-                     log_filename="generate_global.log")
+    # ------------------------------------------------------------------
+    # 5. Logging and run metadata
+    # ------------------------------------------------------------------
+    log_file = setup_logging(cfg)
     logging.info("Unified global pipeline starting.")
-    logging.info(f"Pipeline: {pipeline}")
-    logging.info(f"Active subsets: {active_subsets}")
+    logging.info(f"Pipeline: {cfg.pipeline}")
+    logging.info(f"Active subsets: {cfg.active_subsets}")
+    logging.info(f"Depth suffixes (YAML override): {cfg.depth_suffixes}")
     logging.info(f"Dates: {date_iterations}")
 
     # ------------------------------------------------------------------
     # 6. One-time setup: dask client, S3 filesystem, grid
     # ------------------------------------------------------------------
-    dask_client = create_dask_client(runtime_cfg)
-    fs, _ = create_s3_filesystems(base_cfg.output.s3_endpoint)
+    data_source = get_data_source(cfg.pipeline)
+    dask_client = create_dask_client(cfg.runtime)
+    fs, _ = create_s3_filesystems(cfg.output.s3_endpoint)
 
-    ds_grid, land_mask, grid = set_up_grid(pipeline, data_source)
+    # Save run metadata (local + S3).
+    save_run_metadata(cfg, log_file, fs=fs)
+
+    ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
 
     logging.info(f"LLC rectangular output shape: {RECTANGULAR_SHAPE}")
-
-    # Optional YAML override for depth suffixes.
-    yaml_depth_suffixes = raw.get("depth_suffixes")
 
     # ------------------------------------------------------------------
     # 7. Main loop: subsets × dates
     # ------------------------------------------------------------------
-    for subset_name in active_subsets:
+    for subset_name in cfg.active_subsets:
         logging.info(f"\n{'='*60}")
         logging.info(f"Processing subset: {subset_name}")
         logging.info(f"{'='*60}")
 
-        defn = get_subset_definition(pipeline, subset_name)
-        compute_fn = get_compute_fn(pipeline, subset_name)
+        defn = get_subset_definition(cfg.pipeline, subset_name)
+        compute_fn = get_compute_fn(cfg.pipeline, subset_name)
 
         surface_only = defn.get("surface_only", False)
         dataset_name = defn["dataset_name"]
@@ -410,7 +405,7 @@ def main(
         # Only apply the YAML override when the subset definition itself
         # declares depth_suffixes — surface subsets must never get suffixes.
         defn_suffixes = defn.get("depth_suffixes")
-        depth_suffixes = (yaml_depth_suffixes or defn_suffixes) if defn_suffixes is not None else None
+        depth_suffixes = (cfg.depth_suffixes or defn_suffixes) if defn_suffixes is not None else None
         extra_channels = defn.get("extra_channels")
         compute_channels = expand_channels_with_suffixes(
             defn["compute_features_channels"],
@@ -435,9 +430,9 @@ def main(
 
             # Create zarr output store for this subset + date.
             zarr_ds = zarr_dataset.GlobalZarrDataset(
-                base_cfg.output.bucket,
-                base_cfg.output.folder,
-                run_cfg.run_id,
+                cfg.output.bucket,
+                cfg.output.folder,
+                cfg.run.run_id,
                 dataset_name,
                 fs=fs,
                 channel_names=channel_names,
@@ -447,12 +442,12 @@ def main(
 
             # Load snapshot.
             ds, ds_merge, it = load_snapshot(
-                pipeline, date_str, ds_grid, vars_needed,
+                cfg.pipeline, date_str, ds_grid, vars_needed,
                 surface_only, data_source,
             )
 
             # Process snapshot — dispatch to surface or depth processor.
-            if pipeline == "DEPTH":
+            if cfg.pipeline == "DEPTH":
                 data = process_depth.process_snapshot(
                     ds, ds_merge, grid,
                     model_channels, compute_channels,
@@ -483,8 +478,8 @@ def main(
 
     logging.info("=" * 60)
     logging.info("Run complete.")
-    logging.info(f"  Pipeline        : {pipeline}")
-    logging.info(f"  Subsets         : {active_subsets}")
+    logging.info(f"  Pipeline        : {cfg.pipeline}")
+    logging.info(f"  Subsets         : {cfg.active_subsets}")
     logging.info(f"  Wall-clock time : {wall_hours:.2f} h  ({wall_elapsed:.1f} s)")
     logging.info(f"  Dask workers    : {n_workers}")
     logging.info(f"  Dates           : {len(date_iterations)}")
