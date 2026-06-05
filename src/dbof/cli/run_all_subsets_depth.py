@@ -146,7 +146,7 @@ def get_channels_for_subset(subset_entry: dict) -> list[str]:
     is expanded to ``{base}_{suffix}`` for every suffix.  Entries in
     ``extra_channels`` are appended unchanged.
     """
-    from dbof.global_dataset_creation.runtime import expand_channels_with_suffixes
+    from dbof.global_dataset_creation.subset_definitions import expand_channels_with_suffixes
 
     model_channels = subset_entry.get("model_data_feature_channels", []) or []
     computed_channels = expand_channels_with_suffixes(

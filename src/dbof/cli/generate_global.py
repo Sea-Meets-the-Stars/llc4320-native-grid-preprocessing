@@ -79,11 +79,9 @@ from dbof.global_dataset_creation.iterations import (
     mit_date_to_iteration,
     osn_date_to_iteration,
 )
-from dbof.global_dataset_creation.runtime import (
-    create_dask_client,
-    expand_channels_with_suffixes,
-)
+from dbof.global_dataset_creation.dask import create_dask_client
 from dbof.global_dataset_creation.subset_definitions import (
+    expand_channels_with_suffixes,
     get_compute_fn,
     get_subset_definition,
     valid_subsets,

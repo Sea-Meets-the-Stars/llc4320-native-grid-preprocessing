@@ -288,3 +288,48 @@ def valid_subsets(pipeline: str) -> list[str]:
     raise ValueError(
         f"Unknown pipeline '{pipeline}'.  Expected SURF, OSN, or DEPTH."
     )
+
+
+def expand_channels_with_suffixes(
+    channels: list[str],
+    depth_suffixes: list[str] | None = None,
+    extra_channels: list[str] | None = None,
+) -> list[str]:
+    """
+    Expand channel base names with depth suffixes.
+
+    If *depth_suffixes* is provided, each entry in *channels* is expanded
+    to ``{base}_{suffix}`` for every suffix in the list.  Entries in
+    *extra_channels* are appended unchanged (use for standalone diagnostics
+    like ``mixed_layer_depth`` that have no depth variants).
+
+    If *depth_suffixes* is ``None`` or empty, *channels* is returned as-is
+    with any *extra_channels* appended.
+
+    Parameters
+    ----------
+    channels : list[str]
+        Base channel names (e.g. ``['N2', 'KE']``).
+    depth_suffixes : list[str] or None
+        Suffixes to append (e.g. ``['sfc', 'z25m', 'mld', 'mld_mean']``).
+    extra_channels : list[str] or None
+        Additional channels passed through without expansion.
+
+    Returns
+    -------
+    list[str]
+        Expanded channel list.
+    """
+    if not depth_suffixes:
+        result = list(channels or [])
+        if extra_channels:
+            result.extend(extra_channels)
+        return result
+
+    result = []
+    for base in (channels or []):
+        for suffix in depth_suffixes:
+            result.append(f"{base}_{suffix}")
+    if extra_channels:
+        result.extend(extra_channels)
+    return result
