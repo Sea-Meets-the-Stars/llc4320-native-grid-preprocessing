@@ -2,8 +2,7 @@
 Unified global LLC4320 dataset generation pipeline.
 
 Single entry point that dispatches on the ``pipeline`` key in the YAML
-config.  Replaces the three former separate scripts (generate_global.py,
-generate_global_OSN.py, generate_global_depth.py).
+config. 
 
 Pipeline variants
 -----------------
