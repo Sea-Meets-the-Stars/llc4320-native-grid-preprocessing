@@ -103,13 +103,13 @@ from dbof.utils.faces_to_latlon import (
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 from dbof.llc4320_ingestion import grid as llc_grid
 
-import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
+import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset
 import dbof.dataset_creation.config as config
 
 from dbof.utils.logging import generate_logging
-from dbof.utils.iterations import LLC_FACES, calculate_iterations_for_llc
-from dbof.utils.variable_selection import required_model_variables
-from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
+from dbof.global_dataset_creation.iterations import LLC_FACES, calculate_iterations_for_llc
+from dbof.global_dataset_creation.variable_selection import required_model_variables
+from dbof.global_dataset_creation.runtime import resolve_config, extract_feature_channels, create_dask_client
 from dbof.utils.subset_config import resolve_subset, build_global_job_config, run_per_date
 
 # URL of the raw LLC4320 data store
@@ -409,9 +409,19 @@ def main(
 ) -> None:
     """Entry point.  Reads CLI args when called with no arguments.
 
+    .. deprecated::
+        Use ``generate_global_GEN.main()`` with ``pipeline='SURF'`` instead.
+
     When ``--run_id`` is omitted and ``date_iterations`` is set, each date
     gets its own output directory via ``run_per_date``.
     """
+    import warnings
+    warnings.warn(
+        "generate_global.py (SURF) is deprecated.  "
+        "Use generate_global_GEN.py with pipeline='SURF' instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     # --- Resolve arguments ---------------------------------------------------
     if config_file is None:
         cli = _parse_args()

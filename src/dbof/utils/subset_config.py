@@ -11,8 +11,8 @@ module factors out that shared logic.
 import logging
 
 import dbof.dataset_creation.config as config
-from dbof.utils.iterations import date_to_run_id
-from dbof.utils.runtime import expand_channels_with_suffixes
+from dbof.global_dataset_creation.iterations import date_to_run_id
+from dbof.global_dataset_creation.runtime import expand_channels_with_suffixes
 
 
 # ---------------------------------------------------------------------------

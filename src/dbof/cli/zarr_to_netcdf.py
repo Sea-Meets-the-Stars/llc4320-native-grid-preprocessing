@@ -120,8 +120,8 @@ import numpy as np
 import xarray as xr
 
 from dbof.io.filesystems import create_s3_filesystems
-import dbof.dataset_creation.zarr_dataset_global as zarr_dataset_global
-import dbof.dataset_creation.zarr_grid_global as zarr_grid_global
+import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset_global
+import dbof.global_dataset_creation.zarr_grid_global as zarr_grid_global
 from dbof.preprocessing.ice_mask import load_siarea_mask, apply_ice_mask
 
 

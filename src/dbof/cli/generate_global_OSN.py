@@ -95,16 +95,16 @@ from dbof.utils.faces_to_latlon import (
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 from dbof.llc4320_ingestion import grid as llc_grid
 
-import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
+import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset
 import dbof.dataset_creation.config as config
 
 from dbof.utils.logging import generate_logging
-from dbof.utils.iterations import (
+from dbof.global_dataset_creation.iterations import (
     LLC_FACES,
     osn_date_to_iteration, calculate_iterations_for_llc as _calc_iters_shared,
 )
-from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
-from dbof.utils.variable_selection import required_model_variables
+from dbof.global_dataset_creation.runtime import resolve_config, extract_feature_channels, create_dask_client
+from dbof.global_dataset_creation.variable_selection import required_model_variables
 from dbof.utils.subset_config import resolve_subset, build_global_job_config, run_per_date
 
 # URL of the raw LLC4320 data store
@@ -423,6 +423,9 @@ def main(
     """
     Entry point for the global dataset generation script.
 
+    .. deprecated::
+        Use ``generate_global_GEN.main()`` with ``pipeline='OSN'`` instead.
+
     Can be called from the CLI (no arguments; reads ``--config``, ``--run_id``,
     ``--subset``, and ``--no-icemask`` from ``sys.argv``) or directly from
     Python by passing the arguments explicitly.
@@ -446,6 +449,14 @@ def main(
         ``None``  — read from the CLI flag (``--no-icemask``); defaults to
                     ``True`` if not passed on the command line.
     """
+    import warnings
+    warnings.warn(
+        "generate_global_OSN.py (OSN) is deprecated.  "
+        "Use generate_global_GEN.py with pipeline='OSN' instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     # --- Resolve arguments ---------------------------------------------------
     if config_file is None:
         cli = _parse_args()
@@ -455,7 +466,7 @@ def main(
         if apply_icemask is None:
             apply_icemask = cli.apply_icemask
     elif apply_icemask is None:
-        apply_icemask = True  
+        apply_icemask = True
 
     # --- Load raw YAML and resolve subset ------------------------------------
     with open(config_file, "r") as fh:

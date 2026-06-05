@@ -69,38 +69,29 @@ class JobConfig:
     features: FeaturesConfig
     runtime: RuntimeConfig
 
+
 # ---------------------------------------------------------------------------
-# Config loaders
+# Global pipeline config (slimmed down — no sampling, no range-mode fields)
 # ---------------------------------------------------------------------------
 
-def load_config(path: str) -> JobConfig:
-    with open(path, "r") as f:
-        raw = yaml.safe_load(f) or {}
+@dataclass(frozen=True)
+class GlobalDataConfig:
+    endpoint_url: str = "https://mghp.osn.xsede.org"
+    date_iterations: Optional[List[str]] = None
+    k_levels: Optional[List[int]] = None
 
-    def get(section, default=None):
-        return raw.get(section, default if default is not None else {})
+@dataclass(frozen=True)
+class GlobalOutputConfig:
+    s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
+    bucket: str = "dbof/"
+    folder: str = "surface_fields/"
+    dataset_name: str = "global.zarr"
 
-    cfg = JobConfig(
-        run=RunConfig(**get("run")),
-        data=DataConfig(**get("data")),
-        sampling=SamplingConfig(**get("sampling")),
-        output=OutputConfig(**get("output")),
-        features=FeaturesConfig(**get("features")),
-        runtime=RuntimeConfig(**get("runtime")),
-    )
+@dataclass(frozen=True)
+class GlobalJobConfig:
+    run: RunConfig
+    data: GlobalDataConfig
+    output: GlobalOutputConfig
+    features: FeaturesConfig
+    runtime: RuntimeConfig
 
-    if cfg.data.sampling_step <= 0:
-        raise ValueError("data.sampling_step must be > 0")
-    if cfg.sampling.sample_points_per_snapshot <= 0:
-        raise ValueError("sampling.sample_points_per_snapshot must be > 0")
-    if cfg.output.down_sample_res <= 0:
-        raise ValueError("output.down_sample_res must be > 0")
-
-    return cfg
-
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--config", required=True, help="Path to YAML config.")
-    p.add_argument("--run_id", default=None, help="Optional override for run.run_id")
-    return p.parse_args()

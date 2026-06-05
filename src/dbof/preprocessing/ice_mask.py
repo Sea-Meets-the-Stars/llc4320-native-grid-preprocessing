@@ -17,7 +17,7 @@ import logging
 
 import numpy as np
 
-from dbof.dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
+from dbof.global_dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
 
 log = logging.getLogger(__name__)
 

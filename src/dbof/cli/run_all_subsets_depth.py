@@ -146,7 +146,7 @@ def get_channels_for_subset(subset_entry: dict) -> list[str]:
     is expanded to ``{base}_{suffix}`` for every suffix.  Entries in
     ``extra_channels`` are appended unchanged.
     """
-    from dbof.utils.runtime import expand_channels_with_suffixes
+    from dbof.global_dataset_creation.runtime import expand_channels_with_suffixes
 
     model_channels = subset_entry.get("model_data_feature_channels", []) or []
     computed_channels = expand_channels_with_suffixes(
@@ -168,7 +168,7 @@ def _icearea_store_exists(
     s3_endpoint: str, bucket: str, folder: str, run_id: str, date_prefix: str,
 ) -> bool:
     """Check whether icearea.zarr exists at the expected S3 path."""
-    from dbof.dataset_creation.zarr_dataset_global import make_run_prefix
+    from dbof.global_dataset_creation.zarr_dataset_global import make_run_prefix
     from dbof.io.filesystems import create_s3_filesystems
 
     path = make_run_prefix(bucket, folder, run_id, ICE_MASK_DATASET,
@@ -234,7 +234,7 @@ def run_generate(config_path: str, subset: str, run_id: str = None,
                  "config_file=%r, subset=%r, run_id=%r)", config_path, subset, run_id)
         return
 
-    from dbof.cli.generate_global_depth import main as generate_main
+    from dbof.cli.generate_global_GEN import main as generate_main
     generate_main(config_file=str(config_path), run_id=run_id, subset=subset)
 
 
