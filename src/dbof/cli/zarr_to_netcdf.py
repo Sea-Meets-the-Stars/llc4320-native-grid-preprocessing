@@ -6,7 +6,7 @@ Two modes (selected via --mode):
   snapshots (default)
   -------------------
   Reads global LLC4320 snapshots from the S3 Zarr store written by
-  generate_global_depth.py (or generate_global.py) and writes one NetCDF
+  generate_global.py and writes one NetCDF
   file per timestep to a local directory on the HPC machine.
 
   All zarr stores are assumed to live under a date_prefix subdirectory::

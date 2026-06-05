@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# Unified data-access config for generate_global_GEN.py output
+# Unified data-access config for generate_global.py output
 #
 # This config is consumed by the assessment notebook
-# (assess_generate_global_GEN_script.ipynb) and any downstream reader
+# (assess_generate_global_script.ipynb) and any downstream reader
 # that needs to load data produced by the unified pipeline.
 #
 # Channel lists live in code (subset_definitions.py) and are imported at
@@ -21,7 +21,7 @@ pipeline: "OSN"
 
 # Depth suffixes used during generation (DEPTH pipeline only).
 # This MUST match the depth_suffixes in the generation config
-# (configs/global_unified.yaml) at the time the data was produced.
+# (configs/global/run.yaml) at the time the data was produced.
 # If omitted, the code default [sfc, z25m, mld, mld_mean] is used.
 depth_suffixes: [sfc, mld]
 
@@ -31,7 +31,7 @@ data_access:
   folder: "properties"
 
 # NOTE:
-# - run_id MUST exactly match the run_id used when generate-global-gen was run.
+# - run_id MUST exactly match the run_id used when generate-global was run.
 # - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
 #   the pipeline for the snapshot you want to read.
   run_id: "global_OSN_test00"

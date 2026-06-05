@@ -9,84 +9,45 @@ preserved — no interpolation to a regular lat/lon grid is performed.
 
 ---
 
-## Pipelines at a glance
+## Pipeline overview
 
-There are three `generate_global` pipelines, each suited to different input
-sources and depth handling:
+A single unified entry point (`generate_global.py`) dispatches on the
+`pipeline` key in the YAML config:
 
-| Pipeline                  | Depth support           | Input source                       | Prerequisite               |
-|---------------------------|-------------------------|------------------------------------|----------------------------|
-| `generate_global.py`      | Surface only            | S3 timestep stores (from MIT)      | `transfer_llc4320.py`      |
-| `generate_global_OSN.py`  | Surface only            | OSN kerchunk (direct)              | None                       |
-| `generate_global_depth.py`| Surface + depth-aware   | S3 timestep stores (from MIT)      | `transfer_llc4320.py`      |
+| Pipeline | Depth support         | Input source                  | Prerequisite          |
+|----------|-----------------------|-------------------------------|-----------------------|
+| `SURF`   | Surface only          | OSN kerchunk + S3 forcing     | `transfer_llc4320.py` |
+| `OSN`    | Surface only          | OSN kerchunk (direct)         | None                  |
+| `DEPTH`  | Surface + depth-aware | S3 timestep stores (from MIT) | `transfer_llc4320.py` |
 
-All three share the same output format: S3 Zarr stores shaped
+All variants share the same output format: S3 Zarr stores shaped
 `(T, C, 12960, 17280)` with chunk shape `(1, 1, 12960, 17280)`.
 
----
-
-## 1. `generate_global.py` — Surface-only (S3 source)
-
-Surface-only global maps. Reads raw LLC4320 fields from the OSN kerchunk
-endpoint for core variables (`Theta`, `Salt`, `Eta`, `U`, `V`, `W`) and from
-S3 timestep stores for additional variables not available via kerchunk
-(e.g. `oceTAUX`, `SIarea`).
-
-**The desired timestep must first be transferred from MIT using
-`transfer_llc4320.py`** (see below) before any S3-sourced variables can be
-read.
-
-Config: `configs/global.yaml`. Console command: `generate-global`.
+Config: `configs/global/run.yaml`. Console command: `generate-global`.
 
 ```bash
-generate-global \
-    --config configs/global.yaml \
-    --subset kinematic \
-    --run_id kinematic_$(date +%Y%m%d_%H%M%S)
+generate-global --config configs/global/run.yaml
+generate-global --config configs/global/run.yaml --subset kinematic
+generate-global --config configs/global/run.yaml --pipeline OSN
 ```
 
-Flags: `--subset`, `--run_id`, `--no-icemask` (ice mask off by default).
+Flags: `--subset`, `--pipeline`, `--run_id`, `--no-icemask`.
 
----
+### Pipeline variants
 
-## 2. `generate_global_OSN.py` — Surface-only (OSN direct)
+**SURF** — Surface-only global maps. Reads core variables (`Theta`, `Salt`,
+`Eta`, `U`, `V`, `W`) from OSN kerchunk and forcing variables (`oceTAUX`,
+`oceTAUY`, `SIarea`) from S3 timestep stores written by
+`transfer_llc4320.py`.
 
-Surface-only global maps using inputs directly from the OSN S3 store via
-kerchunk. Uses two OSN endpoints: the standard one for core variables and a
-second (`llc_wind`) for wind stress and sea-ice variables (`KPPhbl`,
-`PhiBot`, `oceTAUX`, `oceTAUY`, `SIarea`).
+**OSN** — Surface-only global maps from OSN kerchunk endpoints (no S3
+timestep stores needed). Uses two OSN endpoints: the standard one for core
+variables and `llc_wind` for wind stress and sea-ice variables.
 
-**No transfer step is required** — all data is read directly from OSN.
-However, the wind/sea-ice endpoint has a limited date range, so not all
-timesteps are available for all variables.
-
-Config: `configs/global_OSN.yaml`. Console command: `generate-global-osn`.
-
-Key differences from `generate_global.py`:
-
-- Uses OSN-native iteration offsets (`osn_date_to_iteration`).
-- Ice mask is on by default (`--no-icemask` to disable).
-- No S3 timestep store fallback — all data comes from OSN.
-
----
-
-## 3. `generate_global_depth.py` — Depth-aware pipeline
-
-Fully-lazy Dask pipeline for depth-resolved diagnostics. Reads full 3D
-(depth-resolved) data from S3 timestep stores, computes derived fields using
-xgcm on dask arrays, reduces each field to a 2D surface using one or more
-depth strategies, stitches the 13 LLC faces, and writes to S3 Zarr.
-
-**Requires data transferred from the MIT Zarr store using
-`transfer_llc4320.py`.**
-
-Config: `configs/global_depth.yaml`. Console command: `generate-global-depth`.
-
-```bash
-generate-global-depth \
-    --config configs/global_depth.yaml \
-    --subset stratification
-```
+**DEPTH** — Fully-lazy Dask pipeline for depth-resolved diagnostics. Reads
+full 3D data from S3 timestep stores, computes derived fields using xgcm,
+reduces to 2D via depth strategies, stitches the 13 LLC faces, and writes to
+S3 Zarr. **Requires data transferred from MIT using `transfer_llc4320.py`.**
 
 ### Depth strategies (suffixes)
 
@@ -133,7 +94,7 @@ config YAML.
 Subsets exist because the full set of derived fields is large — grouping
 related fields together lets you generate and export only what you need.
 
-### Surface pipeline subsets (`generate_global.py` / `generate_global_OSN.py`)
+### Surface pipeline subsets (SURF / OSN)
 
 | Subset              | Fields                                                                                      |
 |---------------------|---------------------------------------------------------------------------------------------|
@@ -142,7 +103,7 @@ related fields together lets you generate and export only what you need.
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` |
 | `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              |
 
-### Depth pipeline subsets (`generate_global_depth.py`)
+### Depth pipeline subsets (DEPTH)
 
 | Subset              | Base fields                                        | Depth suffixes              | Extra channels                          |
 |---------------------|----------------------------------------------------|-----------------------------|-----------------------------------------|
@@ -166,7 +127,7 @@ related fields together lets you generate and export only what you need.
 The batch driver (`dbof.cli.run_all_subsets`) automates the two-phase
 workflow across all subsets and configs:
 
-1. **Phase 1 — Generate:** calls `generate_global_depth.main()` for each
+1. **Phase 1 — Generate:** calls `generate_global.main()` for each
    subset, producing Zarr stores on S3.
 2. **Phase 2 — Export:** calls `zarr_to_netcdf.main()` once per channel,
    writing individual NetCDF files.
@@ -189,26 +150,26 @@ Example:
 
 ```bash
 # Generate + export all subsets:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml
 
 # Only specific subsets:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml \
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml \
     --subsets stratification native_fields
 
 # Export only (assumes Zarr stores already exist):
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --export-only
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --export-only
 
 # Generate only (skip NetCDF export):
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --generate-only
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --generate-only
 
 # Override run_id:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --run-id my_run_01
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --run-id my_run_01
 
 # Dry run:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --dry-run
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --dry-run
 
 # With ice masking:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --ice-mask
+python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --ice-mask
 ```
 
 ### Ice masking
@@ -230,9 +191,9 @@ skipped in `--export-only` mode (a warning is logged instead).
 
 ## Preprocessing: `transfer_llc4320.py`
 
-Both `generate_global.py` and `generate_global_depth.py` read from S3
-timestep stores. These stores must be created by transferring data from the
-MIT Zarr store using `transfer_llc4320.py`.
+The SURF and DEPTH pipelines read from S3 timestep stores. These stores must
+be created by transferring data from the MIT Zarr store using
+`transfer_llc4320.py`.
 
 **`transfer_llc4320.py` must be run on the MIT machines**, since it reads
 from a local Zarr store that is only accessible there. Each date you want
@@ -241,7 +202,7 @@ pipelines — there is currently no pre-flight check that the timestep store
 exists in S3, so a missing transfer will surface as an S3 read error at
 runtime.
 
-Console command: `transfer-timestep`. Config: `configs/transfer.yaml`.
+Console command: `transfer-timestep`. Config: `configs/transfer/run.yaml`.
 
 The transfer writes two stores per timestep:
 
@@ -249,8 +210,8 @@ The transfer writes two stores per timestep:
 - **Timestep data:** `s3://{bucket}/{folder}/{YYYYMMDDTHH}.zarr` (per date,
   includes full-depth 3D fields).
 
-Only `generate_global_OSN.py` does not require this step — it reads directly
-from OSN kerchunk endpoints.
+Only the OSN pipeline does not require this step — it reads directly from
+OSN kerchunk endpoints.
 
 ---
 

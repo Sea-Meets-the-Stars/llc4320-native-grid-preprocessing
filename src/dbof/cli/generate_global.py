@@ -1,10 +1,9 @@
 """
 Unified global LLC4320 dataset generation pipeline.
 
-Replaces the three separate scripts (generate_global.py for SURF,
-generate_global_OSN.py for OSN, generate_global_depth.py for DEPTH)
-with a single entry point that dispatches on the ``pipeline`` key in the
-YAML config.
+Single entry point that dispatches on the ``pipeline`` key in the YAML
+config.  Replaces the three former separate scripts (generate_global.py,
+generate_global_OSN.py, generate_global_depth.py).
 
 Pipeline variants
 -----------------
@@ -37,9 +36,9 @@ opening the zarr store with native ``face=1`` chunks.
 
 CLI usage
 ---------
-    generate-global-gen --config configs/global_unified.yaml
-    generate-global-gen --config configs/global_unified.yaml --subset kinematic
-    generate-global-gen --config configs/global_unified.yaml --pipeline OSN
+    generate-global --config configs/global/run.yaml
+    generate-global --config configs/global/run.yaml --subset kinematic
+    generate-global --config configs/global/run.yaml --pipeline OSN
 
 Output layout
 -------------
@@ -376,7 +375,7 @@ def main(
     )
 
     generate_logging(base_cfg, config_dir=config_dir,
-                     log_filename="generate_global_GEN.log")
+                     log_filename="generate_global.log")
     logging.info("Unified global pipeline starting.")
     logging.info(f"Pipeline: {pipeline}")
     logging.info(f"Active subsets: {active_subsets}")

@@ -1,13 +1,13 @@
 # ---------------------------------------------------------------------------
-# Unified config for generate_global_GEN.py
+# Unified config for generate_global.py
 #
 # This config works with all three pipeline variants: SURF, OSN, DEPTH.
 # Data sources and subset variable lists are defined in code (not here).
 #
 # Usage:
-#   generate-global-gen --config configs/global_unified.yaml
-#   generate-global-gen --config configs/global_unified.yaml --subset kinematic
-#   generate-global-gen --config configs/global_unified.yaml --pipeline OSN
+#   generate-global --config configs/global/run.yaml
+#   generate-global --config configs/global/run.yaml --subset kinematic
+#   generate-global --config configs/global/run.yaml --pipeline OSN
 # ---------------------------------------------------------------------------
 
 # Pipeline: SURF | OSN | DEPTH

@@ -14,12 +14,12 @@ Two categories of variables are transferred to separate stores:
 
 CLI usage
 ---------
-    transfer-timestep --config configs/transfer.yaml --init-store
-    transfer-timestep --config configs/transfer.yaml --subset static --init-store
-    transfer-timestep --config configs/transfer.yaml --subset time --variable Theta
+    transfer-timestep --config configs/transfer/run.yaml --init-store
+    transfer-timestep --config configs/transfer/run.yaml --subset static --init-store
+    transfer-timestep --config configs/transfer/run.yaml --subset time --variable Theta
 
     # Override date from CLI:
-    transfer-timestep --config configs/transfer.yaml \\
+    transfer-timestep --config configs/transfer/run.yaml \\
         --date "2012-11-09 12:00:00" --init-store
 
 Config design
@@ -511,7 +511,7 @@ def _parse_args():
     parser.add_argument(
         "--config",
         required=True,
-        help="Path to the YAML config file (e.g. configs/transfer.yaml).",
+        help="Path to the YAML config file (e.g. configs/transfer/run.yaml).",
     )
     parser.add_argument(
         "--date",
