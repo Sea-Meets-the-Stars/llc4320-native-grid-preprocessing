@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# Unified data-access config for generate_global_GEN.py output
+#
+# This config is consumed by the assessment notebook
+# (assess_generate_global_GEN_script.ipynb) and any downstream reader
+# that needs to load data produced by the unified pipeline.
+#
+# Channel lists and depth suffixes are NOT duplicated here — they live in
+# code (subset_definitions.py) and are imported at read time.  This config
+# only stores the S3 coordinates needed to locate the data.
+#
+# Full S3 path to each subset:
+#   s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
+# ---------------------------------------------------------------------------
+
+# Pipeline that produced the data: SURF | OSN | DEPTH
+# This selects which subset definitions and channel-expansion logic to use
+# when interpreting the data.
+pipeline: "DEPTH"
+
+data_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "properties"
+
+# NOTE:
+# - run_id MUST exactly match the run_id used when generate-global-gen was run.
+# - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
+#   the pipeline for the snapshot you want to read.
+  run_id: "global_test00"
+  date_prefix: "20121109_120000"
+
+# Grid Zarr store written by generate_grid_global.py.
+# NOTE: The grid is stored WITHOUT a run_id prefix (shared across all runs):
+#   s3://{bucket}/{folder}/{dataset_name}
+grid_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "native_grid_dbof_training_data"
+  dataset_name: "llc4320_grid.zarr"

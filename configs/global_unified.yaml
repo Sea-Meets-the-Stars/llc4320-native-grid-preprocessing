@@ -63,4 +63,4 @@ active_subsets:
 # Override the default depth suffixes for depth subsets.
 # Default: [sfc, z25m, mld, mld_mean]
 # Uncomment to customise:
-# depth_suffixes: [sfc, z25m, mld, mld_mean]
+depth_suffixes: [sfc, mld]
