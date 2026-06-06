@@ -36,17 +36,17 @@ OSN_SURFACE_VARS = {"Theta", "Salt", "Eta", "U", "V", "W"}
 OSN_WIND_VARS = {"KPPhbl", "PhiBot", "oceTAUX", "oceTAUY", "SIarea"}
 
 # ---------------------------------------------------------------------------
-# S3 timestep stores
+# LLC timestep stores (on S3)
 # ---------------------------------------------------------------------------
 
-#: S3 source for the SURF pipeline (surface-only timestep stores).
+#: LLC_SURF source for the surface-only pipeline (timestep stores).
 LLC_SURF_SOURCE = {
     "s3_endpoint": "https://s3-west.nrp-nautilus.io",
     "bucket":      "dbof/",
     "folder":      "LLC4320",
 }
 
-#: S3 source for the DEPTH pipeline (full-depth timestep stores).
+#: LLC_DEPTH source for the depth-resolved pipeline (full-depth timestep stores).
 #: ``grid_folder`` points to the original transfer location where
 #: ``grid.zarr`` lives (the non-corrupt copy).
 LLC_DEPTH_SOURCE = {

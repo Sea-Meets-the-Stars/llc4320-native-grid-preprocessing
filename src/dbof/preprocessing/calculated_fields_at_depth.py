@@ -65,16 +65,17 @@ from dbof.preprocessing.vertical_helpers import (
     _masked_ml_mean,
 )
 
-
-# ---------------------------------------------------------------------------
-# Physical constants
-# ---------------------------------------------------------------------------
-RHO0 = 1000.0   # kg m⁻³  reference density
-G    = 9.81      # m s⁻²  gravitational acceleration
-CP   = 3994.0    # J kg⁻¹ K⁻¹  seawater specific heat capacity
-OMEGA_EARTH = 7.292115e-5  # rad s⁻¹
-
-MLD_REFERENCE_DEPTH_M = 10.0  # metres — Bodner et al. reference depth (≈ 9.66 m)
+from dbof.preprocessing.physical_constants import (
+    RHO0_BOUSSINESQ,
+    G,
+    G_KM,
+    CP,
+    OMEGA_EARTH,
+    ALPHA,
+    BETA,
+    RHO0_SEAWATER,
+    MLD_REFERENCE_DEPTH_M,
+)
 
 
 # ===========================================================================
@@ -162,7 +163,7 @@ def buoyancy_frequency_squared_3d(ds_merge):
     rho = _density_lazy(ds_merge)
     drho_dz = _vertical_derivative(rho, ds_merge)
 
-    n2 = (G / RHO0) * drho_dz
+    n2 = (G / RHO0_BOUSSINESQ) * drho_dz
     n2.name = "N2"
     n2.attrs["long_name"] = "Buoyancy frequency squared"
     n2.attrs["units"] = "s^-2"
@@ -181,7 +182,7 @@ def mixed_layer_heat_content(ds_merge, mld=None):
         mld = mixed_layer_depth(ds_merge)
 
     theta = ds_merge.Theta
-    integrand = CP * RHO0 * theta
+    integrand = CP * RHO0_BOUSSINESQ * theta
 
     zdim = _get_vertical_dim(integrand)
     z = _get_depth_coord(ds_merge, zdim=zdim)
@@ -203,9 +204,6 @@ def buoyancy_field_3d(ds_merge):
     """
     import dbof.utils.jmd95_xgcm_implementation as jmd95
 
-    g = 0.0098     # km/s^2  (same constant as physical_calculations)
-    ref_rho = 1025.0
-
     p = xr.zeros_like(ds_merge.Theta)
 
     rho = xr.apply_ufunc(
@@ -217,7 +215,7 @@ def buoyancy_field_3d(ds_merge):
         output_dtypes=[float],
     )
 
-    b = (g * rho / ref_rho) * 1e3
+    b = (G_KM * rho / RHO0_SEAWATER) * 1e3
     b.name = "buoyancy"
     b.attrs["units"] = "m^2 s^-2"
     return b
@@ -306,7 +304,7 @@ def wind_stress_curl(ds_merge, grid):
     return curl_tau
 
 
-def ekman_pumping(ds_merge, grid, rho0=RHO0):
+def ekman_pumping(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
     """Lazy Ekman pumping w_E = curl(τ) / (ρ₀ f)."""
     curl_tau = wind_stress_curl(ds_merge, grid)
     f = coriolis_parameter(ds_merge, grid)
@@ -323,7 +321,7 @@ def _wind_stress_geographic(ds_merge, grid):
     return tau_lambda, tau_phi
 
 
-def ekman_transport_velocity(ds_merge, grid, rho0=RHO0):
+def ekman_transport_velocity(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
     """Lazy Ekman transport (u_E, v_E)."""
     f = coriolis_parameter(ds_merge, grid)
     denom = rho0 * f
@@ -444,10 +442,6 @@ def turner_angle_3d(ds_merge, grid, *, gradtheta2=None, gradsalt2=None,
     recomputation when the caller already has them (e.g. Turner angle
     shares gradtheta2/gradsalt2/gradrho2 with the frontal_structure subset).
     """
-    ALPHA = 2.0e-4    # thermal expansion coefficient (°C⁻¹)
-    BETA  = 7.4e-4    # haline contraction coefficient (PSU⁻¹)
-    RHO0_TU = 1025.0  # reference density (kg m⁻³)
-
     if gradtheta2 is None:
         gradtheta2 = grad_theta2_3d(ds_merge, grid)
     if gradsalt2 is None:
@@ -455,8 +449,8 @@ def turner_angle_3d(ds_merge, grid, *, gradtheta2=None, gradsalt2=None,
     if gradrho2 is None:
         gradrho2 = grad_rho2_3d(ds_merge, grid)
 
-    numer = RHO0_TU * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
-    denom = xr.where(gradrho2 > 0, -gradrho2 / RHO0_TU, np.nan)
+    numer = RHO0_SEAWATER * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
+    denom = xr.where(gradrho2 > 0, -gradrho2 / RHO0_SEAWATER, np.nan)
     return np.degrees(np.arctan(numer / denom))
 
 
@@ -554,13 +548,12 @@ def geostrophic_velocity_3d(ds_merge, grid):
     Eta is inherently 2D so ug/vg are surface-only; named ``_3d`` for
     module consistency (they broadcast against 3D buoyancy gradients).
     """
-    g_accel = 9.81
     f = coriolis_parameter(ds_merge, grid)
     eta_grad_x, eta_grad_y = ng.calculate_native_gradient_tracer(
         ds_merge['Eta'], ds_merge, grid=grid,
     )
-    ug = -(g_accel / f) * eta_grad_y
-    vg =  (g_accel / f) * eta_grad_x
+    ug = -(G / f) * eta_grad_y
+    vg =  (G / f) * eta_grad_x
     return ug, vg
 
 

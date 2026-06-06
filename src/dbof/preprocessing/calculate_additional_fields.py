@@ -1,9 +1,17 @@
 from collections import namedtuple
 
 import numpy as np
+import dask.array as da
+
 import dbof.utils.physical_calculations as physical_calculations
 import dbof.utils.native_gradient as ng
-import dask.array as da
+from dbof.preprocessing.physical_constants import (
+    G,
+    OMEGA_EARTH,
+    ALPHA,
+    BETA,
+    RHO0_SEAWATER,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -286,10 +294,6 @@ def turner_angle(ds_merge, grid, *, gradtheta2=None, gradsalt2=None, gradrho2=No
         Units are degrees.
     """
 
-    ALPHA = 2.0e-4   # thermal expansion coefficient  (°C⁻¹)
-    BETA  = 7.4e-4   # haline contraction coefficient (PSU⁻¹)
-    RHO0  = 1025.0   # reference density (kg m⁻³)
-
     if gradtheta2 is None:
         gradtheta2 = grad_theta2(ds_merge, grid)
     if gradsalt2 is None:
@@ -297,8 +301,8 @@ def turner_angle(ds_merge, grid, *, gradtheta2=None, gradsalt2=None, gradrho2=No
     if gradrho2 is None:
         gradrho2 = grad_rho2(ds_merge, grid)
 
-    numer      = RHO0 * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
-    denom      = np.where(gradrho2 > 0, -gradrho2 / RHO0, np.nan) # Mask pixels where |∇ρ| = 0 to avoid divide-by-zero
+    numer      = RHO0_SEAWATER * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
+    denom      = np.where(gradrho2 > 0, -gradrho2 / RHO0_SEAWATER, np.nan) # Mask pixels where |∇ρ| = 0 to avoid divide-by-zero
 
     tu_rad = np.arctan(numer / denom)
     tu_h   = np.degrees(tu_rad)
@@ -353,8 +357,7 @@ def coriolis_parameter(ds_merge, grid):
         Coriolis parameter field.
     """
 
-    omega = 7.292115e-5  # rad/s ; Earth's rotation rate
-    coriolis_f = 2.0 * omega * np.sin(np.deg2rad(ds_merge['YC']))
+    coriolis_f = 2.0 * OMEGA_EARTH * np.sin(np.deg2rad(ds_merge['YC']))
 
     return coriolis_f
 
@@ -557,14 +560,13 @@ def geostrophic_velocity(ds_merge, grid):
     ug, vg : xarray.DataArray
         Zonal and meridional geostrophic velocity (dask-backed, lazy).
     """
-    g = 9.81  # m/s²
     f = coriolis_parameter(ds_merge, grid)
 
     zonal_grad_eta, merid_grad_eta = ng.calculate_native_gradient_tracer(
         ds_merge['Eta'], ds_merge, grid=grid,
     )
-    ug = -(g / f) * merid_grad_eta
-    vg =  (g / f) * zonal_grad_eta
+    ug = -(G / f) * merid_grad_eta
+    vg =  (G / f) * zonal_grad_eta
     return ug, vg
 
 

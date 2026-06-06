@@ -39,6 +39,9 @@ CLI usage
     generate-global --config configs/global/run.yaml --subset kinematic
     generate-global --config configs/global/run.yaml --pipeline OSN
 
+Each pipeline supports a specific set of subsets.  See the valid
+pipeline × subset combinations in ``configs/global/run.yaml``.
+
 Output layout
 -------------
     s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
@@ -141,15 +144,15 @@ def load_snapshot(
 
     if pipeline == "DEPTH":
         it = mit_date_to_iteration(date_str)
-        logging.info(f"Loading S3 timestep data for {date_str} (MIT iteration {it})")
-        ds = get_raw_data.get_s3_timestep_data(
+        logging.info(f"Loading LLC_DEPTH timestep data for {date_str} (MIT iteration {it})")
+        ds = get_raw_data.get_llc_timestep_data(
             data_source["s3_endpoint"],
             data_source["bucket"],
             data_source["folder"],
             date_str,
             vars_requested=vars_needed or None,
-            chunks=get_raw_data.s3_timestep_3D_chunks,
-            storage_options=get_raw_data._s3_storage_options_3D(
+            chunks=get_raw_data.llc_depth_timestep_chunks,
+            storage_options=get_raw_data._llc_depth_storage_options(
                 data_source["s3_endpoint"]
             ),
         )
@@ -186,36 +189,36 @@ def load_snapshot(
         ds = get_raw_data.get_remote_llc_data(OSN_ENDPOINT, it, LLC_FACES)
         ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
 
-        # Supplement with S3 forcing variables not in kerchunk.
-        s3_vars = [v for v in vars_needed if v not in OSN_SURFACE_VARS]
-        if s3_vars and data_source:
-            logging.info(f"Loading S3 forcing variables: {s3_vars}")
-            ds_s3 = get_raw_data.get_s3_timestep_data(
+        # Supplement with LLC_SURF forcing variables not in kerchunk.
+        llc_surf_vars = [v for v in vars_needed if v not in OSN_SURFACE_VARS]
+        if llc_surf_vars and data_source:
+            logging.info(f"Loading LLC_SURF forcing variables: {llc_surf_vars}")
+            ds_llc = get_raw_data.get_llc_timestep_data(
                 data_source["s3_endpoint"],
                 data_source["bucket"],
                 data_source["folder"],
                 date_str,
                 face_range=LLC_FACES,
-                vars_requested=s3_vars,
+                vars_requested=llc_surf_vars,
             )
-            # S3 stores carry full depth; select surface before merging.
+            # LLC_SURF stores carry full depth; select surface before merging.
             for dim_name in ("k", "k_l"):
-                if dim_name in ds_s3.dims:
-                    ds_s3 = ds_s3.isel({dim_name: 0})
-            for v in s3_vars:
-                if v in ds_s3:
-                    ds_merge[v] = ds_s3[v]
+                if dim_name in ds_llc.dims:
+                    ds_llc = ds_llc.isel({dim_name: 0})
+            for v in llc_surf_vars:
+                if v in ds_llc:
+                    ds_merge[v] = ds_llc[v]
             logging.info(
-                f"S3 variables merged: {[v for v in s3_vars if v in ds_s3]}"
+                f"LLC_SURF variables merged: {[v for v in llc_surf_vars if v in ds_llc]}"
             )
-            # Cross-check OSN vs. S3 timestamps for data integrity.
-            get_raw_data.verify_osn_s3_timestamp(
+            # Cross-check OSN vs. LLC_SURF timestamps for data integrity.
+            get_raw_data.verify_osn_llc_surf_timestamp(
                 ds, data_source, date_str, LLC_FACES
             )
-        elif s3_vars:
+        elif llc_surf_vars:
             logging.warning(
-                f"S3-only variables {s3_vars} requested but no data_source "
-                "configured; these will be missing from the output."
+                f"LLC_SURF-only variables {llc_surf_vars} requested but no "
+                "data_source configured; these will be missing from the output."
             )
 
     else:
@@ -365,7 +368,7 @@ def main(
     # ------------------------------------------------------------------
     # 5. Logging and run metadata
     # ------------------------------------------------------------------
-    log_file = setup_logging(cfg)
+    log_file = setup_logging(cfg)  # raises FileExistsError if log already exists
     logging.info("Unified global pipeline starting.")
     logging.info(f"Pipeline: {cfg.pipeline}")
     logging.info(f"Active subsets: {cfg.active_subsets}")

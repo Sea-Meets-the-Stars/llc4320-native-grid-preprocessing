@@ -31,26 +31,43 @@ def _find_repo_root() -> Path:
         return Path.cwd()
 
 
-def setup_logging(cfg, log_filename: str = "generate_global.log") -> Path:
+def setup_logging(cfg) -> Path:
     """
     Configure file + stdout logging for a global pipeline run.
+
+    Log directory layout::
+
+        {log_dir}/{run_id}/
+            native_fields.log        ← one log per subset invocation
+            kinematic.log
+            run_meta.yaml
 
     If ``cfg.run.log_dir`` is relative it is resolved against the
     **repository root** (detected via ``git rev-parse``).  This keeps log
     output in a predictable location regardless of which directory the
     pipeline is launched from (CLI at the repo root, Jupyter notebook, etc.).
 
+    The run directory (``{log_dir}/{run_id}/``) may already exist — multiple
+    subset runs share the same ``run_id`` directory.  However, if the
+    specific log file for this invocation already exists, a ``FileExistsError``
+    is raised to prevent silently overwriting previous logs.  Delete the
+    log file manually if you want to re-run.
+
     Parameters
     ----------
     cfg : GlobalJobConfig
-        Full pipeline configuration.
-    log_filename : str
-        Name of the log file inside the run directory.
+        Full pipeline configuration.  ``cfg.active_subsets`` determines the
+        log filename.
 
     Returns
     -------
     log_file : Path
         Absolute path to the log file that was created.
+
+    Raises
+    ------
+    FileExistsError
+        If the log file for this subset invocation already exists.
     """
     log_path = Path(cfg.run.log_dir).expanduser()
 
@@ -61,7 +78,22 @@ def setup_logging(cfg, log_filename: str = "generate_global.log") -> Path:
 
     run_dir = log_path / cfg.run.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build log filename from subset(s).
+    if len(cfg.active_subsets) == 1:
+        log_filename = f"{cfg.active_subsets[0]}.log"
+    else:
+        log_filename = "_".join(cfg.active_subsets) + ".log"
+
     log_file = run_dir / log_filename
+
+    if log_file.exists():
+        raise FileExistsError(
+            f"Log file already exists: {log_file}\n"
+            f"This run_id ('{cfg.run.run_id}') has already been used for "
+            f"subset(s) {cfg.active_subsets}.  To re-run, delete the log "
+            f"file first, or use a new run_id."
+        )
 
     logging.basicConfig(
         level=logging.INFO,

@@ -57,8 +57,6 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     frontogenesis_tendency_3d,
     geostrophic_velocity_3d,
     frontogenesis_geo_3d,
-    # -- constants --
-    RHO0,
 )
 from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
 

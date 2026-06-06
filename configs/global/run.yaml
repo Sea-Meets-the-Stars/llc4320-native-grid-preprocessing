@@ -45,15 +45,18 @@ runtime:
 # ---------------------------------------------------------------------------
 # Subset selection
 # ---------------------------------------------------------------------------
-# List one or more subsets to run.  The pipeline processes each in turn.
+# IMPORTANT: each pipeline supports a specific set of subsets.  Running a
+# subset that does not belong to the chosen pipeline will raise a ValueError.
 #
-# Surface subsets (SURF / OSN):
-#   native_fields, frontal_structure, kinematic, frontogenesis
+# ┌─────────┬────────────────────────────────────────────────────────────────┐
+# │ SURF    │ native_fields, frontal_structure, kinematic, frontogenesis    │
+# │ OSN     │ native_fields, frontal_structure, kinematic, frontogenesis    │
+# │ DEPTH   │ stratification, vertical_shear, mixing_parameters, ertel_pv, │
+# │         │ buoyancy_fluxes, surface_wind, energetics, frontal_structure, │
+# │         │ kinematic, frontogenesis, native_fields, icearea              │
+# └─────────┴────────────────────────────────────────────────────────────────┘
 #
-# Depth subsets (DEPTH):
-#   stratification, vertical_shear, mixing_parameters, ertel_pv,
-#   buoyancy_fluxes, surface_wind, energetics, frontal_structure,
-#   kinematic, frontogenesis, native_fields, icearea
+# Only list subsets valid for the pipeline set above.
 active_subsets:
   - stratification
 

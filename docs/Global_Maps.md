@@ -86,6 +86,11 @@ not its 3D computation machinery.
 
 ## Subsets
 
+Each pipeline supports a specific set of subsets.  Running a subset that
+does not belong to the chosen pipeline will raise a `ValueError`.  The
+canonical reference for valid pipeline × subset combinations is in
+`configs/global/run.yaml`.
+
 A **subset** is a named group of related calculated fields/properties that are
 computed and written together as a single Zarr store. Each subset has its own
 `dataset_name` (e.g. `stratification.zarr`) and channel list defined in the

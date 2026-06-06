@@ -8,10 +8,10 @@ OSN / SURF
     ``get_remote_gridfile`` and processed with the 2D grid function.
 
 DEPTH
-    Grid is fetched from an S3 grid store using ``get_s3_gridfile``
-    and processed with the 3D grid function.  The grid is eagerly
-    computed into memory (~1.5 GB) and vertical coordinates are
-    dropped (xgcm only needs the horizontal grid).
+    Grid is fetched from the LLC_DEPTH grid store using
+    ``get_llc_depth_gridfile`` and processed with the 3D grid function.
+    The grid is eagerly computed into memory (~1.5 GB) and vertical
+    coordinates are dropped (xgcm only needs the horizontal grid).
 
 Both paths return the same triple ``(ds_grid, land_mask, grid)``
 so the caller can treat them interchangeably.
@@ -62,19 +62,19 @@ def set_up_grid_osn(endpoint_url: str):
 
 
 # ---------------------------------------------------------------------------
-# DEPTH (S3) grid loading
+# LLC_DEPTH grid loading
 # ---------------------------------------------------------------------------
 
-def set_up_grid_s3(s3_source: dict):
+def set_up_grid_depth(llc_depth_source: dict):
     """
-    Load the LLC4320 3D grid and land mask from an S3 grid store.
+    Load the LLC4320 3D grid and land mask from the LLC_DEPTH grid store.
 
     The grid is eagerly computed into memory and vertical coordinates
     are dropped so xgcm only operates on the horizontal stencil.
 
     Parameters
     ----------
-    s3_source : dict
+    llc_depth_source : dict
         Must contain ``s3_endpoint``, ``bucket``, ``folder``.
         Optionally ``grid_folder`` (defaults to ``folder``).
 
@@ -87,11 +87,11 @@ def set_up_grid_s3(s3_source: dict):
     grid : xgcm.Grid
         xgcm Grid with LLC face connections.
     """
-    grid_folder = s3_source.get("grid_folder", s3_source["folder"])
-    logging.info(f"Fetching grid file from S3 grid store (folder={grid_folder})")
-    co = get_raw_data.get_s3_gridfile(
-        s3_source["s3_endpoint"],
-        s3_source["bucket"],
+    grid_folder = llc_depth_source.get("grid_folder", llc_depth_source["folder"])
+    logging.info(f"Fetching grid from LLC_DEPTH store (folder={grid_folder})")
+    co = get_raw_data.get_llc_depth_gridfile(
+        llc_depth_source["s3_endpoint"],
+        llc_depth_source["bucket"],
         grid_folder,
     )
     ds_grid = preproc_llc_core_data.process_llc4320_3d_grid(co)
@@ -108,7 +108,7 @@ def set_up_grid_s3(s3_source: dict):
     grid_for_xgcm = ds_grid.drop_vars(drop) if drop else ds_grid
     grid = set_xgcm_grid(grid_for_xgcm, use_connections=True)
 
-    logging.info("Grid and land mask loaded (S3)")
+    logging.info("Grid and land mask loaded (LLC_DEPTH)")
     return ds_grid, land_mask, grid
 
 
@@ -142,7 +142,7 @@ def set_up_grid(pipeline: str, data_source: dict | None, endpoint_url: str | Non
     elif pipeline == "DEPTH":
         if data_source is None:
             raise ValueError("DEPTH pipeline requires a data_source dict.")
-        return set_up_grid_s3(data_source)
+        return set_up_grid_depth(data_source)
     else:
         raise ValueError(
             f"Unknown pipeline '{pipeline}'.  Expected SURF, OSN, or DEPTH."

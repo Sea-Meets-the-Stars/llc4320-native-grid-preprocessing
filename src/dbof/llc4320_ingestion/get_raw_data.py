@@ -309,7 +309,7 @@ def get_remote_gridfile(endpoint_url):
 
 
 # ---------------------------------------------------------------------------
-# S3 shared helpers
+# LLC_DEPTH and LLC_SURF shared helpers (S3 infrastructure)
 # ---------------------------------------------------------------------------
 
 def _build_s3_store_url(bucket: str, folder: str, dataset_name: str) -> str:
@@ -320,15 +320,15 @@ def _build_s3_store_url(bucket: str, folder: str, dataset_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# S3 timestep store access - SURFACE ONLY
+# LLC_SURF timestep store access
 # ---------------------------------------------------------------------------
 
 # Chunks matching the on-disk layout of stores written by transfer_llc4320.py
-s3_timestep_sfc_chunks = {"face": 1, "k": 51, "j": 720, "i": 720}
+llc_surf_timestep_chunks = {"face": 1, "k": 51, "j": 720, "i": 720}
 
 
-def _s3_storage_options(s3_endpoint, anon=None):
-    """S3 storage options with automatic credential detection.
+def _llc_surf_storage_options(s3_endpoint, anon=None):
+    """Storage options for LLC_SURF timestep stores.
 
     Parameters
     ----------
@@ -347,7 +347,7 @@ def _s3_storage_options(s3_endpoint, anon=None):
     }
 
 
-def get_s3_timestep_data(
+def get_llc_timestep_data(
     s3_endpoint,
     bucket,
     folder,
@@ -358,9 +358,9 @@ def get_s3_timestep_data(
     storage_options=None,
 ):
     """
-    Load a single-timestep snapshot from an S3 timestep store.
+    Load a single-timestep snapshot from an LLC timestep store on S3.
 
-    Works for both surface-only and full-depth reads — pass the
+    Works for both LLC_SURF and LLC_DEPTH reads — pass the
     appropriate ``chunks`` and ``storage_options`` for your pipeline.
 
     Parameters
@@ -378,12 +378,12 @@ def get_s3_timestep_data(
     vars_requested : list[str] or None
         Variables to extract.  ``None`` returns all.
     chunks : dict or None
-        Dask chunk specification.  Defaults to ``s3_timestep_sfc_chunks``.
-        Pass ``s3_timestep_3D_chunks`` for the depth pipeline.
+        Dask chunk specification.  Defaults to ``llc_surf_timestep_chunks``.
+        Pass ``llc_depth_timestep_chunks`` for the depth pipeline.
     storage_options : dict or None
         S3 storage options for ``xr.open_zarr``.  Defaults to
-        ``_s3_storage_options(s3_endpoint)``.  Pass
-        ``_s3_storage_options_3D(s3_endpoint)`` for the depth pipeline.
+        ``_llc_surf_storage_options(s3_endpoint)``.  Pass
+        ``_llc_depth_storage_options(s3_endpoint)`` for the depth pipeline.
 
     Returns
     -------
@@ -392,9 +392,9 @@ def get_s3_timestep_data(
     from datetime import datetime as _dt
 
     if chunks is None:
-        chunks = s3_timestep_sfc_chunks
+        chunks = llc_surf_timestep_chunks
     if storage_options is None:
-        storage_options = _s3_storage_options(s3_endpoint)
+        storage_options = _llc_surf_storage_options(s3_endpoint)
 
     date_tag = _dt.strptime(date_str, '%Y-%m-%d %H:%M:%S').strftime("%Y%m%dT%H")
     store_name = f"{date_tag}.zarr"
@@ -417,27 +417,28 @@ def get_s3_timestep_data(
             ds = ds.isel(face=face_list)
             ds = ds.chunk({"face": ds.sizes["face"]})
 
-    print(f"S3 timestep data loaded: {store_name}, vars={list(ds.data_vars)}")
+    print(f"LLC timestep data loaded: {store_name}, vars={list(ds.data_vars)}")
     return ds
 
 
 # ---------------------------------------------------------------------------
-# Timestamp cross-check: OSN vs. S3
+# Timestamp cross-check: OSN vs. LLC_SURF
 # ---------------------------------------------------------------------------
 
-def verify_osn_s3_timestamp(ds_osn, s3_source, date_str, face_range):
+def verify_osn_llc_surf_timestamp(ds_osn, llc_surf_source, date_str, face_range):
     """
-    Verify that the OSN and S3 datasets refer to the same physical time.
+    Verify that the OSN and LLC_SURF datasets refer to the same physical time.
 
     OSN time is CF-encoded (``seconds since 2011-09-10``), decoded by xarray
-    to ``datetime64``.  MIT/S3 time is stored directly as ``datetime64[ns]``.
-    Both should resolve to the same datetime for a given date.
+    to ``datetime64``.  LLC_SURF (MIT/S3) time is stored directly as
+    ``datetime64[ns]``.  Both should resolve to the same datetime for a
+    given date.
 
     Parameters
     ----------
     ds_osn : xr.Dataset
         The kerchunk dataset for this snapshot (after ``isel(time=0)``).
-    s3_source : dict
+    llc_surf_source : dict
         Keys: ``s3_endpoint``, ``bucket``, ``folder``.
     date_str : str
         The date being processed (e.g. ``'2012-11-09 12:00:00'``).
@@ -455,10 +456,10 @@ def verify_osn_s3_timestamp(ds_osn, s3_source, date_str, face_range):
     try:
         osn_time = np.datetime64(ds_osn['time'].values, 'ns')
 
-        ds_check = get_s3_timestep_data(
-            s3_source['s3_endpoint'],
-            s3_source['bucket'],
-            s3_source['folder'],
+        ds_check = get_llc_timestep_data(
+            llc_surf_source['s3_endpoint'],
+            llc_surf_source['bucket'],
+            llc_surf_source['folder'],
             date_str,
             face_range=face_range,
             vars_requested=['time'],
@@ -470,21 +471,21 @@ def verify_osn_s3_timestamp(ds_osn, s3_source, date_str, face_range):
             if osn_time == mit_time:
                 logging.info(
                     f"TIMESTAMP CHECK PASSED: OSN time={osn_time}, "
-                    f"MIT time={mit_time}, date='{date_str}'"
+                    f"LLC_SURF time={mit_time}, date='{date_str}'"
                 )
             else:
                 logging.error(
                     f"TIMESTAMP MISMATCH: OSN time={osn_time}, "
-                    f"MIT time={mit_time} (date='{date_str}')"
+                    f"LLC_SURF time={mit_time} (date='{date_str}')"
                 )
                 raise RuntimeError(
                     f"Timestep alignment failure for '{date_str}': "
-                    f"OSN time={osn_time} != MIT time={mit_time}."
+                    f"OSN time={osn_time} != LLC_SURF time={mit_time}."
                 )
         else:
             logging.warning(
                 f"Timestamp cross-check skipped for '{date_str}': "
-                f"no 'time' variable in S3 store. Re-run "
+                f"no 'time' variable in LLC_SURF store. Re-run "
                 f"transfer_llc4320.py with --variables time to enable."
             )
 
@@ -500,9 +501,9 @@ def verify_osn_s3_timestamp(ds_osn, s3_source, date_str, face_range):
 
 
 # ---------------------------------------------------------------------------
-# S3 timestep store access - DEPTH
+# LLC_DEPTH timestep store access
 # ---------------------------------------------------------------------------
-# These functions read from the S3 timestep stores created by
+# These functions read from the LLC timestep stores created by
 # ``cli.transfer_llc4320.py``.  Layout:
 #   {folder}/grid.zarr          — static grid variables
 #   {folder}/{YYYYMMDDTHH}.zarr — per-timestep model fields
@@ -510,14 +511,14 @@ def verify_osn_s3_timestamp(ds_osn, s3_source, date_str, face_range):
 
 
 # Each S3 GET now retrieves the full water column for one face tile.
-s3_timestep_3D_chunks = {"face": 1, "k": 51, "k_l": 51, "k_u": 51, "k_p1": 52, "i": 720, "j": 720, "i_g": 720, "j_g": 720}
+llc_depth_timestep_chunks = {"face": 1, "k": 51, "k_l": 51, "k_u": 51, "k_p1": 52, "i": 720, "j": 720, "i_g": 720, "j_g": 720}
 
 
 # ---------------------------------------------------------------------------
-# S3 storage_options for 3D stores
+# LLC_DEPTH storage options
 # ---------------------------------------------------------------------------
-def _s3_storage_options_3D(s3_endpoint: str) -> dict:
-    """Return ``storage_options`` for ``xr.open_zarr`` on an S3-compatible store.
+def _llc_depth_storage_options(s3_endpoint: str) -> dict:
+    """Return ``storage_options`` for ``xr.open_zarr`` on an LLC_DEPTH store.
 
     The Nautilus NRP S3 endpoint intermittently serves corrupt bytes
     (HTTP 200 but garbled body).  We disable s3fs read caching so that
@@ -543,9 +544,9 @@ def _s3_storage_options_3D(s3_endpoint: str) -> dict:
     }
 
 
-def get_s3_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_store_name: str = "grid.zarr"):
+def get_llc_depth_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_store_name: str = "grid.zarr"):
     """
-    Load LLC4320 grid variables from an S3 grid store written by
+    Load LLC4320 grid variables from an LLC_DEPTH grid store written by
     ``transfer_llc4320.py``.
 
     Returns a Dataset compatible with
@@ -581,7 +582,7 @@ def get_s3_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_store_name:
         s3_url,
         consolidated=False,
         chunks=_grid_chunks,
-        storage_options=_s3_storage_options_3D(s3_endpoint),
+        storage_options=_llc_depth_storage_options(s3_endpoint),
     )
 
     # Select only the grid variables needed for processing.
@@ -613,5 +614,5 @@ def get_s3_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_store_name:
     if coords_update:
         grid = grid.assign_coords(coords_update)
 
-    print(f"S3 grid file loaded from {s3_url}.")
+    print(f"LLC_DEPTH grid file loaded from {s3_url}.")
     return grid
