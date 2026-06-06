@@ -18,7 +18,23 @@ import xarray as xr
 # ===========================================================================
 
 def _get_vertical_dim(da_in):
-    """Return the name of the vertical dimension present in *da_in*."""
+    """Return the name of the vertical dimension present in *da_in*.
+
+    Parameters
+    ----------
+    da_in : xr.DataArray
+        Array whose dimensions are searched for a known vertical axis name.
+
+    Returns
+    -------
+    str
+        Name of the vertical dimension (e.g. ``'k'``, ``'k_l'``, ``'Z'``).
+
+    Raises
+    ------
+    ValueError
+        If no recognised vertical dimension is found.
+    """
     for dim in ("k", "k_l", "k_u", "k_p1", "Z", "Zl", "Zu", "Zp1",
                 "depth", "lev"):
         if dim in da_in.dims:
@@ -41,6 +57,19 @@ def _get_depth_coord(ds_merge, zdim=None):
     For W-level fields (zdim='k_l') this returns ``|Zl|``.
 
     LLC4320 specific — expects ``Z`` or ``Zl`` to exist in *ds_merge*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing the ``Z`` and/or ``Zl`` coordinates.
+    zdim : str or None, optional
+        Vertical dimension name (``'k'`` or ``'k_l'``).  Inferred from
+        ``ds_merge.Theta`` when *None*.
+
+    Returns
+    -------
+    xr.DataArray
+        1D depth coordinate (m, positive downward) with dimension *zdim*.
     """
     if zdim is None:
         zdim = _get_vertical_dim(ds_merge.Theta)
@@ -71,6 +100,19 @@ def _get_vertical_spacing(ds_merge, zdim=None):
 
     Falls back to finite-differencing the depth coordinate if the model
     spacing variable is unavailable.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``drF`` / ``drC`` spacing variables.
+    zdim : str or None, optional
+        Vertical dimension name (``'k'`` or ``'k_l'``).  Inferred from
+        ``ds_merge.Theta`` when *None*.
+
+    Returns
+    -------
+    xr.DataArray
+        1D layer thickness (m) with dimension *zdim*.
     """
     if zdim is None:
         zdim = _get_vertical_dim(ds_merge.Theta)
@@ -136,6 +178,18 @@ def _vertical_derivative(field, ds_merge):
 
     Implemented via ``apply_ufunc`` with ``dask="parallelized"`` so the
     derivative is computed per-chunk without materialising the full array.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        3D dask-backed field to differentiate vertically.
+    ds_merge : xr.Dataset
+        Merged dataset used to retrieve the depth coordinate.
+
+    Returns
+    -------
+    xr.DataArray
+        Vertical derivative df/dz (same shape as *field*), dask-backed.
     """
     zdim = _get_vertical_dim(field)
     z = _get_depth_coord(ds_merge, zdim=zdim)
@@ -193,6 +247,20 @@ def _select_at_depth(field, target_depth, ds_merge):
     Uses ``_nearest_k_to_depth`` to find the closest k-index, then returns
     a 2D slice via ``.isel()``.  No interpolation — this returns the value
     at the discrete model level closest to the requested depth.
+
+    Parameters
+    ----------
+    field : xr.DataArray
+        3D dask-backed field to slice.
+    target_depth : float
+        Target depth in metres, positive downward.
+    ds_merge : xr.Dataset
+        Merged dataset used to retrieve the depth coordinate.
+
+    Returns
+    -------
+    xr.DataArray
+        2D field at the nearest model level to *target_depth*, dask-backed.
     """
     zdim = _get_vertical_dim(field)
     z = _get_depth_coord(ds_merge, zdim=zdim)
@@ -222,6 +290,21 @@ def _extract_at_mld(field3d, mld, ds_merge):
 
     All indexing inside the inner function operates with k in the last
     position — no ``moveaxis`` is needed.
+
+    Parameters
+    ----------
+    field3d : xr.DataArray
+        3D dask-backed field to extract from.
+    mld : xr.DataArray
+        2D mixed-layer depth (m, positive downward), one value per column.
+    ds_merge : xr.Dataset
+        Merged dataset used to retrieve the depth coordinate.
+
+    Returns
+    -------
+    xr.DataArray
+        2D field at the nearest model level to the per-column MLD,
+        dtype float32, dask-backed.
     """
     zdim = _get_vertical_dim(field3d)
     z = _get_depth_coord(ds_merge, zdim=zdim)
@@ -262,6 +345,19 @@ def _interp_w_to_tracer_levels(ds_merge):
     ``0.5 * (W[k] + W[k+1])`` along the vertical.  This avoids fragile
     coordinate-based ``xr.interp`` + rename gymnastics that break across
     xarray versions.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing the ``W`` variable on the ``k_l`` grid
+        and ``Theta`` on the ``k`` grid (used to determine the target
+        number of tracer levels).
+
+    Returns
+    -------
+    xr.DataArray
+        Vertical velocity W interpolated to tracer levels (k / Z),
+        dask-backed.
     """
     zdim_w = _get_vertical_dim(ds_merge.W)
     zdim_t = _get_vertical_dim(ds_merge.Theta)
@@ -292,6 +388,21 @@ def _masked_ml_mean(field3d, mld, ds_merge):
     This is the standard depth-reduction for "mean over the mixed layer".
     The vertical dimension is reduced by the weighted sum, so the output
     is **2D** (face, j, i).
+
+    Parameters
+    ----------
+    field3d : xr.DataArray
+        3D dask-backed field to average.
+    mld : xr.DataArray
+        2D mixed-layer depth (m, positive downward), one value per column.
+    ds_merge : xr.Dataset
+        Merged dataset used to retrieve the depth coordinate and layer
+        thicknesses.
+
+    Returns
+    -------
+    xr.DataArray
+        2D thickness-weighted mean over the mixed layer, dask-backed.
     """
     zdim = _get_vertical_dim(field3d)
     z = _get_depth_coord(ds_merge, zdim=zdim)

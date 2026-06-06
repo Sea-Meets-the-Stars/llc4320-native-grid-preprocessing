@@ -86,7 +86,19 @@ def _density_lazy(ds_merge):
     """Compute density lazily via apply_ufunc (no .persist()).
 
     Wraps the JMD95 equation of state, ensuring the result stays
-    dask-backed and lazy — no eager scheduling on workers.  
+    dask-backed and lazy — no eager scheduling on workers.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing at minimum ``Theta`` and ``Salt`` on tracer
+        levels, plus all standard grid-metric variables.
+
+    Returns
+    -------
+    xr.DataArray
+        In-situ density [kg m⁻³] on tracer levels (dims ``k``, ``face``,
+        ``j``, ``i``), dask-backed.
     """
     chunk_spec = {'face': 1, 'j': 720, 'i': 720}
     for dim in ('k', 'k_l'):
@@ -129,6 +141,24 @@ def mixed_layer_depth(ds_merge, density_threshold=0.03,
     when inputs are dask-backed.
 
     Returns a 2D field (positive metres, no depth dispatch needed).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and vertical coordinate
+        ``Z``.
+    density_threshold : float, optional
+        Potential-density anomaly threshold [kg m⁻³] defining the base of the
+        mixed layer (default 0.03).
+    ref_depth_m : float, optional
+        Reference depth [m] used to locate the near-surface reference level
+        (default ``MLD_REFERENCE_DEPTH_M``, typically 10 m).
+
+    Returns
+    -------
+    xr.DataArray
+        2D mixed-layer depth [m], positive metres below the surface,
+        with ``name="MLD"``.
     """
     rho = _density_lazy(ds_merge)
     zdim = _get_vertical_dim(rho)
@@ -159,6 +189,18 @@ def buoyancy_frequency_squared_3d(ds_merge):
     dρ/dz > 0 and N² > 0 without a leading negative sign.
 
     Computed on tracer levels (dim='k', coord='Z').
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and vertical spacing
+        variables.
+
+    Returns
+    -------
+    xr.DataArray
+        3D buoyancy frequency squared N² [s⁻²] on tracer levels
+        (dims ``k``, ``face``, ``j``, ``i``), with ``name="N2"``.
     """
     rho = _density_lazy(ds_merge)
     drho_dz = _vertical_derivative(rho, ds_merge)
@@ -177,6 +219,21 @@ def mixed_layer_heat_content(ds_merge, mld=None):
     Q_ml = ∫₀ᴹᴸᴰ cp ρ₀ Θ dz   [J m⁻²]
 
     This is a 2D field (no depth dispatch — it is inherently an MLD integral).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and vertical spacing
+        variables.
+    mld : xr.DataArray, optional
+        Pre-computed 2D mixed-layer depth [m].  If ``None``, computed via
+        :func:`mixed_layer_depth`.
+
+    Returns
+    -------
+    xr.DataArray
+        2D mixed-layer heat content [J m⁻²], with
+        ``name="ml_heat_content"``.
     """
     if mld is None:
         mld = mixed_layer_depth(ds_merge)
@@ -201,6 +258,18 @@ def buoyancy_field_3d(ds_merge):
 
     Fully lazy — avoids ``.persist()`` calls.  Keeping the graph lazy is
     critical so downstream code can build flux components one at a time.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and standard grid
+        variables.
+
+    Returns
+    -------
+    xr.DataArray
+        3D buoyancy field [m² s⁻²] on tracer levels (dims ``k``, ``face``,
+        ``j``, ``i``), with ``name="buoyancy"``.
     """
     import dbof.utils.jmd95_xgcm_implementation as jmd95
 
@@ -226,7 +295,23 @@ def buoyancy_field_3d(ds_merge):
 # ===========================================================================
 
 def vertical_shear_components_3d(ds_merge, grid):
-    """Lazy 3D vertical shear (du/dz, dv/dz) in geographic coordinates."""
+    """Lazy 3D vertical shear (du/dz, dv/dz) in geographic coordinates.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, rotation coefficients
+        ``CS`` and ``SN``, and vertical spacing variables.
+    grid : xgcm.Grid
+        Grid object used for interpolation between velocity and tracer points.
+
+    Returns
+    -------
+    uz : xr.DataArray
+        Zonal shear du/dz [s⁻¹] on tracer levels.
+    vz : xr.DataArray
+        Meridional shear dv/dz [s⁻¹] on tracer levels.
+    """
     dUdz = _vertical_derivative(ds_merge.U, ds_merge)
     dVdz = _vertical_derivative(ds_merge.V, ds_merge)
 
@@ -239,14 +324,43 @@ def vertical_shear_components_3d(ds_merge, grid):
 
 
 def vertical_shear_magnitude_3d(ds_merge, grid):
-    """Lazy 3D |S| = sqrt(uz² + vz²)."""
+    """Lazy 3D |S| = sqrt(uz² + vz²).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, rotation coefficients, and
+        vertical spacing variables.
+    grid : xgcm.Grid
+        Grid object used for interpolation between velocity and tracer points.
+
+    Returns
+    -------
+    xr.DataArray
+        3D vertical shear magnitude |S| [s⁻¹] on tracer levels.
+    """
     uz, vz = vertical_shear_components_3d(ds_merge, grid)
     shear_mag = np.sqrt(uz**2 + vz**2)
     return shear_mag
 
 
 def richardson_number_3d(ds_merge, grid):
-    """Lazy 3D Ri = N² / (uz² + vz²)."""
+    """Lazy 3D Ri = N² / (uz² + vz²).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, ``U``, ``V``,
+        rotation coefficients, and vertical spacing variables.
+    grid : xgcm.Grid
+        Grid object used for interpolation and differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        3D Richardson number Ri [dimensionless] on tracer levels; ``NaN``
+        where shear² ≤ 0.
+    """
     n2 = buoyancy_frequency_squared_3d(ds_merge)
     uz, vz = vertical_shear_components_3d(ds_merge, grid)
     shear2 = uz**2 + vz**2
@@ -255,7 +369,25 @@ def richardson_number_3d(ds_merge, grid):
 
 
 def froude_number_3d(ds_merge, grid, mld=None):
-    """Lazy 3D Fr = speed / (N * MLD)."""
+    """Lazy 3D Fr = speed / (N * MLD).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, ``U``, ``V``,
+        rotation coefficients, and vertical spacing variables.
+    grid : xgcm.Grid
+        Grid object used for interpolation and differencing.
+    mld : xr.DataArray, optional
+        Pre-computed 2D mixed-layer depth [m].  If ``None``, computed via
+        :func:`mixed_layer_depth`.
+
+    Returns
+    -------
+    xr.DataArray
+        3D Froude number Fr [dimensionless] on tracer levels; ``NaN``
+        where N * MLD ≤ 0.
+    """
     if mld is None:
         mld = mixed_layer_depth(ds_merge)
     n2 = buoyancy_frequency_squared_3d(ds_merge)
@@ -271,7 +403,21 @@ def froude_number_3d(ds_merge, grid, mld=None):
 
 
 def rossby_number_3d(ds_merge, grid):
-    """Lazy 3D Ro = ζ / f."""
+    """Lazy 3D Ro = ζ / f.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, grid metrics, rotation
+        coefficients, and latitude coordinate ``YC``.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    xr.DataArray
+        3D Rossby number Ro [dimensionless] on tracer levels.
+    """
     du_dx, du_dy, dv_dx, dv_dy = ng.calculate_jacobian(
         ds_merge.U, ds_merge.V, ds_merge, grid)
     zeta = dv_dx - du_dy
@@ -281,7 +427,25 @@ def rossby_number_3d(ds_merge, grid):
 
 
 def burger_number_3d(ds_merge, grid, mld=None):
-    """Lazy 3D Bu = (Ro / Fr)². """
+    """Lazy 3D Bu = (Ro / Fr)².
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, ``U``, ``V``,
+        rotation coefficients, and vertical spacing variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    mld : xr.DataArray, optional
+        Pre-computed 2D mixed-layer depth [m].  If ``None``, computed via
+        :func:`mixed_layer_depth`.
+
+    Returns
+    -------
+    xr.DataArray
+        3D Burger number Bu [dimensionless] on tracer levels; ``NaN``
+        where Fr = 0.
+    """
     if mld is None:
         mld = mixed_layer_depth(ds_merge)
     ro_3d = rossby_number_3d(ds_merge, grid)
@@ -295,7 +459,21 @@ def burger_number_3d(ds_merge, grid, mld=None):
 # ===========================================================================
 
 def wind_stress_curl(ds_merge, grid):
-    """Lazy wind stress curl."""
+    """Lazy wind stress curl.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``oceTAUX`` and ``oceTAUY`` on
+        staggered velocity points, plus grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    xr.DataArray
+        2D wind stress curl ∂τy/∂x − ∂τx/∂y [N m⁻³] on tracer points.
+    """
     taux = ds_merge.oceTAUX
     tauy = ds_merge.oceTAUY
     _, dtaux_dphi, dtauy_dlambda, _ = ng.calculate_jacobian(
@@ -305,7 +483,24 @@ def wind_stress_curl(ds_merge, grid):
 
 
 def ekman_pumping(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
-    """Lazy Ekman pumping w_E = curl(τ) / (ρ₀ f)."""
+    """Lazy Ekman pumping w_E = curl(τ) / (ρ₀ f).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``oceTAUX``, ``oceTAUY``, grid metrics,
+        and latitude coordinate ``YC``.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    rho0 : float, optional
+        Reference density [kg m⁻³] (default ``RHO0_BOUSSINESQ``).
+
+    Returns
+    -------
+    xr.DataArray
+        2D Ekman pumping velocity w_E [m s⁻¹] on tracer points; ``NaN``
+        at the equator where f = 0.
+    """
     curl_tau = wind_stress_curl(ds_merge, grid)
     f = coriolis_parameter(ds_merge, grid)
     w_e = xr.where(np.abs(f) > 0, curl_tau / (rho0 * f), np.nan)
@@ -313,7 +508,24 @@ def ekman_pumping(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
 
 
 def _wind_stress_geographic(ds_merge, grid):
-    """Lazy geographic wind stress (τ_λ, τ_φ) on tracer points."""
+    """Lazy geographic wind stress (τ_λ, τ_φ) on tracer points.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``oceTAUX``, ``oceTAUY``, and rotation
+        coefficients ``CS`` and ``SN``.
+    grid : xgcm.Grid
+        Grid object used for interpolation to tracer points.
+
+    Returns
+    -------
+    tau_lambda : xr.DataArray
+        Zonal (eastward) wind stress component [N m⁻²] on tracer points.
+    tau_phi : xr.DataArray
+        Meridional (northward) wind stress component [N m⁻²] on tracer
+        points.
+    """
     taux_c = grid.interp(ds_merge.oceTAUX, 'X', boundary='fill')
     tauy_c = grid.interp(ds_merge.oceTAUY, 'Y', boundary='fill')
     tau_lambda = taux_c * ds_merge['CS'] - tauy_c * ds_merge['SN']
@@ -322,7 +534,28 @@ def _wind_stress_geographic(ds_merge, grid):
 
 
 def ekman_transport_velocity(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
-    """Lazy Ekman transport (u_E, v_E)."""
+    """Lazy Ekman transport (u_E, v_E).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``oceTAUX``, ``oceTAUY``, rotation
+        coefficients ``CS`` and ``SN``, and latitude coordinate ``YC``.
+    grid : xgcm.Grid
+        Grid object used for interpolation to tracer points.
+    rho0 : float, optional
+        Reference density [kg m⁻³] (default ``RHO0_BOUSSINESQ``).
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+
+        ``"u_ekman"`` : xr.DataArray
+            Zonal Ekman transport velocity [m s⁻¹] on tracer points.
+        ``"v_ekman"`` : xr.DataArray
+            Meridional Ekman transport velocity [m s⁻¹] on tracer points.
+    """
     f = coriolis_parameter(ds_merge, grid)
     denom = rho0 * f
     safe_denom = xr.where(np.abs(f) > 0, denom, np.nan)
@@ -336,7 +569,25 @@ def ekman_transport_velocity(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
 # ===========================================================================
 
 def advective_buoyancy_fluxes_3d(ds_merge, grid):
-    """Lazy (uB, vB, wB) in geographic coordinates."""
+    """Lazy (uB, vB, wB) in geographic coordinates.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, ``U``, ``V``, ``W``,
+        rotation coefficients ``CS`` and ``SN``, and standard grid variables.
+    grid : xgcm.Grid
+        Grid object used for interpolation to tracer points.
+
+    Returns
+    -------
+    uB : xr.DataArray
+        Zonal advective buoyancy flux u·b [m³ s⁻³] on tracer levels.
+    vB : xr.DataArray
+        Meridional advective buoyancy flux v·b [m³ s⁻³] on tracer levels.
+    wB : xr.DataArray
+        Vertical advective buoyancy flux w·b [m³ s⁻³] on tracer levels.
+    """
     b = buoyancy_field_3d(ds_merge)
 
     U_c = grid.interp(ds_merge.U, 'X', boundary='fill')
@@ -360,7 +611,25 @@ def ertel_pv_terms_3d(ds_merge, grid):
         ─────────────    ──────────────────────────────────────
           q_vert                    q_tilt
 
-    Returns dict with keys: ertel_pv, ertel_pv_vertical, ertel_pv_tilt.
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, ``U``, ``V``, ``W``,
+        rotation coefficients, latitude ``YC``, and all grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    dict
+        Dictionary with keys:
+
+        ``"ertel_pv"`` : xr.DataArray
+            Total Ertel PV q [m⁻¹ s⁻¹] on tracer levels.
+        ``"ertel_pv_vertical"`` : xr.DataArray
+            Vertical component q_vert = (ζ + f) b_z [m⁻¹ s⁻¹].
+        ``"ertel_pv_tilt"`` : xr.DataArray
+            Tilting component q_tilt [m⁻¹ s⁻¹].
     """
     U = ds_merge.U
     V = ds_merge.V
@@ -396,36 +665,124 @@ def ertel_pv_terms_3d(ds_merge, grid):
 # ===========================================================================
 
 def _grad_squared_3d(scalar_3d, ds_merge, grid):
-    """Lazy |∇s|² from a tracer-point 3D field."""
+    """Lazy |∇s|² from a tracer-point 3D field.
+
+    Parameters
+    ----------
+    scalar_3d : xr.DataArray
+        3D scalar field on tracer points from which the horizontal gradient
+        is computed.
+    ds_merge : xr.Dataset
+        Merged dataset providing grid metrics for gradient calculation.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal gradient magnitude squared |∇s|² on tracer levels,
+        in units of (input units / m)².
+    """
     gx, gy = ng.calculate_native_gradient_tracer(
         scalar_3d, ds_merge, grid=grid)
     return gx**2 + gy**2
 
 
 def grad_theta2_3d(ds_merge, grid):
-    """Lazy 3D |∇θ|².  Units: (K/m)²."""
+    """Lazy 3D |∇θ|².  Units: (K/m)².
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta`` and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal temperature gradient squared |∇θ|² [(K m⁻¹)²] on
+        tracer levels.
+    """
     return _grad_squared_3d(ds_merge.Theta, ds_merge, grid)
 
 
 def grad_salt2_3d(ds_merge, grid):
-    """Lazy 3D |∇S|².  Units: (PSU/m)²."""
+    """Lazy 3D |∇S|².  Units: (PSU/m)².
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Salt`` and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal salinity gradient squared |∇S|² [(PSU m⁻¹)²] on
+        tracer levels.
+    """
     return _grad_squared_3d(ds_merge.Salt, ds_merge, grid)
 
 
 def grad_rho2_3d(ds_merge, grid):
-    """Lazy 3D |∇ρ|².  Derives density via JMD95."""
+    """Lazy 3D |∇ρ|².  Derives density via JMD95.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal density gradient squared |∇ρ|² [(kg m⁻⁴)²] on
+        tracer levels.
+    """
     rho = _density_lazy(ds_merge)
     return _grad_squared_3d(rho, ds_merge, grid)
 
 
 def grad_b2_3d(ds_merge, grid):
-    """Lazy 3D |∇b|².  Units: s⁻⁴."""
+    """Lazy 3D |∇b|².  Units: s⁻⁴.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal buoyancy gradient squared |∇b|² [s⁻⁴] on tracer
+        levels.
+    """
     b = buoyancy_field_3d(ds_merge)
     return _grad_squared_3d(b, ds_merge, grid)
 
 
 def grad_eta2(ds_merge, grid):
-    """Lazy |∇η|² — inherently 2D (surface only)."""
+    """Lazy |∇η|² — inherently 2D (surface only).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing sea-surface height ``Eta`` and grid
+        metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    xr.DataArray
+        2D sea-surface height gradient squared |∇η|² [m² m⁻²] on tracer
+        points (dims ``face``, ``j``, ``i``).
+    """
     gx, gy = ng.calculate_native_gradient_tracer(
         ds_merge.Eta, ds_merge, grid=grid,
     )
@@ -441,6 +798,25 @@ def turner_angle_3d(ds_merge, grid, *, gradtheta2=None, gradsalt2=None,
     Optional kwargs accept pre-computed 3D gradient fields to avoid
     recomputation when the caller already has them (e.g. Turner angle
     shares gradtheta2/gradsalt2/gradrho2 with the frontal_structure subset).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+    gradtheta2 : xr.DataArray, optional
+        Pre-computed |∇θ|² [(K m⁻¹)²].  If ``None``, computed internally.
+    gradsalt2 : xr.DataArray, optional
+        Pre-computed |∇S|² [(PSU m⁻¹)²].  If ``None``, computed internally.
+    gradrho2 : xr.DataArray, optional
+        Pre-computed |∇ρ|² [(kg m⁻⁴)²].  If ``None``, computed internally.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal Turner angle [degrees] on tracer levels; ``NaN``
+        where |∇ρ|² = 0.
     """
     if gradtheta2 is None:
         gradtheta2 = grad_theta2_3d(ds_merge, grid)
@@ -459,7 +835,22 @@ def turner_angle_3d(ds_merge, grid, *, gradtheta2=None, gradsalt2=None,
 # ===========================================================================
 
 def compute_velocity_jacobian_3d(ds_merge, grid):
-    """3D velocity Jacobian → VelocityJacobian(du_dx, du_dy, dv_dx, dv_dy)."""
+    """3D velocity Jacobian → VelocityJacobian(du_dx, du_dy, dv_dx, dv_dy).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, grid metrics, and rotation
+        coefficients ``CS`` and ``SN``.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+
+    Returns
+    -------
+    VelocityJacobian
+        Named tuple with fields ``(du_dx, du_dy, dv_dx, dv_dy)``, each a
+        dask-backed ``xr.DataArray`` on tracer levels [s⁻¹].
+    """
     du_dx, du_dy, dv_dx, dv_dy = ng.calculate_jacobian(
         ds_merge.U, ds_merge.V, ds_merge, grid,
     )
@@ -467,14 +858,50 @@ def compute_velocity_jacobian_3d(ds_merge, grid):
 
 
 def relative_vorticity_3d(ds_merge, grid, *, jacobian=None):
-    """Lazy 3D ζ = dv/dx − du/dy.  Accepts optional *jacobian*."""
+    """Lazy 3D ζ = dv/dx − du/dy.  Accepts optional *jacobian*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, grid metrics, and rotation
+        coefficients.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    jacobian : VelocityJacobian, optional
+        Pre-computed velocity Jacobian.  If ``None``, computed internally.
+
+    Returns
+    -------
+    xr.DataArray
+        3D relative vorticity ζ [s⁻¹] on tracer levels.
+    """
     if jacobian is None:
         jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
     return jacobian.dv_dx - jacobian.du_dy
 
 
 def strain_3d(ds_merge, grid, *, jacobian=None):
-    """Lazy 3D strain → (strain_mag, strain_n, strain_s).  Accepts optional *jacobian*."""
+    """Lazy 3D strain → (strain_mag, strain_n, strain_s).  Accepts optional *jacobian*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, grid metrics, and rotation
+        coefficients.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    jacobian : VelocityJacobian, optional
+        Pre-computed velocity Jacobian.  If ``None``, computed internally.
+
+    Returns
+    -------
+    sm : xr.DataArray
+        3D strain magnitude |S| = sqrt(Sn² + Ss²) [s⁻¹] on tracer levels.
+    sn : xr.DataArray
+        3D normal strain Sn = du/dx − dv/dy [s⁻¹] on tracer levels.
+    ss : xr.DataArray
+        3D shear strain Ss = du/dy + dv/dx [s⁻¹] on tracer levels.
+    """
     if jacobian is None:
         jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
     sn = jacobian.du_dx - jacobian.dv_dy
@@ -484,7 +911,23 @@ def strain_3d(ds_merge, grid, *, jacobian=None):
 
 
 def divergence_3d(ds_merge, grid, *, jacobian=None):
-    """Lazy 3D divergence = du/dx + dv/dy.  Accepts optional *jacobian*."""
+    """Lazy 3D divergence = du/dx + dv/dy.  Accepts optional *jacobian*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, grid metrics, and rotation
+        coefficients.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    jacobian : VelocityJacobian, optional
+        Pre-computed velocity Jacobian.  If ``None``, computed internally.
+
+    Returns
+    -------
+    xr.DataArray
+        3D horizontal divergence δ = du/dx + dv/dy [s⁻¹] on tracer levels.
+    """
     if jacobian is None:
         jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
     divergence = jacobian.du_dx + jacobian.dv_dy
@@ -492,7 +935,24 @@ def divergence_3d(ds_merge, grid, *, jacobian=None):
 
 
 def okubo_weiss_3d(ds_merge, grid, *, jacobian=None):
-    """Lazy 3D Okubo-Weiss = Sn² + Ss² − ζ².  Accepts optional *jacobian*."""
+    """Lazy 3D Okubo-Weiss = Sn² + Ss² − ζ².  Accepts optional *jacobian*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V``, grid metrics, and rotation
+        coefficients.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    jacobian : VelocityJacobian, optional
+        Pre-computed velocity Jacobian.  If ``None``, computed internally.
+
+    Returns
+    -------
+    xr.DataArray
+        3D Okubo-Weiss parameter W = Sn² + Ss² − ζ² [s⁻²] on tracer
+        levels; positive values indicate strain-dominated regions.
+    """
     if jacobian is None:
         jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
     omega = relative_vorticity_3d(ds_merge, grid, jacobian=jacobian)
@@ -506,7 +966,26 @@ def okubo_weiss_3d(ds_merge, grid, *, jacobian=None):
 # ===========================================================================
 
 def compute_buoyancy_gradients_3d(ds_merge, grid):
-    """3D buoyancy gradients → BuoyancyGradients(zonal, merid)."""
+    """3D buoyancy gradients → BuoyancyGradients(zonal, merid).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    BuoyancyGradients
+        Named tuple with fields:
+
+        ``zonal`` : xr.DataArray
+            Zonal buoyancy gradient ∂b/∂x [m s⁻²  m⁻¹] on tracer levels.
+        ``merid`` : xr.DataArray
+            Meridional buoyancy gradient ∂b/∂y [m s⁻² m⁻¹] on tracer
+            levels.
+    """
     b = buoyancy_field_3d(ds_merge)
     zonal, merid = ng.calculate_native_gradient_tracer(
         b, ds_merge, grid=grid,
@@ -521,6 +1000,26 @@ def _frontogenesis_formula_3d(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
 
     Internal helper shared by ``frontogenesis_tendency_3d`` and
     ``frontogenesis_geo_3d``.
+
+    Parameters
+    ----------
+    du_dx : xr.DataArray
+        Zonal velocity gradient ∂u/∂x [s⁻¹] on tracer levels.
+    du_dy : xr.DataArray
+        Cross-stream velocity gradient ∂u/∂y [s⁻¹] on tracer levels.
+    dv_dx : xr.DataArray
+        Along-stream velocity gradient ∂v/∂x [s⁻¹] on tracer levels.
+    dv_dy : xr.DataArray
+        Meridional velocity gradient ∂v/∂y [s⁻¹] on tracer levels.
+    grad_bx : xr.DataArray
+        Zonal buoyancy gradient ∂b/∂x [s⁻² m⁻¹] on tracer levels.
+    grad_by : xr.DataArray
+        Meridional buoyancy gradient ∂b/∂y [s⁻² m⁻¹] on tracer levels.
+
+    Returns
+    -------
+    xr.DataArray
+        3D frontogenesis tendency F [s⁻⁵] on tracer levels.
     """
     return -(du_dx * grad_bx**2
              + (du_dy + dv_dx) * grad_bx * grad_by
@@ -529,7 +1028,25 @@ def _frontogenesis_formula_3d(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
 
 def frontogenesis_tendency_3d(ds_merge, grid, *, jacobian=None,
                               buoyancy_gradients=None):
-    """Lazy 3D frontogenesis tendency F(u, v).  Accepts optional *jacobian* and *buoyancy_gradients*."""
+    """Lazy 3D frontogenesis tendency F(u, v).  Accepts optional *jacobian* and *buoyancy_gradients*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Theta``, ``Salt``, ``U``, ``V``,
+        grid metrics, and rotation coefficients.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    jacobian : VelocityJacobian, optional
+        Pre-computed velocity Jacobian.  If ``None``, computed internally.
+    buoyancy_gradients : BuoyancyGradients, optional
+        Pre-computed buoyancy gradients.  If ``None``, computed internally.
+
+    Returns
+    -------
+    xr.DataArray
+        3D kinematic frontogenesis tendency F(u, v) [s⁻⁵] on tracer levels.
+    """
     if jacobian is None:
         jacobian = compute_velocity_jacobian_3d(ds_merge, grid)
     if buoyancy_gradients is None:
@@ -547,6 +1064,23 @@ def geostrophic_velocity_3d(ds_merge, grid):
 
     Eta is inherently 2D so ug/vg are surface-only; named ``_3d`` for
     module consistency (they broadcast against 3D buoyancy gradients).
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing sea-surface height ``Eta``, latitude
+        coordinate ``YC``, and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing.
+
+    Returns
+    -------
+    ug : xr.DataArray
+        Zonal geostrophic velocity ug = −(g/f) ∂η/∂y [m s⁻¹] on tracer
+        points.
+    vg : xr.DataArray
+        Meridional geostrophic velocity vg = (g/f) ∂η/∂x [m s⁻¹] on tracer
+        points.
     """
     f = coriolis_parameter(ds_merge, grid)
     eta_grad_x, eta_grad_y = ng.calculate_native_gradient_tracer(
@@ -559,7 +1093,30 @@ def geostrophic_velocity_3d(ds_merge, grid):
 
 def frontogenesis_geo_3d(ds_merge, grid, *, ug=None, vg=None,
                          buoyancy_gradients=None):
-    """Lazy 3D geostrophic frontogenesis F(ug, vg).  Accepts optional *ug*, *vg*, *buoyancy_gradients*."""
+    """Lazy 3D geostrophic frontogenesis F(ug, vg).  Accepts optional *ug*, *vg*, *buoyancy_gradients*.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``Eta``, ``Theta``, ``Salt``, latitude
+        ``YC``, and grid metrics.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    ug : xr.DataArray, optional
+        Pre-computed zonal geostrophic velocity [m s⁻¹].  If ``None``,
+        computed internally together with ``vg``.
+    vg : xr.DataArray, optional
+        Pre-computed meridional geostrophic velocity [m s⁻¹].  If ``None``,
+        computed internally together with ``ug``.
+    buoyancy_gradients : BuoyancyGradients, optional
+        Pre-computed buoyancy gradients.  If ``None``, computed internally.
+
+    Returns
+    -------
+    xr.DataArray
+        3D geostrophic frontogenesis tendency F(ug, vg) [s⁻⁵] on tracer
+        levels.
+    """
     if ug is None or vg is None:
         ug, vg = geostrophic_velocity_3d(ds_merge, grid)
     if buoyancy_gradients is None:

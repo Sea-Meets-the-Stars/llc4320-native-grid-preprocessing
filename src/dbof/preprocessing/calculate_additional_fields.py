@@ -492,9 +492,17 @@ def _frontogenesis_formula(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
 
     Parameters
     ----------
-    du_dx, du_dy : xarray.DataArray  — ∂u/∂x, ∂u/∂y
-    dv_dx, dv_dy : xarray.DataArray  — ∂v/∂x, ∂v/∂y
-    grad_bx, grad_by : xarray.DataArray  — ∂b/∂x, ∂b/∂y
+    du_dx, du_dy : xr.DataArray
+        Velocity gradient components ∂u/∂x and ∂u/∂y (s⁻¹).
+    dv_dx, dv_dy : xr.DataArray
+        Velocity gradient components ∂v/∂x and ∂v/∂y (s⁻¹).
+    grad_bx, grad_by : xr.DataArray
+        Buoyancy gradient components ∂b/∂x and ∂b/∂y (m s⁻² m⁻¹).
+
+    Returns
+    -------
+    xr.DataArray
+        Frontogenesis tendency F (m s⁻² m⁻¹ s⁻¹), dask-backed.
     """
     return -(du_dx * grad_bx**2 +
              (du_dy + dv_dx) * grad_bx * grad_by +

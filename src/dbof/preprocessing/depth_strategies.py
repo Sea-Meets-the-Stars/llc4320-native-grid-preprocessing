@@ -40,26 +40,99 @@ FIXED_DEPTH_M = 25.0   # default fixed depth (≈ k=3 for LLC4320)
 # ===========================================================================
 
 def select_surface(field3d, ds_merge, mld=None, fixed_depth_m=None):
-    """Select z = 0 (surface).  Uses k=0 / k_l=0."""
+    """Select z = 0 (surface).  Uses k=0 / k_l=0.
+
+    Parameters
+    ----------
+    field3d : xr.DataArray
+        Lazy 3D field to reduce.
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates.
+    mld : xr.DataArray or None, optional
+        Unused; accepted for a uniform call signature.
+    fixed_depth_m : float or None, optional
+        Unused; accepted for a uniform call signature.
+
+    Returns
+    -------
+    xr.DataArray
+        2D surface slice (k=0), dask-backed.
+    """
     zdim = _get_vertical_dim(field3d)
     return field3d.isel({zdim: 0})
 
 
 def select_fixed_depth(field3d, ds_merge, mld=None,
                        fixed_depth_m=FIXED_DEPTH_M):
-    """Select the nearest model level to a fixed depth (default 25 m)."""
+    """Select the nearest model level to a fixed depth (default 25 m).
+
+    Parameters
+    ----------
+    field3d : xr.DataArray
+        Lazy 3D field to reduce.
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates.
+    mld : xr.DataArray or None, optional
+        Unused; accepted for a uniform call signature.
+    fixed_depth_m : float, optional
+        Target depth in metres, positive downward.  Default is
+        ``FIXED_DEPTH_M`` (25 m).
+
+    Returns
+    -------
+    xr.DataArray
+        2D slice at the nearest model level to *fixed_depth_m*, dask-backed.
+    """
     return _select_at_depth(field3d, fixed_depth_m, ds_merge)
 
 
 def select_at_mld(field3d, ds_merge, mld=None, fixed_depth_m=None):
-    """Select the nearest model level to the mixed-layer depth."""
+    """Select the nearest model level to the mixed-layer depth.
+
+    Parameters
+    ----------
+    field3d : xr.DataArray
+        Lazy 3D field to reduce.
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates.
+    mld : xr.DataArray or None, optional
+        Pre-computed mixed-layer depth (m, positive downward).  Required;
+        raises ``ValueError`` when *None*.
+    fixed_depth_m : float or None, optional
+        Unused; accepted for a uniform call signature.
+
+    Returns
+    -------
+    xr.DataArray
+        2D field at the nearest model level to the per-column MLD,
+        dask-backed.
+    """
     if mld is None:
         raise ValueError("select_at_mld requires mld to be precomputed.")
     return _extract_at_mld(field3d, mld, ds_merge)
 
 
 def select_mld_mean(field3d, ds_merge, mld=None, fixed_depth_m=None):
-    """Thickness-weighted mean over 0 ≤ z ≤ MLD."""
+    """Thickness-weighted mean over 0 ≤ z ≤ MLD.
+
+    Parameters
+    ----------
+    field3d : xr.DataArray
+        Lazy 3D field to reduce.
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates.
+    mld : xr.DataArray or None, optional
+        Pre-computed mixed-layer depth (m, positive downward).  Required;
+        raises ``ValueError`` when *None*.
+    fixed_depth_m : float or None, optional
+        Unused; accepted for a uniform call signature.
+
+    Returns
+    -------
+    xr.DataArray
+        2D thickness-weighted vertical mean over the mixed layer,
+        dask-backed.
+    """
     if mld is None:
         raise ValueError("select_mld_mean requires mld to be precomputed.")
     return _masked_ml_mean(field3d, mld, ds_merge)
@@ -86,7 +159,19 @@ DEPTH_STRATEGIES = {
 # ===========================================================================
 
 def _fixed_depth_suffix(depth_m):
-    """Generate the suffix for a fixed-depth channel, e.g. 'z25m', 'z50m'."""
+    """Generate the suffix for a fixed-depth channel, e.g. 'z25m', 'z50m'.
+
+    Parameters
+    ----------
+    depth_m : float
+        Depth in metres, positive downward.
+
+    Returns
+    -------
+    str
+        Channel suffix of the form ``z{N}m`` (integer depths) or
+        ``z{N.f}m`` (fractional depths).
+    """
     if depth_m == int(depth_m):
         return f"z{int(depth_m)}m"
     return f"z{depth_m}m"
