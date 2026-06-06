@@ -11,7 +11,7 @@
 # ---------------------------------------------------------------------------
 
 # Pipeline: SURF | OSN | DEPTH
-pipeline: "DEPTH"
+pipeline: "SURF"
 
 run:
   run_id: "global_test00"

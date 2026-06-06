@@ -17,7 +17,7 @@
 # Pipeline that produced the data: SURF | OSN | DEPTH
 # This selects which subset definitions and channel-expansion logic to use
 # when interpreting the data.
-pipeline: "OSN"
+pipeline: "SURF"
 
 # Depth suffixes used during generation (DEPTH pipeline only).
 # This MUST match the depth_suffixes in the generation config
