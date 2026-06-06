@@ -130,12 +130,16 @@ related fields together lets you generate and export only what you need.
 ## Batch driver: `run_all_subsets.py`
 
 The batch driver (`dbof.cli.run_all_subsets`) automates the two-phase
-workflow across all subsets and configs:
+workflow across all active subsets in a single `run.yaml` config (the same
+config used by `generate_global.py`):
 
 1. **Phase 1 — Generate:** calls `generate_global.main()` for each
    subset, producing Zarr stores on S3.
 2. **Phase 2 — Export:** calls `zarr_to_netcdf.main()` once per channel,
    writing individual NetCDF files.
+
+Subset definitions and channel lists come from code
+(`subset_definitions.py`), not from the YAML.
 
 ### NetCDF output layout
 
@@ -143,38 +147,57 @@ workflow across all subsets and configs:
 {netcdf_base}/{run_id}/{date_prefix}/LLC4320_{date}_{channel}_{run_id}.nc
 ```
 
-where `netcdf_base` defaults to `/mnt/tank/Oceanography/data/OGCM/LLC/Fronts`,
-and `date` is formatted as `2012-11-09T12_00_00`.
+`--netcdf-base` is a required CLI argument (no default).
+`date` is formatted as `2012-11-09T12_00_00`.
 
 Example:
 ```
-/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/global_depth_test00/20121109_120000/LLC4320_2012-11-09T12_00_00_N2_sfc_global_depth_test00.nc
+/my/output/dir/global_test00/20121109_120000/LLC4320_2012-11-09T12_00_00_N2_sfc_global_test00.nc
 ```
 
 ### CLI usage
 
-```bash
-# Generate + export all subsets:
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml
+The `--pipeline` flag selects which pipeline variant to run (SURF, OSN,
+or DEPTH).  It can also be set via the `pipeline` key in the YAML config;
+the CLI flag takes precedence.
 
-# Only specific subsets:
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml \
+```bash
+# DEPTH pipeline — generate + export all active subsets:
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output
+
+# SURF pipeline:
+run-all-subsets --pipeline SURF \
+    --config configs/global/run.yaml --netcdf-base /path/to/output
+
+# OSN pipeline:
+run-all-subsets --pipeline OSN \
+    --config configs/global/run.yaml --netcdf-base /path/to/output
+
+# Only specific subsets (overrides active_subsets in YAML):
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output \
     --subsets stratification native_fields
 
 # Export only (assumes Zarr stores already exist):
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --export-only
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --export-only
 
 # Generate only (skip NetCDF export):
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --generate-only
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --generate-only
 
 # Override run_id:
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --run-id my_run_01
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --run-id my_run_01
 
 # Dry run:
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --dry-run
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --dry-run
 
 # With ice masking:
-python -m dbof.cli.run_all_subsets --config configs/global/run.yaml --ice-mask
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --ice-mask
 ```
 
 ### Ice masking
