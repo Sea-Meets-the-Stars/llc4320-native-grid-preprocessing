@@ -31,7 +31,12 @@ data:
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
-  folder: "properties/"
+  # folder is determined automatically by the pipeline:
+  #   SURF / OSN → surface_fields/
+  #   DEPTH      → depth_fields/
+  # Uncomment to override:
+  # folder: "custom_folder/"
+  #
   # dataset_name is set automatically from the subset definition.
   # Override here only if you need a custom name.
   # dataset_name: "custom_name.zarr"

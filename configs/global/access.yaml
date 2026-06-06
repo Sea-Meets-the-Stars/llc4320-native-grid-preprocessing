@@ -28,7 +28,8 @@ depth_suffixes: [sfc, mld]
 data_access:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "properties"
+  # folder: use surface_fields for SURF/OSN output, depth_fields for DEPTH output
+  folder: "surface_fields"
 
 # NOTE:
 # - run_id MUST exactly match the run_id used when generate-global was run.

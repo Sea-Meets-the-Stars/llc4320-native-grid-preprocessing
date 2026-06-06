@@ -355,10 +355,20 @@ def main(
     if run_id is not None:
         run_cfg = config.RunConfig(run_id=run_id, log_dir=run_cfg.log_dir)
 
+    output_cfg = config.GlobalOutputConfig(**(raw.get("output") or {}))
+    # Resolve folder from pipeline if not explicitly set in YAML.
+    if output_cfg.folder is None:
+        output_cfg = config.GlobalOutputConfig(
+            s3_endpoint=output_cfg.s3_endpoint,
+            bucket=output_cfg.bucket,
+            folder=config.default_output_folder(pipeline_str),
+            dataset_name=output_cfg.dataset_name,
+        )
+
     cfg = config.GlobalJobConfig(
         run=run_cfg,
         data=config.GlobalDataConfig(**(raw.get("data") or {})),
-        output=config.GlobalOutputConfig(**(raw.get("output") or {})),
+        output=output_cfg,
         runtime=config.RuntimeConfig(**(raw.get("runtime") or {})),
         pipeline=pipeline_str,
         active_subsets=active_subsets,

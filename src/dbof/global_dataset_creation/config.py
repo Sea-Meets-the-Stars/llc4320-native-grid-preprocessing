@@ -11,6 +11,49 @@ from typing import Optional, List
 
 
 # ---------------------------------------------------------------------------
+# Pipeline → output folder mapping
+# ---------------------------------------------------------------------------
+
+PIPELINE_OUTPUT_FOLDERS = {
+    "SURF":  "surface_fields/",
+    "OSN":   "surface_fields/",
+    "DEPTH": "depth_fields/",
+}
+"""Default S3 output folder for each pipeline variant.
+
+SURF and OSN produce surface-only diagnostics and share a folder.
+DEPTH produces depth-resolved diagnostics and writes to a separate folder.
+"""
+
+
+def default_output_folder(pipeline: str) -> str:
+    """Return the default output folder for *pipeline*.
+
+    Parameters
+    ----------
+    pipeline : str
+        One of ``"SURF"``, ``"OSN"``, ``"DEPTH"``.
+
+    Returns
+    -------
+    str
+        Folder path (e.g. ``"surface_fields/"``).
+
+    Raises
+    ------
+    ValueError
+        If *pipeline* is not recognised.
+    """
+    try:
+        return PIPELINE_OUTPUT_FOLDERS[pipeline]
+    except KeyError:
+        raise ValueError(
+            f"Unknown pipeline '{pipeline}'.  "
+            f"Expected one of: {list(PIPELINE_OUTPUT_FOLDERS)}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Shared building-block configs
 # ---------------------------------------------------------------------------
 
@@ -30,10 +73,15 @@ class GlobalDataConfig:
 
 @dataclass(frozen=True)
 class GlobalOutputConfig:
-    """S3 output location for generated Zarr stores."""
+    """S3 output location for generated Zarr stores.
+
+    If ``folder`` is ``None``, it is resolved from the pipeline via
+    :func:`default_output_folder` when the :class:`GlobalJobConfig` is
+    constructed.
+    """
     s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
     bucket: str = "dbof/"
-    folder: str = "surface_fields/"
+    folder: Optional[str] = None
     dataset_name: str = "global.zarr"
 
 

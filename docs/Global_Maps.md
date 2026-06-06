@@ -248,7 +248,7 @@ NetCDF alongside them.
 # Snapshots
 zarr-to-netcdf --mode snapshots \
     --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof --folder properties \
+    --bucket dbof --folder depth_fields \
     --run-id global_depth_test00 \
     --dates '2012-11-09 12:00:00' \
     --output-dir /path/to/output
@@ -256,7 +256,7 @@ zarr-to-netcdf --mode snapshots \
 # Grid
 zarr-to-netcdf --mode grid \
     --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof --folder properties \
+    --bucket dbof --folder depth_fields \
     --grid-dataset-name llc4320_grid.zarr \
     --output-dir /path/to/output
 ```
@@ -265,7 +265,8 @@ zarr-to-netcdf --mode grid \
 
 ## Zarr output layout
 
-All pipelines write to the same S3 path structure:
+SURF / OSN write to ``surface_fields/``, DEPTH writes to ``depth_fields/``.
+All pipelines use the same path structure within their folder:
 
 ```
 s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}

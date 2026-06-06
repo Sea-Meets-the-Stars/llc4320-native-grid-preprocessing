@@ -192,7 +192,7 @@ def ensure_icearea(
     output = config_info["output"]
     s3_endpoint = output.get("s3_endpoint", "https://s3-west.nrp-nautilus.io")
     bucket = output.get("bucket", "dbof/")
-    folder = output.get("folder", "properties/")
+    folder = output.get("folder", "depth_fields/")
     date_iterations = config_info["date_iterations"]
 
     date_prefixes = [_date_to_prefix(d) for d in date_iterations]
@@ -313,7 +313,7 @@ def run_export_subset(
     output = config_info["output"]
     s3_endpoint = output.get("s3_endpoint", "https://s3-west.nrp-nautilus.io")
     bucket = output.get("bucket", "dbof/")
-    folder = output.get("folder", "properties/")
+    folder = output.get("folder", "depth_fields/")
     dataset_name = subset_entry.get("dataset_name", f"{subset_name}.zarr")
     date_iterations = config_info["date_iterations"]
 

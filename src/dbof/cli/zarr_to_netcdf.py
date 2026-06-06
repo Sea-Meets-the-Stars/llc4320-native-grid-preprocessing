@@ -46,7 +46,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --dates '2012-11-09 12:00:00' \\
@@ -57,7 +57,7 @@ Usage — snapshots
       --mode snapshots \
       --s3-endpoint https://s3-west.nrp-nautilus.io \
       --bucket dbof \
-      --folder properties \
+      --folder depth_fields \
       --run-id testing_019 \
       --dataset-name native_fields.zarr \
       --dates '2012-11-09 12:00:00' \
@@ -70,7 +70,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --output-dir /scratch/llc4320_netcdf/
@@ -80,7 +80,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --dates '2012-11-09 12:00:00' \\
@@ -92,7 +92,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --dates '2012-11-09 12:00:00' \\
@@ -149,7 +149,7 @@ def _discover_date_prefixes(bucket, folder, run_id, dataset_name, fs):
 
     prefixes = []
     for entry in entries:
-        # entry looks like 'dbof/properties/run_id/20121109_120000'
+        # entry looks like 'dbof/depth_fields/run_id/20121109_120000'
         candidate = entry.rstrip("/").split("/")[-1]
         # Check that this directory actually contains the target dataset
         dataset_path = f"{entry}/{dataset_name}"
@@ -188,7 +188,7 @@ def zarr_to_netcdf(
     bucket : str
         S3 bucket name, e.g. 'dbof'.
     folder : str
-        S3 folder path, e.g. 'properties'.
+        S3 folder path, e.g. ``'surface_fields'`` or ``'depth_fields'``.
     run_id : str
         The run_id used when writing the Zarr store.
     dataset_name : str
@@ -625,7 +625,7 @@ if __name__ == '__main__':
     p.add_argument('--bucket', required=True,
                    help="S3 bucket name, e.g. dbof")
     p.add_argument('--folder', required=True,
-                   help="S3 folder, e.g. properties")
+                   help="S3 folder, e.g. surface_fields or depth_fields")
 
     # Output
     p.add_argument('--output-dir', required=True,
