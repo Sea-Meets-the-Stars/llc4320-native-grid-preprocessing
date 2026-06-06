@@ -35,7 +35,7 @@ data_access:
 # - run_id MUST exactly match the run_id used when generate-global was run.
 # - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
 #   the pipeline for the snapshot you want to read.
-  run_id: "global_OSN_test00"
+  run_id: "global_SURF_test01"
   date_prefix: "20121109_120000"
 
 # Grid Zarr store written by generate_grid_global.py.

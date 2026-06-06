@@ -344,6 +344,15 @@ def _llc_surf_storage_options(s3_endpoint, anon=None):
     return {
         "anon": anon,
         "client_kwargs": {"endpoint_url": s3_endpoint},
+        "config_kwargs": {
+            "signature_version": "s3v4",
+            "retries": {"max_attempts": 5, "mode": "adaptive"},
+            "s3": {"addressing_style": "path"},
+            "connect_timeout": 30,
+            "read_timeout": 60,
+        },
+        "max_concurrency": 10,
+        "default_cache_type": "none",
     }
 
 

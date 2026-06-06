@@ -390,10 +390,12 @@ def main(
     # ------------------------------------------------------------------
     data_source = get_data_source(cfg.pipeline)
     dask_client = create_dask_client(cfg.runtime)
-    fs, _ = create_s3_filesystems(cfg.output.s3_endpoint)
+    fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
 
     # Save run metadata (local + S3).
-    save_run_metadata(cfg, log_file, fs=fs)
+    # Use the sync filesystem — the async one conflicts with the Dask
+    # distributed client's event loop.
+    save_run_metadata(cfg, log_file, fs=fs_sync)
 
     ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
 
