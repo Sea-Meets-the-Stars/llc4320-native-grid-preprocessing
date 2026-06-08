@@ -258,6 +258,13 @@ def _parse_args():
         choices=["SURF", "OSN", "DEPTH"],
         help="Override the pipeline key in the config YAML.",
     )
+    parser.add_argument(
+        "--clobber",
+        action="store_true",
+        default=False,
+        help=("Regenerate subset/date zarr stores that already exist on S3.  "
+              "Default is to skip existing stores (per date)."),
+    )
     return parser.parse_args()
 
 
@@ -270,6 +277,7 @@ def main(
     run_id: str = None,
     subset: str = None,
     pipeline: str = None,
+    clobber: bool = False,
 ) -> None:
     """
     Entry point for the unified global pipeline.
@@ -286,6 +294,9 @@ def main(
         Override ``active_subsets`` with a single subset name.
     pipeline : str, optional
         Override the ``pipeline`` key in the YAML.
+    clobber : bool, optional
+        If ``False`` (default), skip any subset/date whose zarr store already
+        exists on S3.  If ``True``, regenerate it.
     """
     wall_start = time.monotonic()
 
@@ -298,6 +309,7 @@ def main(
         run_id = run_id or cli.run_id
         subset = subset or cli.subset
         pipeline = pipeline or cli.pipeline
+        clobber = clobber or cli.clobber
 
     with open(config_file, "r") as fh:
         raw = yaml.safe_load(fh) or {}
@@ -378,7 +390,7 @@ def main(
     # ------------------------------------------------------------------
     # 5. Logging and run metadata
     # ------------------------------------------------------------------
-    log_file = setup_logging(cfg)  # raises FileExistsError if log already exists
+    log_file = setup_logging(cfg)  # appends if the log already exists
     logging.info("Unified global pipeline starting.")
     logging.info(f"Pipeline: {cfg.pipeline}")
     logging.info(f"Active subsets: {cfg.active_subsets}")
@@ -442,6 +454,16 @@ def main(
         for date_str in tqdm.tqdm(date_iterations, desc=subset_name):
             date_prefix = date_to_run_id(date_str)
             logging.info(f"  Date: {date_str}  →  date_prefix: {date_prefix}")
+
+            # Skip this subset/date if its zarr store already exists on S3
+            # (unless clobbering).  
+            store_path = zarr_dataset.make_run_prefix(
+                cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
+                dataset_name, date_prefix=date_prefix,
+            )
+            if not clobber and fs_sync.exists(store_path.removeprefix("s3://")):
+                logging.info(f"  SKIP (zarr store exists): {store_path}")
+                continue
 
             # Create zarr output store for this subset + date.
             zarr_ds = zarr_dataset.GlobalZarrDataset(

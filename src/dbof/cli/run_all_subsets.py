@@ -196,6 +196,7 @@ def _run_generate(
     run_id: str,
     pipeline: str,
     dry_run: bool = False,
+    clobber: bool = False,
 ) -> None:
     """Call ``generate_global.main()`` for one subset.
 
@@ -211,6 +212,9 @@ def _run_generate(
         Pipeline name override.
     dry_run : bool
         If ``True``, log the call without executing.
+    clobber : bool
+        If ``False`` (default), generate_global skips subset/date zarr stores
+        that already exist on S3.  If ``True``, regenerate them.
     """
     log.info("=" * 60)
     log.info("GENERATE  config=%s  subset=%s  pipeline=%s",
@@ -219,8 +223,8 @@ def _run_generate(
 
     if dry_run:
         log.info("[DRY RUN] Would call generate_global.main("
-                 "config_file=%r, subset=%r, run_id=%r, pipeline=%r)",
-                 config_file, subset, run_id, pipeline)
+                 "config_file=%r, subset=%r, run_id=%r, pipeline=%r, clobber=%r)",
+                 config_file, subset, run_id, pipeline, clobber)
         return
 
     from dbof.cli.generate_global import main as generate_main
@@ -229,6 +233,7 @@ def _run_generate(
         run_id=run_id,
         subset=subset,
         pipeline=pipeline,
+        clobber=clobber,
     )
 
 
@@ -253,12 +258,17 @@ def _run_export_channel(
     output_dir: str,
     dry_run: bool = False,
     ice_mask: bool = False,
+    clobber: bool = False,
 ) -> None:
     """Call ``zarr_to_netcdf.main()`` for a single channel.
 
     Produces one ``.nc`` file with naming convention::
 
         LLC4320_{date}_{channel}_{run_id}.nc
+
+    If the target file already exists and ``clobber`` is ``False`` the export
+    is skipped.  Skipping is per-channel, so missing channels in an otherwise
+    complete subset are still exported.
 
     Parameters
     ----------
@@ -283,10 +293,16 @@ def _run_export_channel(
     ice_mask : bool
         If ``True``, mask ice-covered points with NaN.
     """
-    os.makedirs(output_dir, exist_ok=True)
     filename_date = _prefix_to_filename_date(date_prefix)
     output_filename = f"LLC4320_{filename_date}_{channel}_{run_id}.nc"
+    output_path = os.path.join(output_dir, output_filename)
 
+    # Skip channels that are already exported (unless clobbering).
+    if not clobber and os.path.exists(output_path):
+        log.info("  SKIP (exists)  %s", output_filename)
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
     log.info("  EXPORT  %s -> %s/%s", channel, output_dir, output_filename)
 
     if dry_run:
@@ -321,6 +337,7 @@ def _run_export_subset(
     netcdf_base: str,
     dry_run: bool = False,
     ice_mask: bool = False,
+    clobber: bool = False,
 ) -> None:
     """Export all channels in one subset to individual NetCDF files.
 
@@ -380,6 +397,7 @@ def _run_export_subset(
                     output_dir=output_dir,
                     dry_run=dry_run,
                     ice_mask=apply_ice_mask,
+                    clobber=clobber,
                 )
             except Exception:
                 log.exception("  FAILED to export channel '%s' from subset '%s' "
@@ -443,6 +461,12 @@ def _parse_args():
         "--ice-mask", action="store_true", default=False,
         help=("Mask ice-covered points (SIarea > 0) with NaN during "
               "NetCDF export.  The icearea subset itself is never masked."),
+    )
+    p.add_argument(
+        "--clobber", action="store_true", default=False,
+        help=("Re-export channels whose NetCDF file already exists.  Default "
+              "is to skip existing files (per-channel), so only missing "
+              "channels are exported."),
     )
     return p.parse_args()
 
@@ -577,6 +601,7 @@ def main():
                     run_id=run_id,
                     pipeline=pipeline,
                     dry_run=args.dry_run,
+                    clobber=args.clobber,
                 )
             except Exception:
                 log.exception("FAILED to generate subset '%s'", subset_name)
@@ -618,6 +643,7 @@ def main():
                     netcdf_base=args.netcdf_base,
                     dry_run=args.dry_run,
                     ice_mask=args.ice_mask,
+                    clobber=args.clobber,
                 )
             except Exception:
                 log.exception("FAILED to export subset '%s'", subset_name)

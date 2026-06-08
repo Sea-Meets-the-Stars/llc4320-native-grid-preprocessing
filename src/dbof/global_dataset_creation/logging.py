@@ -38,8 +38,8 @@ def setup_logging(cfg) -> Path:
     Log directory layout::
 
         {log_dir}/{run_id}/
-            native_fields.log        ← one log per subset invocation
-            kinematic.log
+            native_fields_20260608_142210.log   ← one log per invocation
+            kinematic_20260608_143055.log
             run_meta.yaml
 
     If ``cfg.run.log_dir`` is relative it is resolved against the
@@ -48,10 +48,11 @@ def setup_logging(cfg) -> Path:
     pipeline is launched from (CLI at the repo root, Jupyter notebook, etc.).
 
     The run directory (``{log_dir}/{run_id}/``) may already exist — multiple
-    subset runs share the same ``run_id`` directory.  However, if the
-    specific log file for this invocation already exists, a ``FileExistsError``
-    is raised to prevent silently overwriting previous logs.  Delete the
-    log file manually if you want to re-run.
+    subset runs share the same ``run_id`` directory.  Each invocation writes a
+    **new, timestamped** log file (``{subset(s)}_{YYYYMMDD_HHMMSS}.log``, run
+    time in UTC), so re-runs never clobber or interleave with previous logs.
+    Whether work is actually redone is decided by the S3 zarr-store existence
+    check in ``generate_global`` (and the ``--clobber`` flag), not by this log.
 
     Parameters
     ----------
@@ -62,12 +63,7 @@ def setup_logging(cfg) -> Path:
     Returns
     -------
     log_file : Path
-        Absolute path to the log file that was created.
-
-    Raises
-    ------
-    FileExistsError
-        If the log file for this subset invocation already exists.
+        Absolute path to the log file created for this invocation.
     """
     log_path = Path(cfg.run.log_dir).expanduser()
 
@@ -79,21 +75,17 @@ def setup_logging(cfg) -> Path:
     run_dir = log_path / cfg.run.run_id
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    # Build log filename from subset(s).
+    # Build log filename from subset(s) + a run-time UTC stamp, so every
+    # invocation gets its own file ({subset(s)}_{YYYYMMDD_HHMMSS}.log) instead
+    # of clobbering or interleaving with previous runs.
     if len(cfg.active_subsets) == 1:
-        log_filename = f"{cfg.active_subsets[0]}.log"
+        base = cfg.active_subsets[0]
     else:
-        log_filename = "_".join(cfg.active_subsets) + ".log"
+        base = "_".join(cfg.active_subsets)
+    run_stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    log_filename = f"{base}_{run_stamp}.log"
 
     log_file = run_dir / log_filename
-
-    if log_file.exists():
-        raise FileExistsError(
-            f"Log file already exists: {log_file}\n"
-            f"This run_id ('{cfg.run.run_id}') has already been used for "
-            f"subset(s) {cfg.active_subsets}.  To re-run, delete the log "
-            f"file first, or use a new run_id."
-        )
 
     logging.basicConfig(
         level=logging.INFO,
