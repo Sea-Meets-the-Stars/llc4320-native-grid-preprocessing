@@ -54,8 +54,10 @@ runtime:
 # subset that does not belong to the chosen pipeline will raise a ValueError.
 #
 # ┌─────────┬────────────────────────────────────────────────────────────────┐
-# │ SURF    │ native_fields, frontal_structure, kinematic, frontogenesis    │
-# │ OSN     │ native_fields, frontal_structure, kinematic, frontogenesis    │
+# │ SURF    │ native_fields, surface_wind, icearea, frontal_structure,      │
+# │         │ kinematic, frontogenesis                                      │
+# │ OSN     │ native_fields, surface_wind, icearea, frontal_structure,      │
+# │         │ kinematic, frontogenesis                                      │
 # │ DEPTH   │ stratification, vertical_shear, mixing_parameters, ertel_pv, │
 # │         │ buoyancy_fluxes, surface_wind, energetics, frontal_structure, │
 # │         │ kinematic, frontogenesis, native_fields, icearea              │

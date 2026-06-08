@@ -468,8 +468,11 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     requested = set(computed_feature_channels)
 
     bases = ("relative_vorticity", "strain_n", "strain_s", "strain_mag",
-             "divergence", "okubo_weiss")
-    if not any(any(c.startswith(b + "_") for c in requested) for b in bases):
+             "divergence", "rossby_number", "okubo_weiss")
+    has_depth_channels = any(
+        any(c.startswith(b + "_") for c in requested) for b in bases)
+    has_coriolis = "coriolis_f" in requested
+    if not has_depth_channels and not has_coriolis:
         return results
 
     mld = _lazy_mld(ds_merge, requested)
@@ -494,10 +497,19 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
             divergence_3d(ds_merge, grid, jacobian=jac),
             "divergence", ds_merge, mld=mld, requested=requested))
 
+    if any(c.startswith("rossby_number_") for c in requested):
+        results.update(apply_depth_strategies(
+            rossby_number_3d(ds_merge, grid),
+            "rossby_number", ds_merge, mld=mld, requested=requested))
+
     if any(c.startswith("okubo_weiss_") for c in requested):
         results.update(apply_depth_strategies(
             okubo_weiss_3d(ds_merge, grid, jacobian=jac),
             "okubo_weiss", ds_merge, mld=mld, requested=requested))
+
+    # coriolis_f is 2D (latitude-only) — no depth strategies needed.
+    if "coriolis_f" in requested:
+        results["coriolis_f"] = coriolis_parameter(ds_merge, grid).values
 
     return _materialise_results(results)
 

@@ -37,8 +37,21 @@ SURFACE_SUBSETS = {
         "surface_only": True,
         "model_data_feature_channels": [
             "Theta", "Salt", "Eta", "U", "V", "W",
-            "oceTAUX", "oceTAUY", "SIarea",
         ],
+        "compute_features_channels": [],
+    },
+
+    "surface_wind": {
+        "dataset_name": "surface_wind.zarr",
+        "surface_only": True,
+        "model_data_feature_channels": ["oceTAUX", "oceTAUY"],
+        "compute_features_channels": [],
+    },
+
+    "icearea": {
+        "dataset_name": "icearea.zarr",
+        "surface_only": True,
+        "model_data_feature_channels": ["SIarea"],
         "compute_features_channels": [],
     },
 
@@ -151,7 +164,7 @@ DEPTH_SUBSETS = {
             "gradb2", "gradtheta2", "gradsalt2",
             "gradrho2", "gradeta2", "turner_angle",
         ],
-        "depth_suffixes": ["sfc"],
+        "depth_suffixes": DEFAULT_DEPTH_SUFFIXES,
     },
 
     "kinematic": {
@@ -160,9 +173,10 @@ DEPTH_SUBSETS = {
         "model_data_feature_channels": [],
         "compute_features_channels": [
             "relative_vorticity", "strain_n", "strain_s", "strain_mag",
-            "divergence", "okubo_weiss",
+            "divergence", "rossby_number", "okubo_weiss",
         ],
         "depth_suffixes": DEFAULT_DEPTH_SUFFIXES,
+        "extra_channels": ["coriolis_f"],
     },
 
     "frontogenesis": {
@@ -173,7 +187,7 @@ DEPTH_SUBSETS = {
             "frontogenesis_tendency", "frontogenesis_geo",
             "frontogenesis_ageo", "ug", "vg",
         ],
-        "depth_suffixes": ["sfc"],
+        "depth_suffixes": DEFAULT_DEPTH_SUFFIXES,
     },
 
     "native_fields": {
@@ -183,7 +197,7 @@ DEPTH_SUBSETS = {
         "compute_features_channels": [
             "Theta", "Salt", "Eta", "U", "V", "W",
         ],
-        "depth_suffixes": ["sfc"],
+        "depth_suffixes": DEFAULT_DEPTH_SUFFIXES,
     },
 
     "icearea": {

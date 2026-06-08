@@ -9,6 +9,47 @@ preserved — no interpolation to a regular lat/lon grid is performed.
 
 ---
 
+## Choosing a pipeline
+
+Three pipeline variants exist. **You must choose one before running.** The
+right choice depends on what variables you need, at what depths, and whether
+you have transferred data from MIT.
+
+**Start here:**
+
+1. **Do you need depth-resolved fields (below the surface)?** → Use **DEPTH**.
+   Requires timesteps transferred from MIT via `transfer_llc4320.py`.
+
+2. **Do you only need surface fields?**
+   - **Do you need wind stress (`oceTAUX`, `oceTAUY`) or sea ice (`SIarea`)?**
+     - Is your date within **2011-11-01 to 2012-07-15**? → Use **OSN**.
+       No data transfer needed.
+     - Is your date outside that window? → Use **SURF**. Requires timesteps
+       transferred from MIT via `transfer_llc4320.py`.
+   - **Do you only need core variables (`Theta`, `Salt`, `Eta`, `U`, `V`, `W`)
+     or derived fields (frontal_structure, kinematic, frontogenesis)?**
+     → Use **OSN**. No data transfer needed. Dates must fall within
+     **2011-09-13 to 2012-11-15**.
+
+### Data availability
+
+| Source     | Variables                                  | Date range                    | Prerequisite            |
+|------------|--------------------------------------------|-------------------------------|-------------------------|
+| OSN (`llc_surf`)  | Theta, Salt, Eta, U, V, W           | 2011-09-13 – 2012-11-15      | None                    |
+| OSN (`llc_wind`)  | oceTAUX, oceTAUY, SIarea            | 2011-11-01 – 2012-07-15      | None                    |
+| LLC_SURF (S3)     | All surface variables + grid         | Per-timestep, on request      | `transfer_llc4320.py`   |
+| LLC_DEPTH (S3)    | All variables, 51 depth levels + grid| Per-timestep, on request      | `transfer_llc4320.py`   |
+
+The `surface_wind` and `icearea` subsets require wind/ice variables. In the
+OSN pipeline these come from the `llc_wind` kerchunk endpoint (limited date
+range). In the SURF pipeline they come from S3 timestep stores — the date
+range is unlimited, but the data must first be transferred from the MIT Zarr
+store using `transfer_llc4320.py`. There is currently no pre-flight check
+that a timestep store exists in S3, so a missing transfer will surface as an
+S3 read error at runtime.
+
+---
+
 ## Pipeline overview
 
 A single unified entry point (`generate_global.py`) dispatches on the
@@ -62,18 +103,25 @@ layer for output. The available strategies are:
 | `mld`       | Value at the mixed-layer depth                            |
 | `mld_mean`  | Thickness-weighted mean over 0 ≤ z ≤ MLD                 |
 
-In the config, each subset lists its base channel names in
-`compute_features_channels` and the desired depth variants in
-`depth_suffixes`. The pipeline expands every base × suffix combination:
+Each subset definition has two channel lists:
+
+- **Base fields** (`compute_features_channels`) are crossed with every active
+  depth suffix. For example, `N2` with suffixes `[sfc, z25m, mld, mld_mean]`
+  produces output channels `N2_sfc`, `N2_z25m`, `N2_mld`, `N2_mld_mean`.
+
+- **Extra channels** (`extra_channels`) are appended as-is, with no suffix
+  expansion. Use these for diagnostics that are inherently 2D and would be
+  nonsensical at multiple depths — e.g. `mixed_layer_depth`, `coriolis_f`.
+
+The expansion is handled by `expand_channels_with_suffixes()` in
+`subset_definitions.py`:
 
 ```yaml
 compute_features_channels: [N2]
 depth_suffixes: [sfc, z25m, mld, mld_mean]
-# → channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean
+extra_channels: [mixed_layer_depth]
+# → output channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean, mixed_layer_depth
 ```
-
-Standalone diagnostics with no depth variants (e.g. `mixed_layer_depth`)
-go in `extra_channels` and are appended unchanged.
 
 ### Surface vs. depth-aware within the depth pipeline
 
@@ -101,27 +149,35 @@ related fields together lets you generate and export only what you need.
 
 ### Surface pipeline subsets (SURF / OSN)
 
-| Subset              | Fields                                                                                      |
-|---------------------|---------------------------------------------------------------------------------------------|
-| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      |
-| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  |
-| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              |
+| Subset              | Fields                                                                                      | Requires wind/ice data |
+|---------------------|---------------------------------------------------------------------------------------------|------------------------|
+| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      | No                     |
+| `surface_wind`      | `oceTAUX`, `oceTAUY`                                                                       | Yes                    |
+| `icearea`           | `SIarea`                                                                                    | Yes                    |
+| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  | No                     |
+| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` | No |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              | No                     |
+
+Subsets marked "Requires wind/ice data" need `oceTAUX`, `oceTAUY`, or
+`SIarea`. On **OSN** these come from the `llc_wind` kerchunk endpoint, which
+only covers **2011-11-01 to 2012-07-15**. On **SURF** they come from S3
+timestep stores, which have no date restriction but must be transferred from
+MIT first using `transfer_llc4320.py`.
 
 ### Depth pipeline subsets (DEPTH)
 
 | Subset              | Base fields                                        | Depth suffixes              | Extra channels                          |
 |---------------------|----------------------------------------------------|-----------------------------|-----------------------------------------|
 | `stratification`    | `N2`                                               | sfc, z25m, mld, mld_mean   | `mixed_layer_depth`, `ml_heat_content`  |
-| `vertical_shear`    | `vertical_shear`, `Ri`                             | mld                         |                                         |
-| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | mld                         |                                         |
-| `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | mld                         |                                         |
-| `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | mld                         |                                         |
+| `vertical_shear`    | `vertical_shear`, `Ri`                             | sfc, z25m, mld, mld_mean   |                                         |
+| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | sfc, z25m, mld, mld_mean   |                                         |
+| `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | sfc, z25m, mld, mld_mean   |                                         |
+| `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | sfc, z25m, mld, mld_mean   |                                         |
 | `energetics`        | `KE`                                               | sfc, z25m, mld, mld_mean   |                                         |
-| `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc |                                         |
-| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `okubo_weiss` | sfc |                           |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc |                                   |
-| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc                         |                                         |
+| `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc, z25m, mld, mld_mean |                   |
+| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `rossby_number`, `okubo_weiss` | sfc, z25m, mld, mld_mean | `coriolis_f` |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc, z25m, mld, mld_mean |                   |
+| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
 | `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
 
