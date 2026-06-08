@@ -27,8 +27,8 @@ config; the CLI flag takes precedence.
 ::
 
     # DEPTH pipeline — generate + export all active subsets:
-    run-all-subsets --pipeline DEPTH \\
-        --config configs/global/run.yaml --netcdf-base /path/to/output
+    run-all-subsets --pipeline DEPTH \
+        --config configs/global/run.yaml --netcdf-base /mnt/tank/Oceanography/data/OGCM/LLC/Fronts --subsets stratification --run-id vtest --ice-mask
 
     # SURF pipeline:
     run-all-subsets --pipeline SURF \\
