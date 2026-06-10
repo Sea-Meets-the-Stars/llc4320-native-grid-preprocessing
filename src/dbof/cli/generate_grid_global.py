@@ -60,7 +60,7 @@ import xarray as xr
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 from dbof.io.filesystems import create_s3_filesystems
-from dbof.dataset_creation.zarr_grid_global import GlobalGridZarrWriter
+from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrWriter
 import dbof.utils.faces_to_latlon as faces_to_latlon
 
 # Source: raw LLC4320 kerchunk files on OSN (public, read-only, no credentials needed)

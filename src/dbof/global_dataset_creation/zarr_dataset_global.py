@@ -42,9 +42,17 @@ from pathlib import PurePosixPath
 # Shared helpers
 # ---------------------------------------------------------------------------
 
-def make_run_prefix(bucket: str, folder: str, run_id: str, dataset_name: str) -> str:
+def make_run_prefix(
+    bucket: str,
+    folder: str,
+    run_id: str,
+    dataset_name: str,
+    date_prefix: str | None = None,
+) -> str:
     bucket = bucket.strip().strip("/")
     folder = folder.strip().strip("/")
+    if date_prefix:
+        return f"s3://{str(PurePosixPath(bucket, folder, run_id, date_prefix, dataset_name))}"
     return f"s3://{str(PurePosixPath(bucket, folder, run_id, dataset_name))}"
 
 
@@ -77,6 +85,10 @@ class GlobalZarrDataset:
         as returned by xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon().
         Typically (12960, 17280). Determined once via a dry-run in main() before
         the writer is constructed.
+    date_prefix : str or None, optional
+        Date subdirectory inserted between *run_id* and *dataset_name* in the
+        S3 path (e.g. ``'20121109_120000'``).  When provided the store path
+        becomes ``s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}``.
     """
 
     def __init__(
@@ -88,8 +100,10 @@ class GlobalZarrDataset:
         fs,
         channel_names: list,
         rectangular_shape: tuple,
+        date_prefix: str | None = None,
     ):
-        path = make_run_prefix(bucket, folder, run_id, dataset_name)
+        path = make_run_prefix(bucket, folder, run_id, dataset_name,
+                               date_prefix=date_prefix)
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
         self.root = zarr.open_group(store=self.store, mode="a", use_consolidated=False)
 
@@ -186,12 +200,11 @@ class GlobalZarrDatasetReader:
     len(reader)                     -> int T
     """
 
-    def __init__(self, bucket: str, folder: str, run_id: str, dataset_name: str, fs):
-        path = make_run_prefix(bucket, folder, run_id, dataset_name)
+    def __init__(self, bucket: str, folder: str, run_id: str, dataset_name: str, fs,
+                 date_prefix: str | None = None):
+        path = make_run_prefix(bucket, folder, run_id, dataset_name,
+                               date_prefix=date_prefix)
         store = zarr.storage.FsspecStore(path=path, fs=fs)
-        # use_consolidated=False: zarr v3 defaults to looking for consolidated
-        # metadata and raises GroupNotFoundError when absent. Our stores don't
-        # consolidate metadata, so we disable that lookup explicitly.
         self.root = zarr.open_group(store=store, mode="r", use_consolidated=False)
 
         self.data = self.root["data"]           # (T, C, rectangular_h, rectangular_w)

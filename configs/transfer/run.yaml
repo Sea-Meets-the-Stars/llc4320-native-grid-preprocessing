@@ -14,7 +14,7 @@
 #   {folder}/{YYYYMMDDTHH}.zarr — time-varying fields (per-date)
 #
 # Usage:
-#   transfer-timestep --config configs/transfer.yaml --init-store
+#   transfer-timestep --config configs/transfer/run.yaml --init-store
 # ---------------------------------------------------------------------------
 
 run:

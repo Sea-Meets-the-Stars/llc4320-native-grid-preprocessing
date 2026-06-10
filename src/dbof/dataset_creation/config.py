@@ -69,6 +69,9 @@ class JobConfig:
     features: FeaturesConfig
     runtime: RuntimeConfig
 
+# ---------------------------------------------------------------------------
+# Config loaders
+# ---------------------------------------------------------------------------
 
 def load_config(path: str) -> JobConfig:
     with open(path, "r") as f:

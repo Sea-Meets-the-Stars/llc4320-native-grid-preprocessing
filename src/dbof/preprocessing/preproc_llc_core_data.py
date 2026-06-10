@@ -60,3 +60,37 @@ def process_llc4320_grid (grid_ds):
 
     return ds_grid
 
+
+def process_llc4320_3d_grid(grid_ds):
+    """
+    Process LLC4320 grid geometry for depth-diagnostic pipelines.
+
+    Same as ``process_llc4320_grid`` but additionally retains vertical
+    coordinate arrays (Z, Zl, Zu, Zp1, drF) needed for depth selection,
+    vertical derivatives, and MLD calculations.
+
+    Parameters
+    ----------
+    grid_ds : xarray.Dataset
+        Dataset containing LLC4320 grid geometry variables.
+
+    Returns
+    -------
+    ds_grid : xarray.Dataset
+        Grid-only dataset containing selected geometry variables plus
+        vertical coordinates.
+    """
+    ds_grid = grid_ds
+    coords_to_keep = [
+        # Horizontal (same as process_llc4320_grid)
+        'XC', 'YC', 'dxC', 'dyC', 'dxG', 'dyG', 'rAz', 'rA',
+        'Depth', 'hFacC', 'SN', 'CS',
+        # Vertical coordinates
+        'Z', 'Zl', 'Zu', 'Zp1', 'drF',
+    ]
+    all_vars = set(grid_ds.reset_coords().data_vars) | set(grid_ds.coords)
+    coords_to_keep = [c for c in coords_to_keep if c in all_vars]
+    ds_grid = ds_grid.reset_coords()[coords_to_keep]
+
+    return ds_grid
+
