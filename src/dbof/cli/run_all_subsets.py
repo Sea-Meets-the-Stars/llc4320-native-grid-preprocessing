@@ -464,9 +464,15 @@ def _parse_args():
     )
     p.add_argument(
         "--clobber", action="store_true", default=False,
-        help=("Re-export channels whose NetCDF file already exists.  Default "
-              "is to skip existing files (per-channel), so only missing "
-              "channels are exported."),
+        help=("Force BOTH phases: regenerate subset/date zarr stores that "
+              "already exist AND re-export every channel NetCDF.  Default skips "
+              "existing stores and existing .nc files."),
+    )
+    p.add_argument(
+        "--clobber-export", action="store_true", default=False,
+        help=("Force re-export of ALL channel NetCDFs from the existing zarr "
+              "stores, WITHOUT regenerating the stores.  Use to (re)convert "
+              "everything already in the store to .nc.  (Implied by --clobber.)"),
     )
     return p.parse_args()
 
@@ -643,7 +649,7 @@ def main():
                     netcdf_base=args.netcdf_base,
                     dry_run=args.dry_run,
                     ice_mask=args.ice_mask,
-                    clobber=args.clobber,
+                    clobber=(args.clobber or args.clobber_export),
                 )
             except Exception:
                 log.exception("FAILED to export subset '%s'", subset_name)
