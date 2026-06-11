@@ -208,3 +208,49 @@ existing `tests/`.
 
 Plan complete and awaiting go-ahead to implement (no code/notebook created
 yet).
+
+### 2026-06-11 (Implemented Test Case A — no-rotation derivative values)
+
+Created `tests/test_native_gradient.py` and implemented Test Case A. It
+**passes** under the `ocean14` env (`pytest tests/test_native_gradient.py`,
+1 passed). The xgcm `keep_coords` DeprecationWarnings come from xgcm
+internals, not this code.
+
+**Reusable fixtures built (for later cases B–G too):**
+- `make_synthetic_grid(n, d, cs, sn)` — builds a full **13-face** dataset
+  (`CS`/`SN` on tracer `(face,j,i)`, `dxC` on U `(face,j,i_g)`, `dyC` on V
+  `(face,j_g,i)`) with comodo `axis`/`c_grid_axis_shift` attrs, then calls
+  the production `grid.set_xgcm_grid(..., use_connections=True)`. Uniform
+  metrics `dxC=dyC=d` and constant `CS`,`SN` keep the answer analytic while
+  still exercising `face_connections`.
+- `add_linear_velocity(ds, d, a, b, e, f)` — adds `U=a*x+b*y` (U points),
+  `V=e*x+f*y` (V points). Linearity makes diff+interp exact, so the result
+  equals `J_model=[[a,b],[e,f]]` before rotation.
+- `interior(da, margin=3)` — trims the face-edge ring before comparison.
+
+**Test Case A** (`test_jacobian_no_rotation_recovers_model_gradients`):
+`CS=1, SN=0` ⇒ rotation is identity ⇒ outputs must equal the model slopes
+`(a,b,e,f)`. Asserts each component constant over every face interior with
+`rtol=1e-9`, plus a coordinate-contract check (outputs on `(face,j,i)`, no
+`i_g`/`j_g`).
+
+**Verified the test is meaningful, not trivially green:**
+- Interior max abs error vs `a` was **3.6e-20** (machine precision) — diff
+  and linear interp are exact for linear fields, as expected.
+- Edge cells of a sample row read `[-4.5e-5, -4.5e-5, 1e-5×12, -3e-5]`: the
+  trimmed cells genuinely deviate from the interior constant because the
+  `face_connections` halo injects the (inconsistent) neighbour-face linear
+  field. This confirms (a) the 13-face topology is actually exercised and
+  (b) `EDGE_MARGIN=3` safely covers the ≤2-cell observed contamination from
+  the interp→diff→interp chain.
+
+**What I learned / decisions:**
+- Only velocity *slopes* (not absolute position offsets) affect the result,
+  so exact half-cell staggering of the synthetic field is irrelevant — this
+  makes the fixtures robust without reasoning about xgcm's half-cell
+  bookkeeping.
+- No pytest markers were added yet: Case A needs no network. Marker
+  registration (`slow`/`network`) will accompany the real-grid tests (F/G).
+
+Next: Test Case B (90° rotation) and D (parametrized angle sweep), reusing
+these fixtures.
