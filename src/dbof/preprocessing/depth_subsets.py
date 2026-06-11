@@ -30,6 +30,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     froude_number_3d,
     rossby_number_3d,
     burger_number_3d,
+    balanced_richardson_number_3d,
     # -- wind --
     wind_stress_curl,
     ekman_pumping,
@@ -243,6 +244,12 @@ def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
         bu_3d = burger_number_3d(ds_merge, grid, mld=mld)   # lazy
         results.update(apply_depth_strategies(
             bu_3d, "Bu", ds_merge, mld=mld, requested=requested))
+
+    if any(c.startswith("R_ib_") for c in requested):
+        # Balanced Richardson number R_ib = N² f² / |∇_h b|² (lazy).
+        rib_3d = balanced_richardson_number_3d(ds_merge, grid)
+        results.update(apply_depth_strategies(
+            rib_3d, "R_ib", ds_merge, mld=mld, requested=requested))
 
     return _materialise_results(results)
 

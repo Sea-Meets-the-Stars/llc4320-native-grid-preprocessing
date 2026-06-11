@@ -119,7 +119,7 @@ DEPTH_SUBSETS = {
         "dataset_name": "mixing_parameters.zarr",
         "surface_only": False,
         "model_data_feature_channels": [],
-        "compute_features_channels": ["Fr", "Ro", "Bu"],
+        "compute_features_channels": ["Fr", "Ro", "Bu", "R_ib"],
         "depth_suffixes": DEFAULT_DEPTH_SUFFIXES,
     },
 
