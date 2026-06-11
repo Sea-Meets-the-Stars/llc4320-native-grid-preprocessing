@@ -127,6 +127,24 @@ extra_channels: [mixed_layer_depth]
 # → output channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean, mixed_layer_depth
 ```
 
+### Mixed-layer depth definitions
+
+The mixed-layer depth (MLD) — the depth to the base of the mixed layer — has
+several definitions. Two estimators are implemented in
+`calculated_fields_at_depth.py`, both returning a 2D field (positive metres):
+
+| Field    | Function                  | Definition                                                                 |
+|----------|---------------------------|----------------------------------------------------------------------------|
+| `MLD`    | `mixed_layer_depth`       | **Threshold (default).** Deepest depth where the potential density σ₀ exceeds σ₀ at the 10 m reference level by ≤ 0.03 kg m⁻³ (Bodner et al.). Lands on a discrete model level. |
+| `MLD_DI` | `mixed_layer_depth_DI`    | **Depth Integration Method.** N²-weighted mean depth over the upper 300 m: `MLD_DI = ∫₀³⁰⁰ z N²(z) dz / ∫₀³⁰⁰ N²(z) dz`. Continuous (off-level) depth near the base of the pycnocline. |
+
+The threshold estimator is the project default. The Depth Integration
+estimator weights by the buoyancy frequency squared N²(z); statically
+unstable layers (N² < 0) are floored to zero before weighting. The
+integration depth defaults to `MLD_INTEGRATION_DEPTH_M` (300 m). See
+`notebooks/notebooks_dev/mld_depth.ipynb` for a side-by-side comparison of
+the two definitions on a few profiles.
+
 ### Surface vs. depth-aware within the depth pipeline
 
 Subset entries can set `surface_only: true` to skip depth processing entirely.

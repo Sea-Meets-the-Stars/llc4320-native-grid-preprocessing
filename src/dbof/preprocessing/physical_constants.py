@@ -73,3 +73,12 @@ MLD_REFERENCE_DEPTH_M = 10.0
 
 Following Bodner et al., the nearest model level is ~9.66 m.
 """
+
+MLD_INTEGRATION_DEPTH_M = 300.0
+"""float: Upper-ocean integration depth for the MLD Depth Integration
+Method [m].
+
+The Depth Integration estimator (``mixed_layer_depth_DI``) weights the
+buoyancy frequency squared N²(z) over the upper ``MLD_INTEGRATION_DEPTH_M``
+metres to define the mixed-layer depth.
+"""
