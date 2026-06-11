@@ -174,7 +174,7 @@ MIT first using `transfer_llc4320.py`.
 |---------------------|----------------------------------------------------|-----------------------------|-----------------------------------------|
 | `stratification`    | `N2`                                               | sfc, z25m, mld, mld_mean   | `mixed_layer_depth`, `ml_heat_content`  |
 | `vertical_shear`    | `vertical_shear`, `Ri`                             | sfc, z25m, mld, mld_mean   |                                         |
-| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | sfc, z25m, mld, mld_mean   |                                         |
+| `mixing_parameters` | `Fr`, `Ro`, `Bu`, `R_ib`                           | sfc, z25m, mld, mld_mean   |                                         |
 | `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | sfc, z25m, mld, mld_mean   |                                         |
 | `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | sfc, z25m, mld, mld_mean   |                                         |
 | `energetics`        | `KE`                                               | sfc, z25m, mld, mld_mean   |                                         |
@@ -184,6 +184,28 @@ MIT first using `transfer_llc4320.py`.
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
 | `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
+
+### Balanced Richardson number (`R_ib`)
+
+`R_ib` (in the `mixing_parameters` subset) is the **balanced Richardson
+number** (Thomas, Tandon & Mahadevan 2013) — the gradient Richardson number
+of a flow in thermal-wind balance, and a dimensionless measure of frontal
+stability:
+
+```
+R_ib = N² · f² / |∇_h b|²
+```
+
+where `N²` is the buoyancy frequency squared, `f` the Coriolis parameter,
+and `|∇_h b|²` the squared horizontal buoyancy-gradient magnitude. Because
+`N²` is a vertical density derivative, `R_ib` is **DEPTH-pipeline only**
+(there is no surface-pipeline variant). Both `N²` and `|∇_h b|²` are built
+from the *same* physically consistent, unscaled buoyancy `b = (g/ρ₀)·ρ`, so
+the ratio is genuinely dimensionless (the `×1e3`-scaled `grad_b2_3d` is
+deliberately **not** reused — it would bias `R_ib` by a constant `1e6`).
+`R_ib` is `NaN` where `|∇_h b|² = 0` and tends to `0` at the equator
+(`f → 0`). It is computed by `balanced_richardson_number_3d` in
+`src/dbof/preprocessing/calculated_fields_at_depth.py`.
 
 ---
 

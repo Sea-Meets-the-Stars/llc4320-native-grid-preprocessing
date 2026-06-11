@@ -56,6 +56,12 @@ We will typically calculate it at a specific depth or averaged over a range of d
 
 ### Tests
 
+1. In addition to the existing tests you generated, please add:
+
+- A test that works on the real grid, i.e. requiring the network.  Follow the approach as in test_generate_tile.py
+- You should work on a small subset of the grid, e.g. a single tile or maybe two neighboring tiles if that is feasible
+- Check that the metadata is being written correctly
+
 ### Planning
 
 **Physical definition**
@@ -189,8 +195,10 @@ I agree.
 
 ## Prompts
 
-1. Re-read this document.  Implement the first item under R_ib/Implementation
-2. Re-read this document.  Implement the 2nd item under R_ib/Implementation
+1. Re-read this document.  Implement the first item under Implementation
+2. Re-read this document.  Implement the 2nd item under Implementation
+3. Re-read this document.  Implement the 1st item under Testing
+4. Re-read this document.  Implement the 1st item under Docs
 
 
 ## Logging
@@ -291,3 +299,85 @@ grid. All 3 pass in `ocean14`.
 - `apply_depth_strategies` keys channels by exact `f"{base}_{suffix}"`
   membership, so a multi-underscore base like `R_ib` needs no special
   handling — it slots in like `Fr`/`Ro`/`Bu`.
+
+### 2026-06-11 (Added a real-grid network test for R_ib)
+
+Executed the first item under Testing: added a network-dependent
+integration test on a real LLC4320 tile and a metadata-round-trip check, in
+the style of `test_generate_tile.py`'s
+`test_rect_ij_to_tile_against_grid_zarr`.
+
+**Test added** — `test_balanced_richardson_against_real_tile` in
+`tests/test_calculated_fields_at_depth.py`:
+  1. resolves one 720×720 tile (mid-grid pixel → open-ocean tile on face 4)
+     and loads its *real* grid (XC, YC, Z, dxC, dyC, CS, SN, drF) plus
+     Theta/Salt for `2012-11-09 12:00:00` from the LLC4320 S3 store, reusing
+     the tile loaders `tile_utils._load_grid_for_tile` /
+     `_load_tracers_for_tile`;
+  2. runs the production `balanced_richardson_number_3d` and reduces to the
+     surface with `apply_depth_strategies` (the `mixing_parameters` path);
+  3. writes the field + provenance to a NetCDF, reloads, and asserts the
+     field metadata (`long_name`, `units`) and provenance attrs
+     (`timestamp`, `tile_index`, `face_index`, `property`) round-trip
+     correctly, plus that the tile interior is predominantly finite.
+
+All 4 tests in the file pass in `ocean14` (~90 s incl. the S3 fetch +
+compute; the network test is documented as deselectable for offline runs).
+
+**What I learned**
+
+- The tile loaders (`_load_grid_for_tile`) slice only the tracer dims
+  (i, j) and leave the staggered dims (`i_g`, `j_g`) at the full face width
+  (4320). To build a valid single-face xgcm grid for the horizontal
+  gradients, those staggered dims must be sliced to the same tile extent;
+  then `set_xgcm_grid(..., use_connections=False)` works and
+  `calculate_native_gradient_tracer` produces correct interior gradients
+  (fill-boundary edges aside).
+- On the real tile the surface R_ib is ~99.99% finite with a median ≈ 100
+  in the interior — physically sensible for an open-ocean, stratified
+  region.
+- R_ib needs no velocity fields (only Theta/Salt + grid + latitude), which
+  keeps the network test light (two tracer variables).
+
+### 2026-06-11 (Documented R_ib)
+
+Executed the first item under Docs: examined `docs/`, added R_ib
+documentation, and made R_ib well-defined alongside the other fields in the
+code base.
+
+**What I examined** — the `docs/` tree (`Global_Maps.md`, `Tiles.md`,
+`index.md`, `Sampling_With_GradB2.md`, …) and the in-code field catalogue
+`src/dbof/defs.py` (`fields_dmodel`). `Global_Maps.md` is the canonical
+reference for pipeline × subset × channel combinations; field channel lists
+come from `subset_definitions.py` (code), not the YAML, so no config doc
+needed updating.
+
+**Changes**
+
+- `docs/Global_Maps.md`:
+  - Added `R_ib` to the `mixing_parameters` row of the **Depth pipeline
+    subsets** table (so the doc matches `subset_definitions.py`).
+  - Added a new **Balanced Richardson number (`R_ib`)** subsection defining
+    the field (formula `N² f² / |∇_h b|²`, dimensionless, DEPTH-only, the
+    physically-consistent unscaled buoyancy rationale, NaN/equator
+    behaviour, and a pointer to `balanced_richardson_number_3d`).
+- `src/dbof/defs.py`: added an `R_ib` entry to `fields_dmodel` (desc +
+  `dimensionless` units), so R_ib is catalogued where `gradb2` / `log_gradb`
+  are.
+
+The canonical code-level definition already lives in the
+`balanced_richardson_number_3d` docstring (added in the implementation
+step); these doc changes make R_ib discoverable in the same places as the
+other derived fields.
+
+**What I learned**
+
+- The repo keeps field definitions in three complementary places: the
+  function docstrings (authoritative formula/units), `defs.py`
+  (`fields_dmodel`, a lightweight catalogue), and `docs/Global_Maps.md`
+  (the subset/channel reference). Documenting a new field well means
+  touching all three; the docstring was done at implementation time, so
+  this step covered the latter two.
+- Other dimensionless numbers (`Ri`, `Fr`, `Ro`, `Bu`) carry no formula in
+  the docs — only the subset tables — so a dedicated `R_ib` definition
+  subsection is a net improvement to the docs rather than an inconsistency.

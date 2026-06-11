@@ -14,4 +14,9 @@ fields_dmodel = {
         "desc": "log_gradb (log10 of gradient of buoyancy, squared)",
         "units": "log10(s^4)",
     },
+    "R_ib": {
+        "desc": ("R_ib (balanced Richardson number, "
+                 "N^2 f^2 / |grad_h b|^2)"),
+        "units": "dimensionless",
+    },
 }
