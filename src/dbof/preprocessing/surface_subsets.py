@@ -188,6 +188,8 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
 SUBSET_COMPUTE_FNS = {
     "native_fields":     compute_native_fields,
+    "surface_wind":      compute_native_fields,   # no-op — raw model vars only
+    "icearea":           compute_native_fields,   # no-op — raw model vars only
     "frontal_structure": compute_frontal_structure,
     "kinematic":         compute_kinematic,
     "frontogenesis":     compute_frontogenesis,

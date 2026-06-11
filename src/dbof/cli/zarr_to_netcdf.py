@@ -6,7 +6,7 @@ Two modes (selected via --mode):
   snapshots (default)
   -------------------
   Reads global LLC4320 snapshots from the S3 Zarr store written by
-  generate_global_depth.py (or generate_global.py) and writes one NetCDF
+  generate_global.py and writes one NetCDF
   file per timestep to a local directory on the HPC machine.
 
   All zarr stores are assumed to live under a date_prefix subdirectory::
@@ -46,7 +46,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --dates '2012-11-09 12:00:00' \\
@@ -57,20 +57,20 @@ Usage — snapshots
       --mode snapshots \
       --s3-endpoint https://s3-west.nrp-nautilus.io \
       --bucket dbof \
-      --folder properties \
-      --run-id testing_019 \
-      --dataset-name native_fields.zarr \
+      --folder depth_fields \
+      --run-id global_DEPTH_test01 \
+      --dataset-name stratification.zarr \
       --dates '2012-11-09 12:00:00' \
-      --channels Theta_sfc \
+      --channels N2_sfc \
       --output-dir /mnt/tank/Oceanography/data/OGCM/LLC/Fronts/vtest/20121109_120000 \
-      --output-filename LLC4320_2012-11-09T12_00_00_Theta_sfc.nc
+      --output-filename LLC4320_2012-11-09T12_00_00_N2_sfc.nc
 
   # All dates (reads all date_prefix subdirectories from the store):
   zarr-to-netcdf \\
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --output-dir /scratch/llc4320_netcdf/
@@ -80,7 +80,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --dates '2012-11-09 12:00:00' \\
@@ -92,7 +92,7 @@ Usage — snapshots
       --mode snapshots \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder properties \\
+      --folder depth_fields \\
       --run-id global_depth_test00 \\
       --dataset-name stratification.zarr \\
       --dates '2012-11-09 12:00:00' \\
@@ -113,39 +113,24 @@ Usage — grid
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import xarray as xr
 
 from dbof.io.filesystems import create_s3_filesystems
-import dbof.dataset_creation.zarr_dataset_global as zarr_dataset_global
-import dbof.dataset_creation.zarr_grid_global as zarr_grid_global
+from dbof.global_dataset_creation.iterations import (
+    date_to_run_id as _date_to_prefix,
+    prefix_to_display as _prefix_to_display,
+)
+import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset_global
+import dbof.global_dataset_creation.zarr_grid_global as zarr_grid_global
 from dbof.preprocessing.ice_mask import load_siarea_mask, apply_ice_mask
 
 
 # ---------------------------------------------------------------------------
-# Date ↔ date_prefix helpers
+# S3 date-prefix discovery
 # ---------------------------------------------------------------------------
-
-DATE_FMT = '%Y-%m-%d %H:%M:%S'
-
-
-def _date_to_prefix(date_str: str) -> str:
-    """Convert 'YYYY-MM-DD HH:MM:SS' → date_prefix '20121109_120000'."""
-    dt = datetime.strptime(date_str.strip(), DATE_FMT)
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
-def _prefix_to_display(date_prefix: str) -> str:
-    """Convert '20121109_120000' → '2012-11-09 12:00:00' for display."""
-    try:
-        dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
-        return dt.strftime(DATE_FMT)
-    except ValueError:
-        return date_prefix
-
 
 def _discover_date_prefixes(bucket, folder, run_id, dataset_name, fs):
     """List available date_prefix subdirectories for a given run_id.
@@ -164,7 +149,7 @@ def _discover_date_prefixes(bucket, folder, run_id, dataset_name, fs):
 
     prefixes = []
     for entry in entries:
-        # entry looks like 'dbof/properties/run_id/20121109_120000'
+        # entry looks like 'dbof/depth_fields/run_id/20121109_120000'
         candidate = entry.rstrip("/").split("/")[-1]
         # Check that this directory actually contains the target dataset
         dataset_path = f"{entry}/{dataset_name}"
@@ -203,7 +188,7 @@ def zarr_to_netcdf(
     bucket : str
         S3 bucket name, e.g. 'dbof'.
     folder : str
-        S3 folder path, e.g. 'properties'.
+        S3 folder path, e.g. ``'surface_fields'`` or ``'depth_fields'``.
     run_id : str
         The run_id used when writing the Zarr store.
     dataset_name : str
@@ -640,7 +625,7 @@ if __name__ == '__main__':
     p.add_argument('--bucket', required=True,
                    help="S3 bucket name, e.g. dbof")
     p.add_argument('--folder', required=True,
-                   help="S3 folder, e.g. properties")
+                   help="S3 folder, e.g. surface_fields or depth_fields")
 
     # Output
     p.add_argument('--output-dir', required=True,

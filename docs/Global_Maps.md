@@ -9,84 +9,86 @@ preserved — no interpolation to a regular lat/lon grid is performed.
 
 ---
 
-## Pipelines at a glance
+## Choosing a pipeline
 
-There are three `generate_global` pipelines, each suited to different input
-sources and depth handling:
+Three pipeline variants exist. **You must choose one before running.** The
+right choice depends on what variables you need, at what depths, and whether
+you have transferred data from MIT.
 
-| Pipeline                  | Depth support           | Input source                       | Prerequisite               |
-|---------------------------|-------------------------|------------------------------------|----------------------------|
-| `generate_global.py`      | Surface only            | S3 timestep stores (from MIT)      | `transfer_llc4320.py`      |
-| `generate_global_OSN.py`  | Surface only            | OSN kerchunk (direct)              | None                       |
-| `generate_global_depth.py`| Surface + depth-aware   | S3 timestep stores (from MIT)      | `transfer_llc4320.py`      |
+**Start here:**
 
-All three share the same output format: S3 Zarr stores shaped
+1. **Do you need depth-resolved fields (below the surface)?** → Use **DEPTH**.
+   Requires timesteps transferred from MIT via `transfer_llc4320.py`.
+
+2. **Do you only need surface fields?**
+   - **Do you need wind stress (`oceTAUX`, `oceTAUY`) or sea ice (`SIarea`)?**
+     - Is your date within **2011-11-01 to 2012-07-15**? → Use **OSN**.
+       No data transfer needed.
+     - Is your date outside that window? → Use **SURF**. Requires timesteps
+       transferred from MIT via `transfer_llc4320.py`.
+   - **Do you only need core variables (`Theta`, `Salt`, `Eta`, `U`, `V`, `W`)
+     or derived fields (frontal_structure, kinematic, frontogenesis)?**
+     → Use **OSN**. No data transfer needed. Dates must fall within
+     **2011-09-13 to 2012-11-15**.
+
+### Data availability
+
+| Source     | Variables                                  | Date range                    | Prerequisite            |
+|------------|--------------------------------------------|-------------------------------|-------------------------|
+| OSN (`llc_surf`)  | Theta, Salt, Eta, U, V, W           | 2011-09-13 – 2012-11-15      | None                    |
+| OSN (`llc_wind`)  | oceTAUX, oceTAUY, SIarea            | 2011-11-01 – 2012-07-15      | None                    |
+| LLC_SURF (S3)     | All surface variables + grid         | Per-timestep, on request      | `transfer_llc4320.py`   |
+| LLC_DEPTH (S3)    | All variables, 51 depth levels + grid| Per-timestep, on request      | `transfer_llc4320.py`   |
+
+The `surface_wind` and `icearea` subsets require wind/ice variables. In the
+OSN pipeline these come from the `llc_wind` kerchunk endpoint (limited date
+range). In the SURF pipeline they come from S3 timestep stores — the date
+range is unlimited, but the data must first be transferred from the MIT Zarr
+store using `transfer_llc4320.py`. There is currently no pre-flight check
+that a timestep store exists in S3, so a missing transfer will surface as an
+S3 read error at runtime.
+
+---
+
+## Pipeline overview
+
+A single unified entry point (`generate_global.py`) dispatches on the
+`pipeline` key in the YAML config:
+
+| Pipeline | Depth support         | Input source                  | Prerequisite          |
+|----------|-----------------------|-------------------------------|-----------------------|
+| `SURF`   | Surface only          | OSN kerchunk + S3 forcing     | `transfer_llc4320.py` |
+| `OSN`    | Surface only          | OSN kerchunk (direct)         | None                  |
+| `DEPTH`  | Surface + depth-aware | S3 timestep stores (from MIT) | `transfer_llc4320.py` |
+
+All variants share the same output format: S3 Zarr stores shaped
 `(T, C, 12960, 17280)` with chunk shape `(1, 1, 12960, 17280)`.
 
----
-
-## 1. `generate_global.py` — Surface-only (S3 source)
-
-Surface-only global maps. Reads raw LLC4320 fields from the OSN kerchunk
-endpoint for core variables (`Theta`, `Salt`, `Eta`, `U`, `V`, `W`) and from
-S3 timestep stores for additional variables not available via kerchunk
-(e.g. `oceTAUX`, `SIarea`).
-
-**The desired timestep must first be transferred from MIT using
-`transfer_llc4320.py`** (see below) before any S3-sourced variables can be
-read.
-
-Config: `configs/global.yaml`. Console command: `generate-global`.
+Config: `configs/global/run.yaml`. Console command: `generate-global`.
 
 ```bash
-generate-global \
-    --config configs/global.yaml \
-    --subset kinematic \
-    --run_id kinematic_$(date +%Y%m%d_%H%M%S)
+generate-global --config configs/global/run.yaml
+generate-global --config configs/global/run.yaml --subset kinematic
+generate-global --config configs/global/run.yaml --pipeline OSN
 ```
 
-Flags: `--subset`, `--run_id`, `--no-icemask` (ice mask off by default).
+Flags: `--subset`, `--pipeline`, `--run_id`, `--no-icemask`.
 
----
+### Pipeline variants
 
-## 2. `generate_global_OSN.py` — Surface-only (OSN direct)
+**SURF** — Surface-only global maps. Reads core variables (`Theta`, `Salt`,
+`Eta`, `U`, `V`, `W`) from OSN kerchunk and forcing variables (`oceTAUX`,
+`oceTAUY`, `SIarea`) from S3 timestep stores written by
+`transfer_llc4320.py`.
 
-Surface-only global maps using inputs directly from the OSN S3 store via
-kerchunk. Uses two OSN endpoints: the standard one for core variables and a
-second (`llc_wind`) for wind stress and sea-ice variables (`KPPhbl`,
-`PhiBot`, `oceTAUX`, `oceTAUY`, `SIarea`).
+**OSN** — Surface-only global maps from OSN kerchunk endpoints (no S3
+timestep stores needed). Uses two OSN endpoints: the standard one for core
+variables and `llc_wind` for wind stress and sea-ice variables.
 
-**No transfer step is required** — all data is read directly from OSN.
-However, the wind/sea-ice endpoint has a limited date range, so not all
-timesteps are available for all variables.
-
-Config: `configs/global_OSN.yaml`. Console command: `generate-global-osn`.
-
-Key differences from `generate_global.py`:
-
-- Uses OSN-native iteration offsets (`osn_date_to_iteration`).
-- Ice mask is on by default (`--no-icemask` to disable).
-- No S3 timestep store fallback — all data comes from OSN.
-
----
-
-## 3. `generate_global_depth.py` — Depth-aware pipeline
-
-Fully-lazy Dask pipeline for depth-resolved diagnostics. Reads full 3D
-(depth-resolved) data from S3 timestep stores, computes derived fields using
-xgcm on dask arrays, reduces each field to a 2D surface using one or more
-depth strategies, stitches the 13 LLC faces, and writes to S3 Zarr.
-
-**Requires data transferred from the MIT Zarr store using
-`transfer_llc4320.py`.**
-
-Config: `configs/global_depth.yaml`. Console command: `generate-global-depth`.
-
-```bash
-generate-global-depth \
-    --config configs/global_depth.yaml \
-    --subset stratification
-```
+**DEPTH** — Fully-lazy Dask pipeline for depth-resolved diagnostics. Reads
+full 3D data from S3 timestep stores, computes derived fields using xgcm,
+reduces to 2D via depth strategies, stitches the 13 LLC faces, and writes to
+S3 Zarr. **Requires data transferred from MIT using `transfer_llc4320.py`.**
 
 ### Depth strategies (suffixes)
 
@@ -101,18 +103,25 @@ layer for output. The available strategies are:
 | `mld`       | Value at the mixed-layer depth                            |
 | `mld_mean`  | Thickness-weighted mean over 0 ≤ z ≤ MLD                 |
 
-In the config, each subset lists its base channel names in
-`compute_features_channels` and the desired depth variants in
-`depth_suffixes`. The pipeline expands every base × suffix combination:
+Each subset definition has two channel lists:
+
+- **Base fields** (`compute_features_channels`) are crossed with every active
+  depth suffix. For example, `N2` with suffixes `[sfc, z25m, mld, mld_mean]`
+  produces output channels `N2_sfc`, `N2_z25m`, `N2_mld`, `N2_mld_mean`.
+
+- **Extra channels** (`extra_channels`) are appended as-is, with no suffix
+  expansion. Use these for diagnostics that are inherently 2D and would be
+  nonsensical at multiple depths — e.g. `mixed_layer_depth`, `coriolis_f`.
+
+The expansion is handled by `expand_channels_with_suffixes()` in
+`subset_definitions.py`:
 
 ```yaml
 compute_features_channels: [N2]
 depth_suffixes: [sfc, z25m, mld, mld_mean]
-# → channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean
+extra_channels: [mixed_layer_depth]
+# → output channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean, mixed_layer_depth
 ```
-
-Standalone diagnostics with no depth variants (e.g. `mixed_layer_depth`)
-go in `extra_channels` and are appended unchanged.
 
 ### Surface vs. depth-aware within the depth pipeline
 
@@ -125,6 +134,11 @@ not its 3D computation machinery.
 
 ## Subsets
 
+Each pipeline supports a specific set of subsets.  Running a subset that
+does not belong to the chosen pipeline will raise a `ValueError`.  The
+canonical reference for valid pipeline × subset combinations is in
+`configs/global/run.yaml`.
+
 A **subset** is a named group of related calculated fields/properties that are
 computed and written together as a single Zarr store. Each subset has its own
 `dataset_name` (e.g. `stratification.zarr`) and channel list defined in the
@@ -133,29 +147,37 @@ config YAML.
 Subsets exist because the full set of derived fields is large — grouping
 related fields together lets you generate and export only what you need.
 
-### Surface pipeline subsets (`generate_global.py` / `generate_global_OSN.py`)
+### Surface pipeline subsets (SURF / OSN)
 
-| Subset              | Fields                                                                                      |
-|---------------------|---------------------------------------------------------------------------------------------|
-| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      |
-| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  |
-| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              |
+| Subset              | Fields                                                                                      | Requires wind/ice data |
+|---------------------|---------------------------------------------------------------------------------------------|------------------------|
+| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      | No                     |
+| `surface_wind`      | `oceTAUX`, `oceTAUY`                                                                       | Yes                    |
+| `icearea`           | `SIarea`                                                                                    | Yes                    |
+| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  | No                     |
+| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` | No |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              | No                     |
 
-### Depth pipeline subsets (`generate_global_depth.py`)
+Subsets marked "Requires wind/ice data" need `oceTAUX`, `oceTAUY`, or
+`SIarea`. On **OSN** these come from the `llc_wind` kerchunk endpoint, which
+only covers **2011-11-01 to 2012-07-15**. On **SURF** they come from S3
+timestep stores, which have no date restriction but must be transferred from
+MIT first using `transfer_llc4320.py`.
+
+### Depth pipeline subsets (DEPTH)
 
 | Subset              | Base fields                                        | Depth suffixes              | Extra channels                          |
 |---------------------|----------------------------------------------------|-----------------------------|-----------------------------------------|
 | `stratification`    | `N2`                                               | sfc, z25m, mld, mld_mean   | `mixed_layer_depth`, `ml_heat_content`  |
-| `vertical_shear`    | `vertical_shear`, `Ri`                             | mld                         |                                         |
-| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | mld                         |                                         |
-| `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | mld                         |                                         |
-| `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | mld                         |                                         |
+| `vertical_shear`    | `vertical_shear`, `Ri`                             | sfc, z25m, mld, mld_mean   |                                         |
+| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | sfc, z25m, mld, mld_mean   |                                         |
+| `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | sfc, z25m, mld, mld_mean   |                                         |
+| `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | sfc, z25m, mld, mld_mean   |                                         |
 | `energetics`        | `KE`                                               | sfc, z25m, mld, mld_mean   |                                         |
-| `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc |                                         |
-| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `okubo_weiss` | sfc |                           |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc |                                   |
-| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc                         |                                         |
+| `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc, z25m, mld, mld_mean |                   |
+| `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `rossby_number`, `okubo_weiss` | sfc, z25m, mld, mld_mean | `coriolis_f` |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc, z25m, mld, mld_mean |                   |
+| `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
 | `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
 
@@ -164,12 +186,16 @@ related fields together lets you generate and export only what you need.
 ## Batch driver: `run_all_subsets.py`
 
 The batch driver (`dbof.cli.run_all_subsets`) automates the two-phase
-workflow across all subsets and configs:
+workflow across all active subsets in a single `run.yaml` config (the same
+config used by `generate_global.py`):
 
-1. **Phase 1 — Generate:** calls `generate_global_depth.main()` for each
+1. **Phase 1 — Generate:** calls `generate_global.main()` for each
    subset, producing Zarr stores on S3.
 2. **Phase 2 — Export:** calls `zarr_to_netcdf.main()` once per channel,
    writing individual NetCDF files.
+
+Subset definitions and channel lists come from code
+(`subset_definitions.py`), not from the YAML.
 
 ### NetCDF output layout
 
@@ -177,38 +203,57 @@ workflow across all subsets and configs:
 {netcdf_base}/{run_id}/{date_prefix}/LLC4320_{date}_{channel}_{run_id}.nc
 ```
 
-where `netcdf_base` defaults to `/mnt/tank/Oceanography/data/OGCM/LLC/Fronts`,
-and `date` is formatted as `2012-11-09T12_00_00`.
+`--netcdf-base` is a required CLI argument (no default).
+`date` is formatted as `2012-11-09T12_00_00`.
 
 Example:
 ```
-/mnt/tank/Oceanography/data/OGCM/LLC/Fronts/global_depth_test00/20121109_120000/LLC4320_2012-11-09T12_00_00_N2_sfc_global_depth_test00.nc
+/my/output/dir/global_test00/20121109_120000/LLC4320_2012-11-09T12_00_00_N2_sfc_global_test00.nc
 ```
 
 ### CLI usage
 
-```bash
-# Generate + export all subsets:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml
+The `--pipeline` flag selects which pipeline variant to run (SURF, OSN,
+or DEPTH).  It can also be set via the `pipeline` key in the YAML config;
+the CLI flag takes precedence.
 
-# Only specific subsets:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml \
+```bash
+# DEPTH pipeline — generate + export all active subsets:
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output
+
+# SURF pipeline:
+run-all-subsets --pipeline SURF \
+    --config configs/global/run.yaml --netcdf-base /path/to/output
+
+# OSN pipeline:
+run-all-subsets --pipeline OSN \
+    --config configs/global/run.yaml --netcdf-base /path/to/output
+
+# Only specific subsets (overrides active_subsets in YAML):
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output \
     --subsets stratification native_fields
 
 # Export only (assumes Zarr stores already exist):
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --export-only
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --export-only
 
 # Generate only (skip NetCDF export):
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --generate-only
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --generate-only
 
 # Override run_id:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --run-id my_run_01
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --run-id my_run_01
 
 # Dry run:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --dry-run
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --dry-run
 
 # With ice masking:
-python -m dbof.cli.run_all_subsets --config configs/global_depth.yaml --ice-mask
+run-all-subsets --pipeline DEPTH \
+    --config configs/global/run.yaml --netcdf-base /path/to/output --ice-mask
 ```
 
 ### Ice masking
@@ -230,9 +275,9 @@ skipped in `--export-only` mode (a warning is logged instead).
 
 ## Preprocessing: `transfer_llc4320.py`
 
-Both `generate_global.py` and `generate_global_depth.py` read from S3
-timestep stores. These stores must be created by transferring data from the
-MIT Zarr store using `transfer_llc4320.py`.
+The SURF and DEPTH pipelines read from S3 timestep stores. These stores must
+be created by transferring data from the MIT Zarr store using
+`transfer_llc4320.py`.
 
 **`transfer_llc4320.py` must be run on the MIT machines**, since it reads
 from a local Zarr store that is only accessible there. Each date you want
@@ -241,7 +286,7 @@ pipelines — there is currently no pre-flight check that the timestep store
 exists in S3, so a missing transfer will surface as an S3 read error at
 runtime.
 
-Console command: `transfer-timestep`. Config: `configs/transfer.yaml`.
+Console command: `transfer-timestep`. Config: `configs/transfer/run.yaml`.
 
 The transfer writes two stores per timestep:
 
@@ -249,8 +294,8 @@ The transfer writes two stores per timestep:
 - **Timestep data:** `s3://{bucket}/{folder}/{YYYYMMDDTHH}.zarr` (per date,
   includes full-depth 3D fields).
 
-Only `generate_global_OSN.py` does not require this step — it reads directly
-from OSN kerchunk endpoints.
+Only the OSN pipeline does not require this step — it reads directly from
+OSN kerchunk endpoints.
 
 ---
 
@@ -282,7 +327,7 @@ NetCDF alongside them.
 # Snapshots
 zarr-to-netcdf --mode snapshots \
     --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof --folder properties \
+    --bucket dbof --folder depth_fields \
     --run-id global_depth_test00 \
     --dates '2012-11-09 12:00:00' \
     --output-dir /path/to/output
@@ -290,7 +335,7 @@ zarr-to-netcdf --mode snapshots \
 # Grid
 zarr-to-netcdf --mode grid \
     --s3-endpoint https://s3-west.nrp-nautilus.io \
-    --bucket dbof --folder properties \
+    --bucket dbof --folder depth_fields \
     --grid-dataset-name llc4320_grid.zarr \
     --output-dir /path/to/output
 ```
@@ -299,7 +344,8 @@ zarr-to-netcdf --mode grid \
 
 ## Zarr output layout
 
-All pipelines write to the same S3 path structure:
+SURF / OSN write to ``surface_fields/``, DEPTH writes to ``depth_fields/``.
+All pipelines use the same path structure within their folder:
 
 ```
 s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}

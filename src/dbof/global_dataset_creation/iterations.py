@@ -57,16 +57,6 @@ def mit_date_to_iteration(date_str: str) -> int:
     return round(delta.total_seconds() / LLC4320_TIMESTEP_SECS)
 
 
-def date_to_run_id(date_str: str) -> str:
-    """
-    Convert a date string to a directory-safe run-id.
-
-    ``'2011-12-09 12:00:00'`` → ``'20111209_120000'``
-    """
-    dt = datetime.strptime(date_str.strip(), DATE_FMT)
-    return dt.strftime("%Y%m%d_%H%M%S")
-
-
 def osn_date_to_iteration(date_str: str) -> int:
     """
     Convert a date string to an **OSN** iteration number.
@@ -80,43 +70,37 @@ def osn_date_to_iteration(date_str: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Iteration-list builder (used by surface / OSN pipelines)
+# Prefix ↔ display / filename converters
 # ---------------------------------------------------------------------------
 
-def calculate_iterations_for_llc(
-    cfg,
-    *,
-    use_osn_offset: bool = True,
-) -> np.ndarray:
+def date_to_run_id(date_str: str) -> str:
     """
-    Return the array of LLC4320 iteration numbers to process.
+    Convert a date string to a directory-safe run-id.
 
-    ``cfg.data.date_iterations`` must be a list of date strings.
-    Each is converted via the appropriate date-to-iteration converter.
-
-    Parameters
-    ----------
-    cfg : GlobalJobConfig or JobConfig
-        Pipeline configuration.  Must have ``cfg.data.date_iterations``.
-    use_osn_offset : bool, default True
-        If True, use :func:`osn_date_to_iteration` (adds OSN offset);
-        otherwise use :func:`mit_date_to_iteration`.
+    ``'2011-12-09 12:00:00'`` → ``'20111209_120000'``
     """
-    date_to_iter = osn_date_to_iteration if use_osn_offset else mit_date_to_iteration
+    dt = datetime.strptime(date_str.strip(), DATE_FMT)
+    return dt.strftime("%Y%m%d_%H%M%S")
 
-    if cfg.data.date_iterations is None or len(cfg.data.date_iterations) == 0:
-        raise ValueError(
-            "cfg.data.date_iterations must be set.  The range-mode fallback "
-            "(sampling_step / start_record / timestep_hours) has been removed."
-        )
 
-    iterations = [date_to_iter(d) for d in cfg.data.date_iterations]
-    label = "OSN offset applied" if use_osn_offset else "MIT iterations"
-    logging.info(
-        f"Using date-derived iteration list ({label}): "
-        + ", ".join(
-            f"'{d}' → {it}"
-            for d, it in zip(cfg.data.date_iterations, iterations)
-        )
-    )
-    return np.array(iterations, dtype=int)
+def prefix_to_display(date_prefix: str) -> str:
+    """
+    Convert a date prefix back to a human-readable date string.
+
+    ``'20121109_120000'`` → ``'2012-11-09 12:00:00'``
+    """
+    try:
+        dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
+        return dt.strftime(DATE_FMT)
+    except ValueError:
+        return date_prefix
+
+
+def prefix_to_filename_date(date_prefix: str) -> str:
+    """
+    Convert a date prefix to the filename-safe date format used by NetCDF exports.
+
+    ``'20121109_120000'`` → ``'2012-11-09T12_00_00'``
+    """
+    dt = datetime.strptime(date_prefix, "%Y%m%d_%H%M%S")
+    return dt.strftime("%Y-%m-%dT%H_%M_%S")

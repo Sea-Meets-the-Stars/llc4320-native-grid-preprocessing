@@ -1,220 +1,233 @@
 """
-Global LLC4320 dataset generation.
+Unified global LLC4320 dataset generation pipeline.
 
-Single-entry-point script for generating global LLC4320 property datasets.
-The subset of properties to compute is selected at runtime via ``--subset``
-(or the ``active_subset`` key in the YAML config).
+Single entry point that dispatches on the ``pipeline`` key in the YAML
+config. 
 
-Available subsets
+Pipeline variants
 -----------------
-native_fields
-    Raw model state variables only (Theta, Salt, Eta, U, V, W, oceTAUX,
-    oceTAUY, SIarea).
-    No derived quantities are computed.
+SURF
+    Core ocean variables (Theta, Salt, Eta, U, V, W) from OSN kerchunk;
+    forcing variables (oceTAUX, oceTAUY, SIarea) from S3 timestep stores
+    written by ``transfer_llc4320.py`` into the ``LLC4320`` folder.
 
-frontal_structure
-    Scalar gradient magnitudes and the Turner angle characterising front
-    intensity and water-mass structure: ``gradsalt2``, ``gradtheta2``,
-    ``gradeta2``, ``gradrho2``, ``gradb2``, ``turner_angle``.
-    The Turner angle reuses the gradient fields computed earlier in the
-    same callback, so no gradient is evaluated twice.
+OSN
+    All variables from OSN kerchunk endpoints (surface + wind).  No S3
+    timestep stores are used.
 
-kinematic
-    Velocity-derived scalar fields computed from a single Jacobian pass:
-    ``relative_vorticity``, ``strain_n``, ``strain_s``, ``strain_mag``,
-    ``divergence``, ``coriolis_f``, ``rossby_number``, ``okubo_weiss``.
+DEPTH
+    All variables from S3 timestep stores in ``LLC4320_v1`` (full depth).
+    Grid is read from the ``LLC4320`` folder (original, non-corrupt
+    transfer location).
 
-frontogenesis
-    Kinematic frontogenesis tendency and geostrophic/ageostrophic decomposition:
-    ``frontogenesis_tendency``, ``ug``, ``vg``,
-    ``frontogenesis_geo``, ``frontogenesis_ageo``.
+Chunking & face-ordering contract (important for xgcm / DEPTH)
+---------------------------------------------------------------
+S3 zarr layout:  ``{face: 1, k: 51, j: 720, i: 720}``
 
-    *** Dask graph note ***
-    This subset merges two large lazy lineages (velocity Jacobian gradients +
-    tracer gradients for buoyancy and Eta).  To avoid the large-graph and
-    run_spec scheduler warnings that appear when multiple frontogenesis arrays
-    share the same lineage and are written together as lazy arrays, this
-    callback materialises all selected fields with a *single* ``dask.compute()``
-    call before returning them.  This fuses the shared subgraph in one scheduler
-    round and returns NumPy arrays, so downstream zarr writes are decoupled from
-    the Dask graph entirely.
+Two requirements must be satisfied for xgcm's ``map_overlap`` with LLC
+face connections to work correctly:
+
+1. **face must be chunked as (1,1,...,1)** — 13 blocks of size 1.
+2. **face must be axis 0 for 3D+ arrays.**
+
+The DEPTH loading path handles both via ``transpose("face", ...)`` after
+opening the zarr store with native ``face=1`` chunks.
 
 CLI usage
 ---------
-    generate-global \\
-        --config configs/global.yaml \\
-        --subset native_fields \\
-        [--run_id my_run] \\
-        [--icemask]
+    generate-global --config configs/global/run.yaml
+    generate-global --config configs/global/run.yaml --subset kinematic
+    generate-global --config configs/global/run.yaml --pipeline OSN
 
-When ``date_iterations`` is set in the YAML, each date is processed as a
-separate pipeline run, stored in a date subdirectory under the run_id::
+Each pipeline supports a specific set of subsets.  See the valid
+pipeline × subset combinations in ``configs/global/run.yaml``.
 
-    s3://dbof/surface_fields/{run_id}/20111209_120000/native_fields.zarr
-    s3://dbof/surface_fields/{run_id}/20121109_120000/native_fields.zarr
-
-When ``--run_id`` is provided it overrides the config value; otherwise the
-run_id from the YAML is used.
-
-Config design
+Output layout
 -------------
-The YAML adds two top-level keys consumed here before the config object is
-constructed:
+    s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
 
-    active_subset: kinematic       # default; overridden by --subset
-
-    subsets:
-      native_fields:
-        dataset_name: "native_fields.zarr"
-        model_data_feature_channels: [Theta, Salt, Eta, U, V, W, ...]
-        compute_features_channels: []
-      frontal_structure:
-        ...
-      kinematic:
-        ...
-      frontogenesis:
-        ...
-
-Date format
------------
-All ``date_iterations`` entries in the YAML must use ISO format:
-    'YYYY-MM-DD HH:MM:SS'  e.g. '2012-09-11 12:00:00'
+Each date gets its own subdirectory (``date_prefix``).
 """
 
 # stdlib
-import logging
 import argparse
+import logging
+import time
+from pathlib import Path
 
 # distributed / IO
 import yaml
-# progress
 import tqdm
 
-# internal
+# internal — data loading
+import dbof.llc4320_ingestion.get_raw_data as get_raw_data
+import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
+
+# internal — IO
 from dbof.io.filesystems import create_s3_filesystems
 
-import dbof.preprocessing.native_grid_masks as native_grid_masks
-import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
-import dbof.preprocessing.surface_subsets as surface_subsets
-from dbof.utils.faces_to_latlon import (
-    interp_staggered_to_tracer, set_vector_pair_attrs, stitch_and_mask,
+# internal — global pipeline modules
+import dbof.global_dataset_creation.config as config
+import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset
+from dbof.global_dataset_creation.data_sources import (
+    OSN_ENDPOINT,
+    OSN_SURFACE_VARS,
+    OSN_WIND_VARS,
+    get_data_source,
 )
-
-import dbof.llc4320_ingestion.get_raw_data as get_raw_data
-from dbof.llc4320_ingestion import grid as llc_grid
-
-import dbof.dataset_creation.zarr_dataset_global as zarr_dataset
-import dbof.dataset_creation.config as config
-
-from dbof.utils.logging import generate_logging
-from dbof.utils.iterations import LLC_FACES, calculate_iterations_for_llc
-from dbof.utils.variable_selection import required_model_variables
-from dbof.utils.runtime import resolve_config, extract_feature_channels, create_dask_client
-from dbof.utils.subset_config import resolve_subset, build_global_job_config, run_per_date
-
-# URL of the raw LLC4320 data store
-ENDPOINT_URL = 'https://mghp.osn.xsede.org'
-
-# Variables available from the kerchunk endpoint; anything else needs S3.
-_KERCHUNK_VARS = {'Theta', 'Salt', 'Eta', 'U', 'V', 'W'}
+from dbof.global_dataset_creation.grid_setup import set_up_grid
+from dbof.global_dataset_creation.iterations import (
+    LLC_FACES,
+    date_to_run_id,
+    mit_date_to_iteration,
+    osn_date_to_iteration,
+)
+from dbof.global_dataset_creation.dask import create_dask_client
+from dbof.global_dataset_creation.logging import setup_logging, save_run_metadata
+from dbof.global_dataset_creation.subset_definitions import (
+    expand_channels_with_suffixes,
+    get_compute_fn,
+    get_subset_definition,
+    valid_subsets,
+)
+from dbof.global_dataset_creation.variable_selection import required_model_variables
+import dbof.global_dataset_creation.process_surface as process_surface
+import dbof.global_dataset_creation.process_depth as process_depth
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Constants
 # ---------------------------------------------------------------------------
 
+RECTANGULAR_SHAPE = (3 * 4320, 4 * 4320)   # (12960, 17280)
 
-def set_up_grid_data_and_masks(cfg: config.GlobalJobConfig, use_halo: bool = False):
+
+# ---------------------------------------------------------------------------
+# Snapshot loading — dispatches on pipeline
+# ---------------------------------------------------------------------------
+
+def load_snapshot(
+    pipeline: str,
+    date_str: str,
+    ds_grid,
+    vars_needed: list[str],
+    surface_only: bool,
+    data_source: dict | None,
+):
     """
-    Load the LLC4320 grid and compute a static land mask.
+    Load one time snapshot from the appropriate store.
 
     Parameters
     ----------
-    cfg : JobConfig
-    use_halo : bool, default False
-        If ``True``, expand the land mask outward by a halo.  This is useful
-        for the cutout pipeline where patch centres must be far from land,
-        but is generally not needed for global output (it would NaN out
-        coastal ocean in the image).
-        If ``False``, the raw land mask (``hFacC == 0``) is used with no
-        expansion.
+    pipeline : str
+        ``"SURF"``, ``"OSN"``, or ``"DEPTH"``.
+    date_str : str
+        ISO date string (e.g. ``'2012-11-09 12:00:00'``).
+    ds_grid : xr.Dataset
+        Pre-loaded grid dataset.
+    vars_needed : list[str]
+        Raw model variable names required for this subset.
+    surface_only : bool
+        If ``True`` (DEPTH pipeline), slice 3D data to surface after load.
+    data_source : dict or None
+        S3 data-source dict.  Required for SURF and DEPTH; ``None`` for OSN.
+
+    Returns
+    -------
+    ds : xr.Dataset
+        Raw dataset (face topology preserved for face→latlon stitching).
+    ds_merge : xr.Dataset
+        Merged dataset (raw + grid variables).
+    it : int
+        LLC4320 iteration number for this snapshot.
     """
-    logging.info("Fetching grid file")
-    co      = get_raw_data.get_remote_gridfile(cfg.data.endpoint_url)
-    ds_grid = preproc_llc_core_data.process_llc4320_grid(co)
 
-    logging.info(f"Calculating land mask (use_halo={use_halo})")
-    if use_halo:
-        land_mask = native_grid_masks.generate_static_land_mask_for_sampling(
-            ds_grid, cfg.output.target_km_res
+    if pipeline == "DEPTH":
+        it = mit_date_to_iteration(date_str)
+        logging.info(f"Loading LLC_DEPTH timestep data for {date_str} (MIT iteration {it})")
+        ds = get_raw_data.get_llc_timestep_data(
+            data_source["s3_endpoint"],
+            data_source["bucket"],
+            data_source["folder"],
+            date_str,
+            vars_requested=vars_needed or None,
+            chunks=get_raw_data.llc_depth_timestep_chunks,
+            storage_options=get_raw_data._llc_depth_storage_options(
+                data_source["s3_endpoint"]
+            ),
         )
+        # face must be axis 0 for xgcm (see module docstring).
+        if "face" in ds.dims:
+            ds = ds.transpose("face", ...)
+        if surface_only:
+            ds = process_depth._select_surface(ds)
+
+        ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
+        if "face" in ds_merge.dims:
+            ds_merge = ds_merge.transpose("face", ...)
+
+    elif pipeline == "OSN":
+        it = osn_date_to_iteration(date_str)
+        logging.info(f"Loading OSN kerchunk data for {date_str} (OSN iteration {it})")
+        ds = get_raw_data.get_remote_llc_data(OSN_ENDPOINT, it, LLC_FACES)
+        ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
+
+        # Merge wind/sea-ice kerchunk variables if needed.
+        if set(vars_needed) & OSN_WIND_VARS:
+            logging.info("Merging llc_wind kerchunk variables")
+            ds_wind = get_raw_data.get_remote_llc_wind_data(
+                OSN_ENDPOINT, it, LLC_FACES
+            )
+            ds_merge = ds_merge.merge(ds_wind)
+
+    elif pipeline == "SURF":
+        it = osn_date_to_iteration(date_str)
+        logging.info(
+            f"Loading SURF data for {date_str} (OSN iteration {it})"
+        )
+        # Core ocean variables from OSN kerchunk.
+        ds = get_raw_data.get_remote_llc_data(OSN_ENDPOINT, it, LLC_FACES)
+        ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
+
+        # Supplement with LLC_SURF forcing variables not in kerchunk.
+        llc_surf_vars = [v for v in vars_needed if v not in OSN_SURFACE_VARS]
+        if llc_surf_vars and data_source:
+            logging.info(f"Loading LLC_SURF forcing variables: {llc_surf_vars}")
+            ds_llc = get_raw_data.get_llc_timestep_data(
+                data_source["s3_endpoint"],
+                data_source["bucket"],
+                data_source["folder"],
+                date_str,
+                face_range=LLC_FACES,
+                vars_requested=llc_surf_vars,
+            )
+            # LLC_SURF stores carry full depth; select surface before merging.
+            for dim_name in ("k", "k_l"):
+                if dim_name in ds_llc.dims:
+                    ds_llc = ds_llc.isel({dim_name: 0})
+            for v in llc_surf_vars:
+                if v in ds_llc:
+                    ds_merge[v] = ds_llc[v]
+            logging.info(
+                f"LLC_SURF variables merged: {[v for v in llc_surf_vars if v in ds_llc]}"
+            )
+            # Cross-check OSN vs. LLC_SURF timestamps for data integrity.
+            get_raw_data.verify_osn_llc_surf_timestamp(
+                ds, data_source, date_str, LLC_FACES
+            )
+        elif llc_surf_vars:
+            logging.warning(
+                f"LLC_SURF-only variables {llc_surf_vars} requested but no "
+                "data_source configured; these will be missing from the output."
+            )
+
     else:
-        land_mask = ds_grid.hFacC  # raw land mask, no coastal buffer
+        raise ValueError(
+            f"Unknown pipeline '{pipeline}'.  Expected SURF, OSN, or DEPTH."
+        )
 
-    return ds_grid, land_mask
-
-
-# ---------------------------------------------------------------------------
-# Core snapshot processor
-# ---------------------------------------------------------------------------
-
-def process_time_snapshot(
-    cfg: config.GlobalJobConfig,
-    zarr_ds,
-    ds,
-    ds_merge,
-    grid,
-    land_mask,
-    model_feature_channels: list,
-    computed_feature_channels: list,
-    it: int,
-    compute_fields_fn,
-    apply_icemask: bool = True,
-) -> None:
-    """Process one snapshot: compute fields → stagger interp → stitch → write."""
-
-    # --- Computed (mode-specific) fields ---
-    calculated_fields = compute_fields_fn(ds_merge, grid, computed_feature_channels)
-
-    # Move non-tracer values to tracer points so all channels share the same
-    # (face, j, i) grid before the face→latlon stitch.
-    interp_staggered_to_tracer(ds_merge, grid)
-
-    # Assemble all channels into a single Dataset for a single conversion pass.
-    channels_to_convert = model_feature_channels + computed_feature_channels
-    update_vars = (
-        {ch: ds_merge[ch] for ch in model_feature_channels}
-        | {ch: calculated_fields[ch] for ch in computed_feature_channels}
-    )
-    ds_to_convert = ds.assign(update_vars)[channels_to_convert]
-    set_vector_pair_attrs(ds_to_convert)
-
-    # Build mask dict: land (always) + optional ice mask.
-    mask_dict = {'_land_mask': (ds_merge.hFacC == 0)}
-    if apply_icemask:
-        logging.info("Calculating and applying ice mask (Theta <= 0) and land mask (hFacC == 0)")
-        mask_dict['_ice_mask'] = (ds_merge.Theta <= 0.0)
-    else:
-        logging.info("Calculating and applying land mask (hFacC == 0); ice mask disabled")
-
-    data = stitch_and_mask(ds_to_convert, channels_to_convert, mask_dict)
-
-    # Write to zarr store.
-    logging.info("Writing snapshot to zarr dataset")
-    zarr_ds.write_snapshot(data, it)
-
-    # Release references so Dask can reclaim worker memory.
-    ds_merge = None
-    del ds_merge
-    grid = None
-    del grid
-
-
-# ---------------------------------------------------------------------------
-# Subset dispatch (callbacks live in surface_subsets.py)
-# ---------------------------------------------------------------------------
-
-SUBSET_COMPUTE_FNS = surface_subsets.SUBSET_COMPUTE_FNS
+    logging.info(f"Data loaded for date: {date_str}")
+    return ds, ds_merge, it
 
 
 # ---------------------------------------------------------------------------
@@ -222,179 +235,37 @@ SUBSET_COMPUTE_FNS = surface_subsets.SUBSET_COMPUTE_FNS
 # ---------------------------------------------------------------------------
 
 def _parse_args():
-    """Parse --config, --run_id, and --subset from sys.argv."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Global LLC4320 dataset generation. "
-            "Select which property subset to compute with --subset."
-        )
+        description="Unified global LLC4320 dataset generation pipeline.",
     )
     parser.add_argument(
-        "--config",
-        required=True,
-        help="Path to the YAML config file.",
+        "--config", required=True, help="Path to the YAML config file."
     )
     parser.add_argument(
-        "--run_id",
-        default=None,
-        help="Override the run_id defined in the config YAML.",
+        "--run_id", default=None, help="Override run_id from config."
     )
     parser.add_argument(
         "--subset",
         default=None,
-        choices=list(SUBSET_COMPUTE_FNS),
         help=(
-            "Property subset to compute. "
-            f"One of: {', '.join(SUBSET_COMPUTE_FNS)}. "
-            "If omitted, the value of 'active_subset' in the config YAML is used."
+            "Override active_subsets with a single subset.  "
+            "Valid values depend on the pipeline."
         ),
     )
     parser.add_argument(
-        "--icemask",
-        dest="apply_icemask",
+        "--pipeline",
+        default=None,
+        choices=["SURF", "OSN", "DEPTH"],
+        help="Override the pipeline key in the config YAML.",
+    )
+    parser.add_argument(
+        "--clobber",
         action="store_true",
         default=False,
-        help=(
-            "Enable the sea-ice mask (Theta <= 0).  By default the ice mask "
-            "is NOT applied.  Pass --icemask to NaN out pixels where surface "
-            "temperature is at or below freezing."
-        ),
+        help=("Regenerate subset/date zarr stores that already exist on S3.  "
+              "Default is to skip existing stores (per date)."),
     )
     return parser.parse_args()
-
-
-# ---------------------------------------------------------------------------
-# Pipeline orchestrator
-# ---------------------------------------------------------------------------
-
-def run_global_pipeline(
-    config_file: str = None,
-    run_id: str = None,
-    compute_fields_fn = None,
-    cfg: config.GlobalJobConfig = None,
-    apply_icemask: bool = True,
-    s3_source: dict = None,
-    date_prefix: str | None = None,
-) -> None:
-    """Orchestration loop: load grid, iterate snapshots, write zarr.
-
-    Kerchunk variables come from OSN; anything else (oceTAUX, SIarea, …)
-    is loaded from *s3_source* timestep stores when provided.
-
-    Parameters
-    ----------
-    date_prefix : str or None, optional
-        Date subdirectory inserted between *run_id* and *dataset_name*
-        in the S3 output path (e.g. ``'20121109_120000'``).
-    """
-    cfg = resolve_config(cfg, config_file, run_id, config_module=config)
-
-    generate_logging(cfg, log_filename="generate_global.log")
-    logging.info("Arguments parsed successfully. Logging set up. Running script.")
-
-    model_feature_channels, computed_feature_channels = extract_feature_channels(cfg)
-    dask_client = create_dask_client(cfg.runtime)
-
-    iter_range = calculate_iterations_for_llc(cfg)
-    logging.info(f"Processing: {iter_range} time snapshots")
-
-    # Set up S3 filesystem
-    fs, fs_synch = create_s3_filesystems(cfg.output.s3_endpoint)
-
-    # Load the LLC4320 grid and land mask once — they never change across time.
-    # use_halo=False: no coastal buffer needed for global rectangular output.
-    ds_grid, land_mask = set_up_grid_data_and_masks(cfg, use_halo=False)
-    grid = llc_grid.set_xgcm_grid(ds_grid, use_connections=True)
-
-    # LLC4320 rectangular output shape is a model constant: 3×4320 rows, 4×4320 cols.
-    rectangular_shape = (3 * 4320, 4 * 4320)   # (12960, 17280)
-    logging.info(f"LLC rectangular output shape: {rectangular_shape}")
-
-    # Variables not in the kerchunk endpoint must come from S3 timestep stores.
-    all_needed = required_model_variables(model_feature_channels,
-                                          computed_feature_channels)
-    s3_vars = [v for v in all_needed if v not in _KERCHUNK_VARS]
-
-    iter_to_date = {}
-    if s3_source and cfg.data.date_iterations is not None:
-        if s3_vars:
-            logging.info(f"Will load {s3_vars} from S3 timestep stores")
-        for date_str, it in zip(cfg.data.date_iterations, iter_range):
-            iter_to_date[int(it)] = date_str
-    elif s3_vars and s3_source is None:
-        logging.warning(
-            f"S3-only variables {s3_vars} requested but no s3_source configured; "
-            "these will be missing from the output."
-        )
-    elif s3_vars and cfg.data.date_iterations is None:
-        raise ValueError(
-            f"S3-only variables {s3_vars} require 'date_iterations' in the "
-            "config when 's3_source' is provided."
-        )
-
-    # Construct the zarr output store
-    zarr_ds = zarr_dataset.GlobalZarrDataset(
-        cfg.output.bucket,
-        cfg.output.folder,
-        cfg.run.run_id,
-        cfg.output.dataset_name,
-        fs=fs,
-        channel_names=model_feature_channels + computed_feature_channels,
-        rectangular_shape=rectangular_shape,
-        date_prefix=date_prefix,
-    )
-    logging.info("Zarr dataset created.")
-
-    for it in tqdm.tqdm(iter_range):
-        # Fetch raw LLC4320 data for this iteration from S3/OSN
-        ds       = get_raw_data.get_remote_llc_data(ENDPOINT_URL, it, LLC_FACES)
-        ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
-        logging.info(f"Data loaded for iteration: {it}")
-
-        # Load additional surface variables from S3 timestep stores.
-        if s3_vars and int(it) in iter_to_date:
-            ds_s3 = get_raw_data.get_s3_timestep_data(
-                s3_source['s3_endpoint'],
-                s3_source['bucket'],
-                s3_source['folder'],
-                iter_to_date[int(it)],
-                face_range=LLC_FACES,
-                vars_requested=s3_vars,
-            )
-            # S3 stores carry full depth; select surface before merging.
-            for dim_name in ("k", "k_l"):
-                if dim_name in ds_s3.dims:
-                    ds_s3 = ds_s3.isel({dim_name: 0})
-            for v in s3_vars:
-                if v in ds_s3:
-                    ds_merge[v] = ds_s3[v]
-            logging.info(f"S3 variables merged: {[v for v in s3_vars if v in ds_s3]}")
-
-        # Cross-check OSN vs. S3 timestamps for data integrity.
-        if s3_source and int(it) in iter_to_date:
-            get_raw_data.verify_osn_s3_timestamp(
-                ds, s3_source, iter_to_date[int(it)], LLC_FACES,
-            )
-
-        process_time_snapshot(
-            cfg,
-            zarr_ds,
-            ds,        # raw kerchunk dataset — preserves LLC4320 topology for faces_to_latlon
-            ds_merge,
-            grid,
-            land_mask,
-            model_feature_channels,
-            computed_feature_channels,
-            it,
-            compute_fields_fn,
-            apply_icemask=apply_icemask,
-        )
-
-        ds_merge = None
-        del ds_merge
-
-        ds = None
-        del ds
 
 
 # ---------------------------------------------------------------------------
@@ -405,55 +276,260 @@ def main(
     config_file: str = None,
     run_id: str = None,
     subset: str = None,
-    apply_icemask: bool = None,
+    pipeline: str = None,
+    clobber: bool = False,
 ) -> None:
-    """Entry point.  Reads CLI args when called with no arguments.
-
-    When ``--run_id`` is omitted and ``date_iterations`` is set, each date
-    gets its own output directory via ``run_per_date``.
     """
-    # --- Resolve arguments ---------------------------------------------------
+    Entry point for the unified global pipeline.
+
+    Can be called from the CLI (no arguments) or programmatically.
+
+    Parameters
+    ----------
+    config_file : str, optional
+        Path to the YAML config.  If ``None``, read from ``--config``.
+    run_id : str, optional
+        Override for ``run.run_id``.
+    subset : str, optional
+        Override ``active_subsets`` with a single subset name.
+    pipeline : str, optional
+        Override the ``pipeline`` key in the YAML.
+    clobber : bool, optional
+        If ``False`` (default), skip any subset/date whose zarr store already
+        exists on S3.  If ``True``, regenerate it.
+    """
+    wall_start = time.monotonic()
+
+    # ------------------------------------------------------------------
+    # 1. Parse args, load YAML
+    # ------------------------------------------------------------------
     if config_file is None:
         cli = _parse_args()
         config_file = cli.config
         run_id = run_id or cli.run_id
         subset = subset or cli.subset
-        if apply_icemask is None:
-            apply_icemask = cli.apply_icemask
-    elif apply_icemask is None:
-        apply_icemask = False
+        pipeline = pipeline or cli.pipeline
+        clobber = clobber or cli.clobber
 
-    # --- Load raw YAML and resolve subset ------------------------------------
     with open(config_file, "r") as fh:
         raw = yaml.safe_load(fh) or {}
 
-    subset, subset_entry = resolve_subset(raw, subset, SUBSET_COMPUTE_FNS)
-
-    # S3 source: optional, for variables not in the kerchunk endpoint.
-    s3_source_cfg = raw.get("s3_source") or None
-
-    # --- Per-date looping or single run --------------------------------------
-    date_iterations = raw.get("data", {}).get("date_iterations")
-    pipeline_kwargs = dict(
-        apply_icemask=apply_icemask,
-        s3_source=s3_source_cfg,
-    )
-
-    if date_iterations is not None and len(date_iterations) > 0:
-        run_per_date(
-            raw, subset_entry, date_iterations,
-            pipeline_fn=run_global_pipeline,
-            compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
-            run_id=run_id,
-            **pipeline_kwargs,
+    # ------------------------------------------------------------------
+    # 2. Resolve pipeline and active_subsets
+    # ------------------------------------------------------------------
+    pipeline_str = pipeline or raw.get("pipeline")
+    if pipeline_str is None:
+        raise ValueError(
+            "No pipeline specified.  Set 'pipeline' in the YAML config "
+            "or pass --pipeline on the command line."
         )
-        return
+    pipeline_str = pipeline_str.upper()
 
-    # Single run (no date_iterations).
-    cfg = build_global_job_config(raw, subset_entry)
-    run_global_pipeline(
-        run_id=run_id,
-        compute_fields_fn=SUBSET_COMPUTE_FNS[subset],
-        cfg=cfg,
-        **pipeline_kwargs,
+    if subset is not None:
+        active_subsets = [subset]
+    else:
+        active_subsets = raw.get("active_subsets")
+        if active_subsets is None:
+            # Backward compat: single active_subset key
+            single = raw.get("active_subset")
+            if single is not None:
+                active_subsets = [single]
+        if not active_subsets:
+            raise ValueError(
+                "No subsets specified.  Set 'active_subsets' (list) in the "
+                "YAML config, or pass --subset on the command line."
+            )
+
+    # Validate subsets early.
+    valid = valid_subsets(pipeline_str)
+    for s in active_subsets:
+        if s not in valid:
+            raise ValueError(
+                f"Subset '{s}' is not valid for pipeline '{pipeline_str}'.  "
+                f"Valid subsets: {valid}"
+            )
+
+    # ------------------------------------------------------------------
+    # 3. Date iterations (from YAML)
+    # ------------------------------------------------------------------
+    date_iterations = raw.get("data", {}).get("date_iterations")
+    if not date_iterations:
+        raise ValueError(
+            "data.date_iterations must be set in the config YAML.  "
+            "Each entry should be a date string in ISO format "
+            "(e.g. '2012-11-09 12:00:00')."
+        )
+
+    # ------------------------------------------------------------------
+    # 4. Build GlobalJobConfig
+    # ------------------------------------------------------------------
+    run_cfg = config.RunConfig(**(raw.get("run") or {}))
+    if run_id is not None:
+        run_cfg = config.RunConfig(run_id=run_id, log_dir=run_cfg.log_dir)
+
+    output_cfg = config.GlobalOutputConfig(**(raw.get("output") or {}))
+    # Resolve folder from pipeline if not explicitly set in YAML.
+    if output_cfg.folder is None:
+        output_cfg = config.GlobalOutputConfig(
+            s3_endpoint=output_cfg.s3_endpoint,
+            bucket=output_cfg.bucket,
+            folder=config.default_output_folder(pipeline_str),
+            dataset_name=output_cfg.dataset_name,
+        )
+
+    cfg = config.GlobalJobConfig(
+        run=run_cfg,
+        data=config.GlobalDataConfig(**(raw.get("data") or {})),
+        output=output_cfg,
+        runtime=config.RuntimeConfig(**(raw.get("runtime") or {})),
+        pipeline=pipeline_str,
+        active_subsets=active_subsets,
+        depth_suffixes=raw.get("depth_suffixes"),
     )
+
+    # ------------------------------------------------------------------
+    # 5. Logging and run metadata
+    # ------------------------------------------------------------------
+    log_file = setup_logging(cfg)  # appends if the log already exists
+    logging.info("Unified global pipeline starting.")
+    logging.info(f"Pipeline: {cfg.pipeline}")
+    logging.info(f"Active subsets: {cfg.active_subsets}")
+    logging.info(f"Depth suffixes (YAML override): {cfg.depth_suffixes}")
+    logging.info(f"Dates: {date_iterations}")
+
+    # ------------------------------------------------------------------
+    # 6. One-time setup: dask client, S3 filesystem, grid
+    # ------------------------------------------------------------------
+    data_source = get_data_source(cfg.pipeline)
+    dask_client = create_dask_client(cfg.runtime)
+    fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
+
+    # Save run metadata (local + S3).
+    # Use the sync filesystem — the async one conflicts with the Dask
+    # distributed client's event loop.
+    save_run_metadata(cfg, log_file, fs=fs_sync)
+
+    ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
+
+    logging.info(f"LLC rectangular output shape: {RECTANGULAR_SHAPE}")
+
+    # ------------------------------------------------------------------
+    # 7. Main loop: subsets × dates
+    # ------------------------------------------------------------------
+    for subset_name in cfg.active_subsets:
+        logging.info(f"\n{'='*60}")
+        logging.info(f"Processing subset: {subset_name}")
+        logging.info(f"{'='*60}")
+
+        defn = get_subset_definition(cfg.pipeline, subset_name)
+        compute_fn = get_compute_fn(cfg.pipeline, subset_name)
+
+        surface_only = defn.get("surface_only", False)
+        dataset_name = defn["dataset_name"]
+        model_channels = list(defn["model_data_feature_channels"])
+
+        # Expand depth suffixes: YAML override > subset definition default.
+        # Only apply the YAML override when the subset definition itself
+        # declares depth_suffixes — surface subsets must never get suffixes.
+        defn_suffixes = defn.get("depth_suffixes")
+        depth_suffixes = (cfg.depth_suffixes or defn_suffixes) if defn_suffixes is not None else None
+        extra_channels = defn.get("extra_channels")
+        compute_channels = expand_channels_with_suffixes(
+            defn["compute_features_channels"],
+            depth_suffixes=depth_suffixes,
+            extra_channels=extra_channels,
+        )
+
+        logging.info(f"  dataset_name: {dataset_name}")
+        logging.info(f"  surface_only: {surface_only}")
+        logging.info(f"  model_channels: {model_channels}")
+        logging.info(f"  compute_channels: {compute_channels}")
+
+        # Determine which raw variables to request from storage.
+        vars_needed = required_model_variables(model_channels, compute_channels)
+        logging.info(f"  vars_needed from storage: {vars_needed}")
+
+        channel_names = model_channels + compute_channels
+
+        for date_str in tqdm.tqdm(date_iterations, desc=subset_name):
+            date_prefix = date_to_run_id(date_str)
+            logging.info(f"  Date: {date_str}  →  date_prefix: {date_prefix}")
+
+            # Skip this subset/date if its zarr store already exists on S3
+            # (unless clobbering).  
+            store_path = zarr_dataset.make_run_prefix(
+                cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
+                dataset_name, date_prefix=date_prefix,
+            )
+            if not clobber and fs_sync.exists(store_path.removeprefix("s3://")):
+                logging.info(f"  SKIP (zarr store exists): {store_path}")
+                continue
+
+            # Create zarr output store for this subset + date.
+            zarr_ds = zarr_dataset.GlobalZarrDataset(
+                cfg.output.bucket,
+                cfg.output.folder,
+                cfg.run.run_id,
+                dataset_name,
+                fs=fs,
+                channel_names=channel_names,
+                rectangular_shape=RECTANGULAR_SHAPE,
+                date_prefix=date_prefix,
+            )
+
+            # Load snapshot.
+            ds, ds_merge, it = load_snapshot(
+                cfg.pipeline, date_str, ds_grid, vars_needed,
+                surface_only, data_source,
+            )
+
+            # Process snapshot — dispatch to surface or depth processor.
+            if cfg.pipeline == "DEPTH":
+                data = process_depth.process_snapshot(
+                    ds, ds_merge, grid,
+                    model_channels, compute_channels,
+                    compute_fn, surface_only,
+                )
+            else:
+                data = process_surface.process_snapshot(
+                    ds, ds_merge, grid,
+                    model_channels, compute_channels,
+                    compute_fn,
+                )
+
+            # Write to zarr.
+            logging.info("Writing snapshot to zarr dataset")
+            zarr_ds.write_snapshot(data, it)
+
+            # Release references for GC.
+            ds = None
+            ds_merge = None
+            data = None
+
+    # ------------------------------------------------------------------
+    # 8. Cleanup
+    # ------------------------------------------------------------------
+    wall_elapsed = time.monotonic() - wall_start
+    wall_hours = wall_elapsed / 3600.0
+    n_workers = len(dask_client.scheduler_info().get("workers", {}))
+
+    logging.info("=" * 60)
+    logging.info("Run complete.")
+    logging.info(f"  Pipeline        : {cfg.pipeline}")
+    logging.info(f"  Subsets         : {cfg.active_subsets}")
+    logging.info(f"  Wall-clock time : {wall_hours:.2f} h  ({wall_elapsed:.1f} s)")
+    logging.info(f"  Dask workers    : {n_workers}")
+    logging.info(f"  Dates           : {len(date_iterations)}")
+    logging.info("=" * 60)
+
+    dask_client.close()
+    logging.info("Dask client closed.")
+    try:
+        from s3fs import S3FileSystem
+        S3FileSystem.clear_instance_cache()
+    except Exception:
+        pass
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Unified config for generate_global.py
+#
+# This config works with all three pipeline variants: SURF, OSN, DEPTH.
+# Data sources and subset variable lists are defined in code (not here).
+#
+# Usage:
+#   generate-global --config configs/global/run.yaml
+#   generate-global --config configs/global/run.yaml --subset kinematic
+#   generate-global --config configs/global/run.yaml --pipeline OSN
+# ---------------------------------------------------------------------------
+
+# Pipeline: SURF | OSN | DEPTH
+pipeline: "SURF"
+
+run:
+  run_id: "global_test00"
+  log_dir: "notebooks/notebooks_global/test_logs"
+
+data:
+  # Each entry must be in ISO format: 'YYYY-MM-DD HH:MM:SS'
+  #
+  # For DEPTH:  must match a transferred timestep store in S3.
+  # For SURF:   must fall within OSN data availability + S3 forcing window.
+  # For OSN:    must fall within OSN kerchunk availability.
+  #   llc_surf (Theta, Salt, Eta, U, V, W):                2011-09-13 - 2012-11-15
+  #   llc_wind (oceTAUX, oceTAUY, SIarea, KPPhbl, PhiBot): 2011-11-01 - 2012-07-15
+  date_iterations:
+    - '2012-11-09 12:00:00'
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  # folder is determined automatically by the pipeline:
+  #   SURF / OSN → surface_fields/
+  #   DEPTH      → depth_fields/
+  # Uncomment to override:
+  # folder: "custom_folder/"
+  #
+  # dataset_name is set automatically from the subset definition.
+  # Override here only if you need a custom name.
+  # dataset_name: "custom_name.zarr"
+
+runtime:
+  zarr_async_concurrency: 8
+  dask_scheduler: "distributed"
+  dask_n_workers: 4
+  dask_threads_per_worker: 4
+
+# ---------------------------------------------------------------------------
+# Subset selection
+# ---------------------------------------------------------------------------
+# IMPORTANT: each pipeline supports a specific set of subsets.  Running a
+# subset that does not belong to the chosen pipeline will raise a ValueError.
+#
+# ┌─────────┬────────────────────────────────────────────────────────────────┐
+# │ SURF    │ native_fields, surface_wind, icearea, frontal_structure,      │
+# │         │ kinematic, frontogenesis                                      │
+# │ OSN     │ native_fields, surface_wind, icearea, frontal_structure,      │
+# │         │ kinematic, frontogenesis                                      │
+# │ DEPTH   │ stratification, vertical_shear, mixing_parameters, ertel_pv, │
+# │         │ buoyancy_fluxes, surface_wind, energetics, frontal_structure, │
+# │         │ kinematic, frontogenesis, native_fields, icearea              │
+# └─────────┴────────────────────────────────────────────────────────────────┘
+#
+# Only list subsets valid for the pipeline set above.
+active_subsets:
+  - stratification
+
+# ---------------------------------------------------------------------------
+# Depth suffixes  (DEPTH pipeline only, optional)
+# ---------------------------------------------------------------------------
+# Override the default depth suffixes for depth subsets.
+# Default: [sfc, z25m, mld, mld_mean]
+# Uncomment to customise:
+depth_suffixes: [sfc, mld]

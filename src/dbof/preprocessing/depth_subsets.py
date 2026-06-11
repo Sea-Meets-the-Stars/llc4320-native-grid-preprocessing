@@ -57,8 +57,6 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     frontogenesis_tendency_3d,
     geostrophic_velocity_3d,
     frontogenesis_geo_3d,
-    # -- constants --
-    RHO0,
 )
 from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
 
@@ -68,7 +66,18 @@ from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
 # ---------------------------------------------------------------------------
 
 def _materialise_results(results):
-    """dask.compute() every lazy value in *results*, return numpy-backed dict."""
+    """dask.compute() every lazy value in *results*, return numpy-backed dict.
+
+    Parameters
+    ----------
+    results : dict[str, xr.DataArray]
+        Mapping of channel name to lazy dask-backed DataArray.
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Same keys as *results*, values materialised as NumPy arrays.
+    """
     if not results:
         return results
     keys = list(results.keys())
@@ -78,14 +87,40 @@ def _materialise_results(results):
 
 
 def _needs_mld(requested):
-    """Return True if any requested channel uses a MLD-based depth strategy."""
+    """Return True if any requested channel uses a MLD-based depth strategy.
+
+    Parameters
+    ----------
+    requested : iterable of str
+        Channel names requested by the caller.
+
+    Returns
+    -------
+    bool
+        ``True`` if at least one channel ends with ``_mld`` or
+        ``_mld_mean``, or is ``"mixed_layer_depth"`` / ``"ml_heat_content"``.
+    """
     return any(c.endswith("_mld") or c.endswith("_mld_mean")
                or c == "mixed_layer_depth" or c == "ml_heat_content"
                for c in requested)
 
 
 def _lazy_mld(ds_merge, requested):
-    """Return lazy MLD if any requested channel needs it, else None."""
+    """Return lazy MLD if any requested channel needs it, else None.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates.
+    requested : iterable of str
+        Channel names requested by the caller.
+
+    Returns
+    -------
+    xr.DataArray or None
+        Lazy mixed-layer depth (m, positive downward), or ``None`` if no
+        MLD-based channel was requested.
+    """
     if _needs_mld(requested):
         return mixed_layer_depth(ds_merge)
     return None
@@ -96,7 +131,22 @@ def _lazy_mld(ds_merge, requested):
 # ===========================================================================
 
 def compute_stratification(ds_merge, grid, computed_feature_channels):
-    """Subset: stratification — MLD, N², mixed-layer heat content."""
+    """Subset: stratification — MLD, N², mixed-layer heat content.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
     requested = set(computed_feature_channels)
 
@@ -117,7 +167,22 @@ def compute_stratification(ds_merge, grid, computed_feature_channels):
 
 
 def compute_vertical_shear(ds_merge, grid, computed_feature_channels):
-    """Subset: vertical_shear — |S| and Ri at four depths."""
+    """Subset: vertical_shear — |S| and Ri at four depths.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
     requested = set(computed_feature_channels)
 
@@ -143,7 +208,22 @@ def compute_vertical_shear(ds_merge, grid, computed_feature_channels):
 
 
 def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
-    """Subset: mixing_parameters — Fr, Ro, Burger at four depths."""
+    """Subset: mixing_parameters — Fr, Ro, Burger at four depths.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
     requested = set(computed_feature_channels)
 
@@ -168,7 +248,22 @@ def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
 
 
 def compute_ertel_pv(ds_merge, grid, computed_feature_channels):
-    """Subset: ertel_pv — Ertel PV terms at four depths."""
+    """Subset: ertel_pv — Ertel PV terms at four depths.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
     requested = set(computed_feature_channels)
 
@@ -189,7 +284,22 @@ def compute_ertel_pv(ds_merge, grid, computed_feature_channels):
 
 
 def compute_buoyancy_fluxes(ds_merge, grid, computed_feature_channels):
-    """Subset: buoyancy_fluxes — uB, vB, wB at four depths."""
+    """Subset: buoyancy_fluxes — uB, vB, wB at four depths.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
     requested = set(computed_feature_channels)
 
@@ -214,7 +324,22 @@ def compute_buoyancy_fluxes(ds_merge, grid, computed_feature_channels):
 
 
 def compute_energetics(ds_merge, grid, computed_feature_channels):
-    """Subset: energetics — KE = 0.5 * (MLD * |∇b| / f)²."""
+    """Subset: energetics — KE = 0.5 * (MLD * |∇b| / f)².
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
     requested = set(computed_feature_channels)
 
@@ -237,6 +362,20 @@ def compute_energetics(ds_merge, grid, computed_feature_channels):
 
 def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     """Subset: frontal_structure — scalar gradient magnitudes, Turner angle.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
     """
     results = {}
     requested = set(computed_feature_channels)
@@ -310,13 +449,30 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     Computes the 3D velocity Jacobian once and passes it to each
     individual kinematic function.  Only channels listed in
     ``computed_feature_channels`` are returned.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
     """
     results = {}
     requested = set(computed_feature_channels)
 
     bases = ("relative_vorticity", "strain_n", "strain_s", "strain_mag",
-             "divergence", "okubo_weiss")
-    if not any(any(c.startswith(b + "_") for c in requested) for b in bases):
+             "divergence", "rossby_number", "okubo_weiss")
+    has_depth_channels = any(
+        any(c.startswith(b + "_") for c in requested) for b in bases)
+    has_coriolis = "coriolis_f" in requested
+    if not has_depth_channels and not has_coriolis:
         return results
 
     mld = _lazy_mld(ds_merge, requested)
@@ -341,10 +497,19 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
             divergence_3d(ds_merge, grid, jacobian=jac),
             "divergence", ds_merge, mld=mld, requested=requested))
 
+    if any(c.startswith("rossby_number_") for c in requested):
+        results.update(apply_depth_strategies(
+            rossby_number_3d(ds_merge, grid),
+            "rossby_number", ds_merge, mld=mld, requested=requested))
+
     if any(c.startswith("okubo_weiss_") for c in requested):
         results.update(apply_depth_strategies(
             okubo_weiss_3d(ds_merge, grid, jacobian=jac),
             "okubo_weiss", ds_merge, mld=mld, requested=requested))
+
+    # coriolis_f is 2D (latitude-only) — no depth strategies needed.
+    if "coriolis_f" in requested:
+        results["coriolis_f"] = coriolis_parameter(ds_merge, grid).values
 
     return _materialise_results(results)
 
@@ -356,6 +521,20 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     gradients, geostrophic velocity) once and passes them to individual
     property functions.  Only channels listed in
     ``computed_feature_channels`` are returned.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
     """
     results = {}
     requested = set(computed_feature_channels)
@@ -424,7 +603,22 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
 
 def compute_surface_wind(ds_merge, grid, computed_feature_channels):
-    """Subset: surface_wind — curl, Ekman pumping, Ekman transport."""
+    """Subset: surface_wind — curl, Ekman pumping, Ekman transport.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables.
+    grid : xgcm.Grid
+        Grid object used for differencing and interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
+    """
     results = {}
 
     if "wind_stress_curl" in computed_feature_channels:
@@ -448,7 +642,22 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
 # ===========================================================================
 
 def _compute_no_op(ds_merge, grid, computed_feature_channels):
-    """No-op callback for subsets that only output raw model variables."""
+    """No-op callback for subsets that only output raw model variables.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset (unused).
+    grid : xgcm.Grid
+        Grid object (unused).
+    computed_feature_channels : list of str
+        Channel names (unused).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Always an empty dict.
+    """
     return {}
 
 
@@ -461,6 +670,21 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     U and V live on staggered grids (i_g / j_g) and are interpolated to
     tracer points before the depth reduction.  Eta is inherently 2D
     (surface only) and is handled as a special case.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset with grid coordinates and model variables
+        (Theta, Salt, U, V, W, Eta).
+    grid : xgcm.Grid
+        Grid object used for staggered-to-tracer-point interpolation.
+    computed_feature_channels : list of str
+        Channel names to compute (as specified in the YAML config).
+
+    Returns
+    -------
+    dict[str, np.ndarray]
+        Materialised arrays keyed by channel name.
     """
     results = {}
     requested = set(computed_feature_channels)
