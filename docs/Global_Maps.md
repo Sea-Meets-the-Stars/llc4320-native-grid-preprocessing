@@ -204,8 +204,15 @@ from the *same* physically consistent, unscaled buoyancy `b = (g/ρ₀)·ρ`, so
 the ratio is genuinely dimensionless (the `×1e3`-scaled `grad_b2_3d` is
 deliberately **not** reused — it would bias `R_ib` by a constant `1e6`).
 `R_ib` is `NaN` where `|∇_h b|² = 0` and tends to `0` at the equator
-(`f → 0`). It is computed by `balanced_richardson_number_3d` in
+(`f → 0`). Statically unstable columns (`N² < 0`) are **floored to
+`N² = 0`**, so `R_ib = 0` there rather than negative. It is computed by
+`balanced_richardson_number_3d` in
 `src/dbof/preprocessing/calculated_fields_at_depth.py`.
+
+The same `N² ≥ 0` floor is applied to the gradient Richardson number `Ri`
+(the `vertical_shear` subset, `richardson_number_3d`): negative `N²` is
+clamped to `0` so unstable columns give `Ri = 0` rather than a negative
+value.
 
 ---
 

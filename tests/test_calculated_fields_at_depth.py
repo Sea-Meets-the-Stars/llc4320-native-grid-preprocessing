@@ -165,6 +165,32 @@ def test_balanced_richardson_zero_at_equator():
     np.testing.assert_allclose(r_ib, 0.0, atol=0.0)
 
 
+def test_balanced_richardson_floors_negative_n2():
+    """Statically unstable columns (N² < 0) are floored → R_ib = 0."""
+    lat = 30.0
+    ds_merge = _make_ds_merge(lat)
+    gradb2 = _dask_const(1.0e-9)  # finite → ratio is defined everywhere
+
+    # N² with one negative (unstable) cell and the rest positive (stable).
+    n2_np = np.full((1, 3, 3), 1.0e-5, dtype=float)
+    n2_np[0, 0, 0] = -1.0e-5
+    n2 = xr.DataArray(
+        da.from_array(n2_np, chunks=n2_np.shape),
+        dims=("face", "j", "i"),
+    )
+
+    r_ib = cfad.balanced_richardson_number_3d(
+        ds_merge, grid=None, n2=n2, gradb2=gradb2,
+    ).values
+
+    # Unstable cell: N² floored to 0 → R_ib = 0 (not negative).
+    assert r_ib[0, 0, 0] == 0.0
+    # Stable cells keep the positive closed-form value.
+    f = _coriolis(lat)
+    expected = 1.0e-5 * f**2 / 1.0e-9
+    np.testing.assert_allclose(r_ib[0, 1, 1], expected, rtol=1e-12)
+
+
 # ---------------------------------------------------------------------------
 # Network integration: R_ib on a real LLC4320 tile from S3
 # ---------------------------------------------------------------------------

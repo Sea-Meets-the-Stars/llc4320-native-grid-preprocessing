@@ -193,12 +193,21 @@ I agree.
 
 ## Modifications
 
+1. We would prefer to not include negative N^2 values in the calculation.  Please:
+
+- floor its value to 0 when calculating R_ib
+- do the same for R_i
+- update the docs to reflect the change
+- update the tests, if needed
+- Log your work
+
 ## Prompts
 
 1. Re-read this document.  Implement the first item under Implementation
 2. Re-read this document.  Implement the 2nd item under Implementation
 3. Re-read this document.  Implement the 1st item under Testing
 4. Re-read this document.  Implement the 1st item under Docs
+5. Re-read this document.  Implement the 1st item under Modifications
 
 
 ## Logging
@@ -381,3 +390,41 @@ other derived fields.
 - Other dimensionless numbers (`Ri`, `Fr`, `Ro`, `Bu`) carry no formula in
   the docs — only the subset tables — so a dedicated `R_ib` definition
   subsection is a net improvement to the docs rather than an inconsistency.
+
+### 2026-06-11 (Floored negative N² in R_ib and Ri)
+
+Executed the first item under Modifications: stopped negative (statically
+unstable) N² values from entering the Richardson-number calculations.
+
+**Code changes** (`calculated_fields_at_depth.py`):
+
+- `balanced_richardson_number_3d` — floor N² with `n2 = n2.clip(min=0.0)`
+  right after it is obtained (whether computed internally or passed via the
+  `n2=` kwarg). Unstable columns now give `R_ib = 0` instead of a negative
+  value.
+- `richardson_number_3d` (R_i) — same `n2.clip(min=0.0)` floor before
+  dividing by shear². Unstable columns now give `Ri = 0`.
+
+Both clips are lazy (dask-backed) so the fully-lazy pipeline is preserved.
+Updated both docstrings to state the N² ≥ 0 floor.
+
+**Docs** (`docs/Global_Maps.md`): extended the **Balanced Richardson number
+(`R_ib`)** subsection to note that `N² < 0` is floored to 0 (R_ib = 0 in
+unstable columns), and added a sentence that the same floor applies to the
+gradient Richardson number `Ri` in the `vertical_shear` subset.
+
+**Tests** (`tests/test_calculated_fields_at_depth.py`): added
+`test_balanced_richardson_floors_negative_n2`, which injects an N² field
+with one negative cell and asserts that cell → `R_ib = 0` while stable
+cells keep the closed-form value. The existing tests still pass (they used
+positive N²). All 5 tests pass in `ocean14` (incl. the network test).
+
+**What I learned**
+
+- `xr.DataArray.clip(min=0.0)` is the cleanest lazy way to floor — it
+  dispatches to dask and keeps the graph lazy, unlike an eager comparison.
+- Ri's flooring can't be unit-tested via kwargs (it computes N² and shear
+  internally from a grid), so the focused floor test targets R_ib, which
+  accepts an injected `n2`; the one-line clip is identical in both
+  functions and the real-grid network test exercises the R_ib path
+  end-to-end.
