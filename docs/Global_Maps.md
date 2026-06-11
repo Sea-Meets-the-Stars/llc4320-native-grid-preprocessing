@@ -7,6 +7,10 @@ This document describes the pipelines for turning raw LLC4320 model output
 S3-backed Zarr stores, plus the NetCDF export step. The native grid geometry is
 preserved — no interpolation to a regular lat/lon grid is performed.
 
+> **Need just one 720×720 depth-resolved tile instead of a full global map?**
+> See [Single-Tile 3D Property Extraction](Tiles.md), which reads from the same
+> LLC_DEPTH source described below.
+
 ---
 
 ## Choosing a pipeline

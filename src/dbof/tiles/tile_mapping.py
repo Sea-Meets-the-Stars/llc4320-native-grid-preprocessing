@@ -70,6 +70,11 @@ def _build_lookup_arrays():
     (RECT_H, RECT_W).  Sampling these by (j_rect, i_rect) tells us which face
     and face-local (j, i) any rect pixel belongs to, transparently handling
     per-face rotations.
+
+    Returns:
+    - face_id: int8 array of shape (RECT_H, RECT_W)
+    - j_face: int16 array of shape (RECT_H, RECT_W)
+    - i_face: int16 array of shape (RECT_H, RECT_W)
     """
     # face_id: every pixel holds the face index it belongs to.  int8 is
     # plenty since face index is 0..12.
@@ -108,7 +113,8 @@ def _build_lookup_arrays():
 
 
 def _get_lookup_arrays():
-    """Return the (face_id, j_face, i_face) lookup maps, building on first call."""
+    """Return the (face_id, j_face, i_face) lookup maps, 
+    building on first call."""
     global _LOOKUP_CACHE
     if _LOOKUP_CACHE is None:
         _LOOKUP_CACHE = _build_lookup_arrays()

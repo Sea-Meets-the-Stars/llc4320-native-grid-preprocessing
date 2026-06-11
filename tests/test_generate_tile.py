@@ -149,8 +149,9 @@ def test_run_round_trip(monkeypatch, tmp_path, prop_name):
     }
     monkeypatch.setattr(tu, "_resolve_s3_source", lambda _: fake_s3_cfg)
 
-    # --- Stub git-commit lookup. ---
-    monkeypatch.setattr(tu, "_git_commit", lambda: "deadbeef")
+    # --- Stub git-commit lookup (reused from global_dataset_creation.logging,
+    # --- imported into tile_utils as ``_git_commit_hash``). ---
+    monkeypatch.setattr(tu, "_git_commit_hash", lambda: "deadbeef")
 
     # --- Synthetic grid: 51 k-levels, one face, 720x720 spatial extent. ---
     n_k = 51

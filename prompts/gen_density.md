@@ -166,9 +166,20 @@ The surface panel is enough.
 
 1. Generate a test opens the zarr store and confirms that the logic for i,j to tile index is correct.  Put it in tests/test_generate_tile_density.py as a unit test.
 
+2. I believe this computer is on the Network.  Please: 
+
+- perform all of the tests in tests/test_generate_tile.py
+- Log your work and the results
+
 ## Docs
 
 1. Add notes on the Parameters and Returns to the docstrings for every function in the code.  
+
+2. Please add documenation by doing the following:
+
+- Read the files in docs/ 
+- Generate a Tiles.md file in docs/
+- Update any other docs accordingly
 
 ## Modifications
 
@@ -183,6 +194,11 @@ The surface panel is enough.
 - create a test module tests/test_generate_tile.py that tests the tile code.  See the example in generate_tile.py 
 - Log your work below
 
+4. We are close to issuing a PR.  Please:
+
+ - check that all of the new methods are well documented
+ - check to see if any of the methods in tile_utils.py are present elsewhere in the code base.  If so, refactor to use those and remove the methods from tile_utils.py.
+
 ## Prompts
 
 1. Read this document.  Plan the code to implement the functionality.  Update this document with your plan under the Planning section.  If you have any questions, put them under the Clarification section.
@@ -193,6 +209,10 @@ The surface panel is enough.
 6. Re-read this document.  Implement the modifications 1-2.
 7. Re-read this document.  Implement the modification 3
 8. Re-read this document.  My computer crashed while you were working on Prompt 7.  Please continue where you left off, if you can.
+9. Re-read this document.  Implement the 2nd item in the Testing section
+10. Re-read this document.  Execute the 4th item under Modifications 
+11. Re-read this document.  Execute the 2nd item under Docs
+
 
 ## Logging
 
@@ -265,3 +285,142 @@ Remaining (not done, needs network): the live integration test
 `test_rect_ij_to_tile_against_grid_zarr` opens the real S3 `grid.zarr` to
 confirm the rect-(i,j)→tile mapping; run it on a networked machine to fully
 validate the face-mapping against real coordinates.
+
+### 2026-06-11 (Testing item 2: full network test run of tests/test_generate_tile.py)
+
+This machine is on the network, so I ran the **entire** suite — no deselects —
+to exercise the live-S3 integration tests that the previous resume run had to
+skip.
+
+**Command:** `conda run -n ocean14 python -m pytest tests/test_generate_tile.py -v`
+
+**Result: 22 passed, 20 warnings in 282.66s (~4m43s).** Zero failures.
+
+Breakdown of the 22 collected tests:
+
+- `test_flat_tile_index` (7 params) — flat rect tile-index math, incl. corners
+  `(0,0)→0` and `(17279,12959)→431`, off-boundary floors, and a mid-grid case.
+- `test_out_of_range_raises` — out-of-bounds (i, j) rejected.
+- `test_face_mapping_handles_rotation` — synthetic rotated-face lookup arrays.
+- `test_run_round_trip[density|salinity|temperature]` (3) — full `run`
+  orchestrator end-to-end on synthetic stubs across every registered property.
+- `test_run_unknown_property_raises` — unregistered property → `KeyError`.
+- `test_resolve_s3_source_default_is_depth` — default source resolves to
+  canonical LLC_DEPTH.
+- `test_output_path_default | _directory | _verbatim` (3) — filename conventions.
+- `test_rect_ij_to_tile_against_grid_zarr` (5 params: `(100,100)`, `(5000,5000)`,
+  `(16000,1000)`, `(1000,11000)`, `(12345,6789)`) — **live S3**: opens the real
+  LLC4320 `grid.zarr`, stitches `XC`/`YC` to the rect grid, and confirms each
+  rect-(i,j)→tile mapping (and the rotation-invariant set-equality of physical
+  coords inside the face-local vs. rect tile) against the actual model
+  coordinates. **All 5 passed**, so the face-mapping is validated end-to-end
+  against real data — closing the item left open in the previous log entry.
+
+**Warnings (all benign, no action needed):**
+
+- `UserWarning` from `get_raw_data.py:590` (`xr.open_zarr`): the requested chunks
+  separate the stored chunks along `k`/`k_l`. Performance hint only; the grid
+  read for these tests is small.
+- `FutureWarning` from `xmitgcm/llcreader/llcmodel.py` about `Dataset.dims`
+  returning a set in a future xarray release — upstream xmitgcm, not our code.
+
+**What I learned:** the live integration test's wall time (~4–5 min) is dominated
+by the five sequential S3 `grid.zarr` opens + xmitgcm rect-grid stitches (one per
+param); the mapping logic itself is instant. For routine offline development,
+deselecting `test_rect_ij_to_tile_against_grid_zarr` keeps the suite at ~13s.
+
+### 2026-06-11 (Modifications item 4: PR prep — docs audit + de-duplication)
+
+Pre-PR pass over `src/dbof/tiles/`: confirm every new method is documented and
+remove logic that already lives elsewhere in the codebase.
+
+**Documentation audit:** all functions/methods in `tile_utils.py`,
+`tile_mapping.py`, and `generate_tile.py` carry numpydoc-style docstrings with
+Parameters/Returns (and Raises where relevant). Three small fixes for PR
+cleanliness in `tile_utils.py`:
+
+- `run()` — reformatted the `clobber` / `gen_qa_plot` entries (they had the
+  Python signature `: bool = False,` bleeding into the numpydoc field name) and
+  corrected the Returns to `Path or None` (it returns `None` when the output
+  exists and `clobber=False`).
+- Removed a leftover commented-out `from IPython import embed; embed(...)`
+  debug line in `run()`.
+
+**De-duplication** — searched src/ and dev/ for tile_utils methods that already
+exist elsewhere and found two exact duplicates:
+
+1. `tile_utils._date_to_iteration` (+ the constants `LLC4320_START_DATE`,
+   `LLC4320_TIMESTEP_SECS`, `DATE_FMT`) was a byte-for-byte re-implementation of
+   `dbof.global_dataset_creation.iterations.mit_date_to_iteration` /
+   `DATE_FMT` — same epoch, timestep, rounding, and pre-start `ValueError`.
+   Removed the local copies; `tile_utils` now imports and calls
+   `mit_date_to_iteration` and `DATE_FMT`. (Verified `tu.mit_date_to_iteration
+   is iterations.mit_date_to_iteration`.)
+2. `tile_utils._git_commit` duplicated
+   `dbof.global_dataset_creation.logging._git_commit_hash` — both shell out to
+   `git rev-parse` with an `'unknown'` fallback for the `git_commit` provenance
+   attr. Removed the local copy and reused `_git_commit_hash`. Minor behavior
+   change: the attr now stores the **short** hash (`rev-parse --short HEAD`)
+   instead of the full hash, matching the run-metadata provenance the rest of
+   the pipeline already writes.
+
+Dropped the now-unused `import subprocess` and narrowed `from datetime import
+datetime, timezone` to just `datetime`.
+
+Updated the round-trip test in `tests/test_generate_tile.py` to monkeypatch the
+new name (`tu._git_commit_hash` instead of `tu._git_commit`).
+
+**Considered but kept:** `_load_s3_config` (an `s3_source`-block YAML reader) has
+no clean equivalent — `cli.transfer_llc4320._load_transfer_config` reads a
+different (`transfer`) block and builds a `JobConfig`, so it's not a duplicate.
+The remaining helpers (`_build_output_path`, the tile grid/tracer loaders,
+`compute_tile_property`, `_build_output_dataset`, `_qa_plot`, the per-property
+compute callbacks) are tile-specific orchestration with no counterpart.
+`density_of_field` was already being reused from `physical_calculations`.
+
+**Verification:** module imports clean under `ocean14`; the duplicate symbols
+are gone (`_date_to_iteration`, `_git_commit`, `LLC4320_START_DATE` no longer
+attributes of `tile_utils`); offline suite **17 passed, 5 deselected** in ~12s.
+Did not re-run the 5 live-S3 tests (no code path they touch changed; they passed
+in the prior entry).
+
+### 2026-06-11 (Docs item 2: write docs/Tiles.md + wire into the docs set)
+
+Added user-facing documentation for the single-tile pipeline.
+
+**What I read first:** the existing `docs/` set (`index.md` toctree,
+`Accessing_Raw_LLC4320_Data.md`, and especially `Global_Maps.md`) to match
+house style — table-heavy, code-block usage examples, an explicit data-source
+table, and a "Known issues / Notes" tail. `Global_Maps.md` documents the global
+DEPTH pipeline that shares the tile pipeline's LLC_DEPTH S3 source, so I framed
+Tiles as its single-tile counterpart and cross-linked the two.
+
+**Created `docs/Tiles.md`** covering: the three `src/dbof/tiles/` modules; tile
+geometry (rect grid → 432 tiles, `tile_idx = tile_j_rect*24 + tile_i_rect`,
+floor-to-enclosing-tile); how `rect_ij_to_tile` resolves the per-face rotation
+via the synthetic stitched lookup arrays; the property registry table
+(density→`sigma0`, temperature→`Theta`, salinity→`Salt`) and how to add a new
+property; CLI and `tile_utils.run()` Python usage; the output NetCDF layout
+(dims/coords/attrs); the LLC_DEPTH data source + `--s3-config` override; the
+reused building blocks; and how to run the tests. Ends with the required
+"Generated by JXP and Claude" line.
+
+**Updated other docs:**
+
+- `docs/index.md` — added `Tiles` to the Documentation toctree. Also added
+  `Global_Maps`, which existed on disk but had been omitted from the toctree
+  (so it now renders in the Sphinx/MyST site), and added a bullet to the
+  Overview list.
+- `docs/Global_Maps.md` — added a callout near the top pointing readers who
+  only need one 720×720 tile to `Tiles.md`.
+
+**Accuracy check:** verified every concrete claim against the code under
+`ocean14` rather than trusting the (now-stale) Planning section — e.g. the
+worked example `(i=9800, j=9000) → tile_idx 301` (face 7; I'd first written 203
+and corrected it), the LLC_DEPTH source dict
+(`folder=LLC4320_v1`, `grid_folder=LLC4320`, bucket `dbof/`), and the filename
+prefixes (`density` / `theta` / `salt`). Note the Planning section still
+describes the *original* design (`dev/generate_tile_density.py`, surface-`hFacC`
+land masking, `configs/global_depth.yaml`); the shipped code dropped masking and
+moved to `src/dbof/tiles/` + the `data_sources` DEPTH source, so I documented the
+code as it actually is.
