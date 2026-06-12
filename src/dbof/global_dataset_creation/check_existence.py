@@ -25,6 +25,8 @@ ordering used by ``run_all_subsets``:
         -> some missing:         check zarr store completeness
                -> complete:      EXPORT only the missing channels
                -> incomplete:    GENERATE the store, then export
+
+Written by LAH and Claude.
 """
 
 import json
@@ -110,7 +112,8 @@ def store_channels(fs, store_path: str) -> list[str] | None:
 def store_n_timesteps(fs, store_path: str) -> int:
     """Return the number of timesteps written to the store's ``data`` array.
 
-    Reads ``{store}/data/zarr.json`` and returns ``shape[0]``.  A freshly
+    Reads ``{store}/data/zarr.json`` and returns ``shape[0]``.  
+    Protects against zero timestep case (i.e. no data written). A freshly
     created but never-written store (e.g. from a crashed run) has shape
     ``(0, C, H, W)`` and therefore returns 0.
 
