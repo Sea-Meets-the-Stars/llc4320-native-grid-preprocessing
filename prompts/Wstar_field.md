@@ -77,14 +77,6 @@ Q_2 = -(du/dy db/dx + dv/dy db/dy)
  - Build a Juptyer notebook named notebooks/notebooks_dev/Wstar_field.ipynb that demonstrates the new field.
  - Log your work under the Logs section
 
-### Tests
-
-1. In addition to the existing tests you generated, please add:
-
-- A test that works on the real grid, i.e. requiring the network.  Follow the approach as in test_generate_tile.py
-- You should work on a small subset of the grid, e.g. a single tile or maybe two neighboring tiles if that is feasible
-- Check that the metadata is being written correctly
-
 ### Planning
 
 #### 1. Goal
@@ -222,8 +214,8 @@ No new gradient/EOS code. W\* is assembled entirely from
 
 1. Examine the docs in docs/.  Then:
 
-- Add docs related to R_ib where you see fit
-- Make sure R_ib is well defined where other fields are in the code base
+- Add docs related to W* where you see fit
+- Make sure W* is well defined where other fields are in the code base
 - Log your work
 
 
@@ -233,6 +225,7 @@ No new gradient/EOS code. W\* is assembled entirely from
 
 1. Re-read this document.  Implement the 1st item under Implementation
 2. Re-read this document.  Implement the 2nd item under Implementation
+3. Re-read this document.  Implement the 1st item under Docs
 
 ## Logging
 
@@ -351,3 +344,36 @@ try/except so the notebook still runs offline.
   its sign agrees with the classical W everywhere (sgn(l₂)=sgn(W) holds),
   and |W*| ≳ |W| (the QG term amplifies the signal) — a good physical
   sanity check that the wiring and units are correct.
+
+### 2026-06-12 (Documented W* in Global_Maps.md; verified field registration)
+
+Executed the 1st item under **Docs**.
+
+Surveyed `docs/` — `Global_Maps.md` is the single field-reference hub
+(included from `docs/index.md`); `R_ib` is documented only there, with a
+dedicated subsection and an entry in the subset tables.  No other doc file
+catalogs individual fields (the rest are task/how-to guides), so that is
+where W* belongs too.
+
+Changes to `docs/Global_Maps.md`:
+
+- Added `Wstar` to the `frontogenesis` row of **both** subset tables
+  (Surface pipeline + Depth pipeline) — no new column, just the extra
+  channel, so the table layout is unchanged.
+- Added a new **"Modified Okubo-Weiss parameter (`Wstar`)"** subsection
+  right after the `R_ib` one, mirroring its style: the eigenvalue
+  formula (W*, l₁, l₂), the Q-vector definition, the reuse of
+  `okubo_weiss_3d` + the velocity Jacobian, the unscaled-physical-buoyancy
+  choice (same rationale as R_ib), the resulting `s⁻²` units and sign
+  convention, the equator NaN behaviour, why it needs both U/V and
+  Theta/Salt (hence the `frontogenesis` subset), and a pointer to
+  `modified_okubo_weiss_3d`.
+
+"Well defined where other fields are": confirmed by grepping the repo for
+`R_ib` vs `Wstar`.  `R_ib` is registered in `defs.py`, `subset_definitions.py`,
+`depth_subsets.py`, `calculated_fields_at_depth.py`, and `Global_Maps.md`.
+`Wstar` now appears in **all** of those *plus* `variable_selection.py` — a
+superset of R_ib's footprint — so it is at least as well-defined as the
+existing fields.  (Aside noticed while grepping: `R_ib_` has no explicit
+rule in `variable_selection.py`; it is not my task to change, but worth a
+follow-up — `Wstar_` was added explicitly and is covered.)

@@ -178,7 +178,7 @@ related fields together lets you generate and export only what you need.
 | `icearea`           | `SIarea`                                                                                    | Yes                    |
 | `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  | No                     |
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` | No |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              | No                     |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`, `Wstar`     | No                     |
 
 Subsets marked "Requires wind/ice data" need `oceTAUX`, `oceTAUY`, or
 `SIarea`. On **OSN** these come from the `llc_wind` kerchunk endpoint, which
@@ -198,7 +198,7 @@ MIT first using `transfer_llc4320.py`.
 | `energetics`        | `KE`                                               | sfc, z25m, mld, mld_mean   |                                         |
 | `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc, z25m, mld, mld_mean |                   |
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `rossby_number`, `okubo_weiss` | sfc, z25m, mld, mld_mean | `coriolis_f` |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc, z25m, mld, mld_mean |                   |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`, `Wstar` | sfc, z25m, mld, mld_mean |                   |
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
 | `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
@@ -231,6 +231,47 @@ The same `N² ≥ 0` floor is applied to the gradient Richardson number `Ri`
 (the `vertical_shear` subset, `richardson_number_3d`): negative `N²` is
 clamped to `0` so unstable columns give `Ri = 0` rather than a negative
 value.
+
+### Modified Okubo-Weiss parameter (`Wstar`)
+
+`Wstar` (in the `frontogenesis` subset) is the **modified Okubo-Weiss
+parameter** of Bachman (2021). Like the classical Okubo-Weiss parameter
+`okubo_weiss` (the `kinematic` subset), it compares strain and vorticity,
+but `Wstar` is additionally **sensitive to the vertical shear** carried by
+the quasi-geostrophic `Q` vector. It is the eigenvalue combination
+
+```
+Wstar = 4 · sgn(l₂) · √(l₁² + l₂²)
+
+l₂ = W / 4                              W = σ_n² + σ_s² − ω²   (Okubo-Weiss)
+l₁ = ½·l₂ + ½·√(l₂² + |Q|²/f²)
+```
+
+where `(l₁, l₂)` are the eigenvalues of the QG strain-squared-plus-
+vorticity-squared tensor, `W` is the classical Okubo-Weiss parameter, `f`
+the Coriolis parameter, and `|Q|² = Q₁² + Q₂²` the squared magnitude of the
+QG `Q` vector (Hoskins, Draghici & Davies 1978):
+
+```
+Q₁ = −(∂u/∂x · ∂b/∂x + ∂v/∂x · ∂b/∂y)
+Q₂ = −(∂u/∂y · ∂b/∂x + ∂v/∂y · ∂b/∂y)
+```
+
+The classical Okubo-Weiss term reuses `okubo_weiss_3d`; the velocity
+gradients come from the shared velocity Jacobian; and — exactly as for
+`R_ib` — the horizontal buoyancy gradient `∇_h b` is built from the
+*unscaled* physical buoyancy `b = (g/ρ₀)·ρ` (the `×1e3`-scaled buoyancy is
+**not** reused). This keeps the dimensions honest: `∂b ~ s⁻²`, `Q ~ s⁻³`,
+`|Q|²/f² ~ s⁻⁴`, so `Wstar` carries the **same units as the classical
+Okubo-Weiss parameter, `s⁻²`**. Its sign follows that of `W` (positive ⇒
+strain-dominated). `Wstar` is `NaN` at the equator where `f → 0` (the QG
+scaling `|Q|²/f²` diverges). Because the `Q` vector needs the horizontal
+buoyancy gradient, `Wstar` requires **both** velocities (`U`, `V`) and
+tracers (`Theta`, `Salt`) — unlike the classical `okubo_weiss`, which needs
+only velocities; this is why it lives in the `frontogenesis` subset (which
+already loads both and builds the velocity Jacobian). It is computed by
+`modified_okubo_weiss_3d` in
+`src/dbof/preprocessing/calculated_fields_at_depth.py`.
 
 ---
 
