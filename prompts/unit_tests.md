@@ -422,3 +422,66 @@ curvature term lives; (3) histogram of pooled `|grad|` with the median,
 magnitude scaling (diff of a constant is 0 before the divide) — that is
 covered by synthetic Cases A–D. Case G (rotation-invariance of trace/curl
 with *real* velocities) is still outstanding for a later prompt.
+
+### 2026-06-12 (Implemented Test Case G — real-grid rotation invariance)
+
+Implemented the 6th item under Native gradients/Jacobian: the trace/curl
+rotation-invariance test in `tests/test_jacobian.py` plus
+`notebooks/notebooks_tests/jacobian_tests_G.ipynb`. Both reuse the test
+code (`load_real_llc_grid`, `load_real_llc_surface_velocity`,
+`model_frame_jacobian`, `interior`).
+
+**Real surface U,V source (important efficiency finding).** The user asked
+whether I was truly grabbing only the surface — I was *not*. The LLC_DEPTH
+timestep store `dbof/LLC4320_v1/20121109T12.zarr` has `U`/`V` but with
+on-disk chunk shape `[51,1,720,720]` — **all 51 k-levels in one chunk** —
+so `isel(k=0)` still pulls every level (~50 GB for one surface level).
+Per the user's choice, I switched to the **LLC_SURF OSN kerchunk** store
+(`get_raw_data.get_remote_llc_data(OSN_ENDPOINT, it, range(13))`,
+`OSN_ENDPOINT=https://mghp.osn.xsede.org`, `it=osn_date_to_iteration(
+'2012-11-09 12:00:00')`), which stores a single surface level — a genuine
+surface-only read (~1.9 GB, ~125 s), cached to NetCDF
+(`LLC_TEST_UV_CACHE`). `U` on `(face,j,i_g)`, `V` on `(face,j_g,i)` — the
+exact staggering `calculate_jacobian` expects.
+
+**Design — reuse `calculate_jacobian` for the reference.** The model-frame
+divergence/vorticity is obtained by re-running `calculate_jacobian` on a
+copy of the grid with `CS=1, SN=0` (identity rotation) — added as helper
+`model_frame_jacobian`. The geographic frame uses the real `CS/SN`. The
+test then compares trace (`du_λ/dλ+dv_φ/dφ`) and antisymmetric part
+(`dv_φ/dλ−du_λ/dφ`) between frames.
+
+**Empirical agreement** (139.3M finite ocean-interior points, edge ring
+trimmed, `hFacC>0`, nan-aware):
+- divergence: signalRMS=1.43e-5, **median |diff|=0.0**, RMSdiff/signal=
+  **3.2e-3**, 99th pct=1.9e-7, max=3.7e-5;
+- vorticity:  signalRMS=2.03e-5, **median |diff|=0.0**, RMSdiff/signal=
+  **2.2e-3**, 99th pct=1.7e-7, max=3.7e-5.
+
+So the invariants are **bit-identical** where the grid rotation is locally
+smooth (median diff exactly 0) and agree to ~0.3% RMS overall; the small
+residual is the same `grad(CS)` term seen in Case F, concentrated near grid
+singularities. This is a strong truth-free check: a sign/rotation bug would
+make `RMSdiff/signal` O(1), not 0.3%.
+
+**Assertions (per invariant):** `signalRMS > 1e-6` (signal is real, not a
+trivial 0==0); `median|diff| < 1e-10`; `RMSdiff/signal < 2e-2`; `99th pct
+< 1e-6`. Gating is the same self-contained `slow`/`network` +
+`skipif(not RUN_LLC_NETWORK_TESTS)`. Default `pytest` → **9 passed, 2
+skipped**; `RUN_LLC_NETWORK_TESTS=1 -k rotation_invariance` → **1 passed in
+102 s** (reusing both caches).
+
+**Notebook** `jacobian_tests_G.ipynb` (executed via `nbconvert`: 0 errors,
+3 figures, ends "Test Case G passed."): (1) load + dual jacobian + print
+stats; (2) side-by-side geographic vs model divergence maps + their
+log-scale difference on a face; (3) `y=x` scatter of geographic vs model
+divergence and vorticity (sampled); (4) histogram of the positive-diff tail
+with signal RMS / RMS-diff / 99th-pct (median is exactly 0, reported as the
+off-plot zero fraction).
+
+**Gotcha fixed:** the residual `|diff|` is float32 and mostly exactly 0;
+`log10(d+1e-300)` underflowed to `-inf` in float32 → histogrammed only the
+`d>0` tail in float64 and reported the zero fraction separately.
+
+All synthetic (A–E) and real-grid (F, G) Jacobian test cases from the plan
+are now implemented.
