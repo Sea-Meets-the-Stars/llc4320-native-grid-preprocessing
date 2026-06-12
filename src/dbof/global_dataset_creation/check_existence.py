@@ -24,7 +24,9 @@ ordering used by ``run_all_subsets``:
         -> all exist:            SKIP (zarr store is not even consulted)
         -> some missing:         check zarr store completeness
                -> complete:      EXPORT only the missing channels
-               -> incomplete:    GENERATE the store, then export
+               -> incomplete:    GENERATE the store, then re-export ALL
+                                 channels (existing .nc files are overwritten
+                                 so every export traces to one store build)
 
 Written by LAH and Claude.
 """
@@ -248,7 +250,12 @@ def plan_subset_date(
 
         all .nc files exist                -> (SKIP, [])
         some missing, zarr complete        -> (EXPORT, missing_channels)
-        some missing, zarr incomplete      -> (GENERATE, missing_channels)
+        some missing, zarr incomplete      -> (GENERATE, ALL channels)
+
+    GENERATE returns *all* channels (not just the missing ones) so that
+    every ``.nc`` file for this subset/date is re-exported from the freshly
+    built store -- a mix of exports from different store builds (e.g. before
+    and after a code change) would be inconsistent.
 
     Note the zarr store is only consulted when at least one ``.nc`` file is
     missing, so deleting a store whose exports are all on disk never
@@ -273,8 +280,8 @@ def plan_subset_date(
     -------
     (action, channels_to_export) : tuple[str, list[str]]
         *action* is one of :data:`SKIP`, :data:`EXPORT`, :data:`GENERATE`.
-        *channels_to_export* lists the channels whose ``.nc`` is missing
-        (empty for SKIP).
+        *channels_to_export* is empty for SKIP, the missing channels for
+        EXPORT, and ALL channels for GENERATE (overwriting stale exports).
     """
     missing = missing_netcdfs(output_dir, date_prefix, run_id, channels)
     if not missing:
@@ -283,4 +290,4 @@ def plan_subset_date(
     if store_is_complete(fs, store_path, channels):
         return EXPORT, missing
 
-    return GENERATE, missing
+    return GENERATE, list(channels)

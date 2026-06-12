@@ -8,7 +8,10 @@ Batch driver that loops over all active subsets in a ``run.yaml`` config:
 
        all channel .nc files exist     -> SKIP (zarr not even consulted)
        some missing, zarr complete     -> EXPORT only the missing channels
-       some missing, zarr incomplete   -> GENERATE the store, then export
+       some missing, zarr incomplete   -> GENERATE the store, then re-export
+                                          ALL channels (overwriting existing
+                                          .nc so every export comes from the
+                                          same store build)
 
    "zarr complete" = root metadata exists, ``channel_names`` covers every
    expected (suffix-expanded) channel, and >= 1 timestep is written.  A
@@ -358,8 +361,13 @@ def _run_export_subset(
     dry_run: bool = False,
     ice_mask: bool = False,
     clobber: bool = False,
+    clobber_dates: set | None = None,
 ) -> None:
     """Export the planned channels in one subset to individual NetCDF files.
+
+    *clobber_dates* lists date_prefixes whose store was (re)generated this
+    run: their exports overwrite existing ``.nc`` files so all exports for
+    a subset/date come from the same store build.
 
     Parameters
     ----------
@@ -422,7 +430,7 @@ def _run_export_subset(
                     output_dir=output_dir,
                     dry_run=dry_run,
                     ice_mask=apply_ice_mask,
-                    clobber=clobber,
+                    clobber=clobber or dp in (clobber_dates or set()),
                 )
             except Exception:
                 log.exception("  FAILED to export channel '%s' from subset '%s' "
@@ -791,7 +799,8 @@ def main():
         for subset_name, dataset_name, channels in work:
             failed = failed_generates.get(subset_name, set())
             channels_by_date = {}
-            for dp, (_action, export_channels) in plans[subset_name].items():
+            clobber_dates = set()  # regenerated dates: overwrite their .nc
+            for dp, (action, export_channels) in plans[subset_name].items():
                 if not export_channels:
                     continue
                 if dp in failed:
@@ -800,6 +809,8 @@ def main():
                              subset_name, dp)
                     continue
                 channels_by_date[dp] = export_channels
+                if action == check_existence.GENERATE:
+                    clobber_dates.add(dp)
             if not channels_by_date:
                 log.info("Subset '%s': all channel NetCDFs exist — "
                          "skipping export.", subset_name)
@@ -817,6 +828,7 @@ def main():
                     dry_run=args.dry_run,
                     ice_mask=args.ice_mask,
                     clobber=(args.clobber or args.clobber_export),
+                    clobber_dates=clobber_dates,
                 )
             except Exception:
                 log.exception("FAILED to export subset '%s'", subset_name)
