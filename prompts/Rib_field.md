@@ -201,6 +201,15 @@ I agree.
 - update the tests, if needed
 - Log your work
 
+2. Add a Notebook name notebooks/notebook_dev/Rib_field.ipynb that demonstrates the new field. Please:
+
+ - Build a Juptyer notebook that demonstrates the new field
+ - Mimic it after the Wstar_field.ipynb notebook.
+ - Use the code in tests_calculated_fields_at_depth.py to make the figures.
+- Log your work
+
+
+
 ## Prompts
 
 1. Re-read this document.  Implement the first item under Implementation
@@ -208,6 +217,7 @@ I agree.
 3. Re-read this document.  Implement the 1st item under Testing
 4. Re-read this document.  Implement the 1st item under Docs
 5. Re-read this document.  Implement the 1st item under Modifications
+6. Re-read this document.  Implement the 2nd item under Modifications
 
 
 ## Logging
