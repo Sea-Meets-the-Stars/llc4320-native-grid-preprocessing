@@ -68,6 +68,7 @@ from dbof.io.filesystems import create_s3_filesystems
 
 # internal — global pipeline modules
 import dbof.global_dataset_creation.config as config
+import dbof.global_dataset_creation.check_existence as check_existence
 import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset
 from dbof.global_dataset_creation.data_sources import (
     OSN_ENDPOINT,
@@ -278,6 +279,7 @@ def main(
     subset: str = None,
     pipeline: str = None,
     clobber: bool = False,
+    dates: list = None,
 ) -> None:
     """
     Entry point for the unified global pipeline.
@@ -296,7 +298,13 @@ def main(
         Override the ``pipeline`` key in the YAML.
     clobber : bool, optional
         If ``False`` (default), skip any subset/date whose zarr store already
-        exists on S3.  If ``True``, regenerate it.
+        exists on S3 *and* is complete (all expected channels present, at
+        least one timestep written).  If ``True``, regenerate it (snapshots
+        are overwritten in place; the store never grows duplicates).
+    dates : list of str, optional
+        Override ``data.date_iterations`` with a subset of dates (ISO
+        strings).  Used by ``run_all_subsets`` to regenerate only the dates
+        its plan flagged, leaving other dates untouched.
     """
     wall_start = time.monotonic()
 
@@ -360,6 +368,17 @@ def main(
             "(e.g. '2012-11-09 12:00:00')."
         )
 
+    # Optional override: process only a subset of the config's dates
+    # (validated against the YAML so callers can't introduce new dates).
+    if dates:
+        unknown = [d for d in dates if d not in date_iterations]
+        if unknown:
+            raise ValueError(
+                f"dates override contains entries not in the config's "
+                f"date_iterations: {unknown}"
+            )
+        date_iterations = list(dates)
+
     # ------------------------------------------------------------------
     # 4. Build GlobalJobConfig
     # ------------------------------------------------------------------
@@ -404,10 +423,11 @@ def main(
     dask_client = create_dask_client(cfg.runtime)
     fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
 
-    # Save run metadata (local + S3).
+    # Save run metadata (local + S3).  Read-merge-write: per-subset entries
+    # accumulate across invocations instead of overwriting the file.
     # Use the sync filesystem — the async one conflicts with the Dask
     # distributed client's event loop.
-    save_run_metadata(cfg, log_file, fs=fs_sync)
+    save_run_metadata(cfg, log_file, fs=fs_sync, clobber=clobber)
 
     ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
 
@@ -456,13 +476,17 @@ def main(
             logging.info(f"  Date: {date_str}  →  date_prefix: {date_prefix}")
 
             # Skip this subset/date if its zarr store already exists on S3
-            # (unless clobbering).  
+            # AND is complete: all expected channels present and >= 1
+            # timestep written (metadata-only checks).  A store from a
+            # crashed run (0 timesteps) or built with a different
+            # depth-suffix set is treated as incomplete and regenerated.
             store_path = zarr_dataset.make_run_prefix(
                 cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
                 dataset_name, date_prefix=date_prefix,
             )
-            if not clobber and fs_sync.exists(store_path.removeprefix("s3://")):
-                logging.info(f"  SKIP (zarr store exists): {store_path}")
+            if not clobber and check_existence.store_is_complete(
+                    fs_sync, store_path, channel_names):
+                logging.info(f"  SKIP (zarr store complete): {store_path}")
                 continue
 
             # Create zarr output store for this subset + date.

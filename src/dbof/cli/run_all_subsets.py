@@ -3,10 +3,22 @@ run_all_subsets.py
 ------------------
 Batch driver that loops over all active subsets in a ``run.yaml`` config:
 
+0. **Plan:** for every subset x date, decide what (if anything) needs
+   doing using the ".nc-first" ordering (``check_existence.plan_subset_date``)::
+
+       all channel .nc files exist     -> SKIP (zarr not even consulted)
+       some missing, zarr complete     -> EXPORT only the missing channels
+       some missing, zarr incomplete   -> GENERATE the store, then export
+
+   "zarr complete" = root metadata exists, ``channel_names`` covers every
+   expected (suffix-expanded) channel, and >= 1 timestep is written.  A
+   store from a crashed run or built with a different depth-suffix set is
+   therefore regenerated automatically.
 1. **Phase 1 — Generate:** calls ``generate_global.main()`` for each
-   subset, producing Zarr stores on S3.
+   subset that has dates flagged GENERATE (only those dates are passed),
+   producing Zarr stores on S3.
 2. **Phase 2 — Export:** calls ``zarr_to_netcdf.main()`` once per
-   channel, writing individual NetCDF files.
+   missing channel, writing individual NetCDF files.
 
 This script reads the *same* ``run.yaml`` consumed by
 ``generate_global.py`` — it does not have its own config format.
@@ -77,6 +89,10 @@ import time
 
 import yaml
 
+from dbof.global_dataset_creation import check_existence
+from dbof.global_dataset_creation.zarr_dataset_global import make_run_prefix
+from dbof.io.filesystems import create_s3_filesystems
+
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -97,15 +113,18 @@ log = logging.getLogger(__name__)
 ICE_MASK_DATASET = "icearea.zarr"
 
 
-def _icearea_store_exists(
-    s3_endpoint: str, bucket: str, folder: str, run_id: str, date_prefix: str,
+def _icearea_store_complete(
+    fs_sync, bucket: str, folder: str, run_id: str, date_prefix: str,
 ) -> bool:
-    """Check whether icearea.zarr exists at the expected S3 path.
+    """Check whether icearea.zarr exists AND is complete for one date.
+
+    Uses the shared metadata-only completeness check (``SIarea`` channel
+    present, >= 1 timestep written).
 
     Parameters
     ----------
-    s3_endpoint : str
-        S3 endpoint URL.
+    fs_sync : fsspec filesystem (sync)
+        S3 filesystem.
     bucket : str
         S3 bucket name.
     folder : str
@@ -118,23 +137,18 @@ def _icearea_store_exists(
     Returns
     -------
     bool
-        ``True`` if the store exists.
+        ``True`` if the store is complete.
     """
-    from dbof.global_dataset_creation.zarr_dataset_global import make_run_prefix
-    from dbof.io.filesystems import create_s3_filesystems
-
     path = make_run_prefix(bucket, folder, run_id, ICE_MASK_DATASET,
                            date_prefix=date_prefix)
-    s3_key = path.removeprefix("s3://")
-    _, fs_sync = create_s3_filesystems(s3_endpoint)
-    return fs_sync.exists(s3_key)
+    return check_existence.store_is_complete(fs_sync, path, ["SIarea"])
 
 
 def _ensure_icearea(
     config_file: str,
     pipeline: str,
     run_id: str,
-    s3_endpoint: str,
+    fs_sync,
     bucket: str,
     folder: str,
     date_prefixes: list[str],
@@ -153,8 +167,8 @@ def _ensure_icearea(
         Pipeline name (``"SURF"``, ``"OSN"``, or ``"DEPTH"``).
     run_id : str
         Run identifier.
-    s3_endpoint : str
-        S3 endpoint URL.
+    fs_sync : fsspec filesystem (sync)
+        S3 filesystem.
     bucket : str
         S3 bucket name.
     folder : str
@@ -166,7 +180,7 @@ def _ensure_icearea(
     """
     missing = [
         dp for dp in date_prefixes
-        if not _icearea_store_exists(s3_endpoint, bucket, folder, run_id, dp)
+        if not _icearea_store_complete(fs_sync, bucket, folder, run_id, dp)
     ]
 
     if not missing:
@@ -197,6 +211,7 @@ def _run_generate(
     pipeline: str,
     dry_run: bool = False,
     clobber: bool = False,
+    dates: list[str] | None = None,
 ) -> None:
     """Call ``generate_global.main()`` for one subset.
 
@@ -214,17 +229,22 @@ def _run_generate(
         If ``True``, log the call without executing.
     clobber : bool
         If ``False`` (default), generate_global skips subset/date zarr stores
-        that already exist on S3.  If ``True``, regenerate them.
+        that already exist on S3 and are complete.  If ``True``, regenerate
+        them (snapshots are overwritten in place).
+    dates : list of str, optional
+        Restrict generation to these dates (ISO strings).  ``None`` means
+        all dates in the config.
     """
     log.info("=" * 60)
-    log.info("GENERATE  config=%s  subset=%s  pipeline=%s",
-             config_file, subset, pipeline)
+    log.info("GENERATE  config=%s  subset=%s  pipeline=%s  dates=%s",
+             config_file, subset, pipeline, dates or "all")
     log.info("=" * 60)
 
     if dry_run:
         log.info("[DRY RUN] Would call generate_global.main("
-                 "config_file=%r, subset=%r, run_id=%r, pipeline=%r, clobber=%r)",
-                 config_file, subset, run_id, pipeline, clobber)
+                 "config_file=%r, subset=%r, run_id=%r, pipeline=%r, "
+                 "clobber=%r, dates=%r)",
+                 config_file, subset, run_id, pipeline, clobber, dates)
         return
 
     from dbof.cli.generate_global import main as generate_main
@@ -234,6 +254,7 @@ def _run_generate(
         subset=subset,
         pipeline=pipeline,
         clobber=clobber,
+        dates=dates,
     )
 
 
@@ -332,14 +353,13 @@ def _run_export_subset(
     run_id: str,
     subset_name: str,
     dataset_name: str,
-    channels: list[str],
-    date_prefixes: list[str],
+    channels_by_date: dict[str, list[str]],
     netcdf_base: str,
     dry_run: bool = False,
     ice_mask: bool = False,
     clobber: bool = False,
 ) -> None:
-    """Export all channels in one subset to individual NetCDF files.
+    """Export the planned channels in one subset to individual NetCDF files.
 
     Parameters
     ----------
@@ -355,10 +375,10 @@ def _run_export_subset(
         Name of the subset being exported.
     dataset_name : str
         Zarr store name (e.g. ``"stratification.zarr"``).
-    channels : list[str]
-        Expanded channel names to export.
-    date_prefixes : list[str]
-        Date prefix strings (``YYYYMMDD_HHMMSS``).
+    channels_by_date : dict[str, list[str]]
+        Mapping ``date_prefix -> channels to export`` from the work plan
+        (only channels whose ``.nc`` was missing at plan time, or all
+        channels when clobbering).
     netcdf_base : str
         Root directory for NetCDF output.
     dry_run : bool
@@ -366,23 +386,28 @@ def _run_export_subset(
     ice_mask : bool
         If ``True``, mask ice-covered points with NaN.
     """
-    if not channels:
-        log.warning("  No channels for subset '%s' — skipping export.", subset_name)
+    if not any(channels_by_date.values()):
+        log.info("  No channels to export for subset '%s' — skipping.",
+                 subset_name)
         return
 
     # Don't self-mask the icearea subset.
     apply_ice_mask = ice_mask and subset_name != "icearea"
     mask_label = " [ice-masked]" if apply_ice_mask else ""
 
+    n_total = sum(len(chs) for chs in channels_by_date.values())
     log.info("-" * 60)
     log.info("EXPORT subset=%s  dataset=%s  channels=%d  dates=%d%s",
-             subset_name, dataset_name, len(channels), len(date_prefixes),
+             subset_name, dataset_name, n_total, len(channels_by_date),
              mask_label)
     log.info("-" * 60)
 
-    for dp in date_prefixes:
+    for dp, channels in channels_by_date.items():
+        if not channels:
+            continue
         output_dir = os.path.join(netcdf_base, run_id, dp)
-        log.info("  date_prefix=%s  -> %s", dp, output_dir)
+        log.info("  date_prefix=%s  -> %s  (%d channel(s))",
+                 dp, output_dir, len(channels))
 
         for channel in channels:
             try:
@@ -402,6 +427,94 @@ def _run_export_subset(
             except Exception:
                 log.exception("  FAILED to export channel '%s' from subset '%s' "
                               "(date_prefix=%s)", channel, subset_name, dp)
+
+
+# ---------------------------------------------------------------------------
+# Planning (".nc-first" ordering)
+# ---------------------------------------------------------------------------
+
+def _plan_work(
+    fs_sync,
+    work: list,
+    date_pairs: list,
+    run_id: str,
+    bucket: str,
+    folder: str,
+    netcdf_base: str,
+    clobber: bool = False,
+    clobber_export: bool = False,
+    generate_only: bool = False,
+    export_only: bool = False,
+) -> dict:
+    """Build the per-subset x per-date work plan.
+
+    Default (full) mode uses the ".nc-first" ordering from
+    ``check_existence.plan_subset_date``.  Mode flags adjust it:
+
+    - ``clobber``: GENERATE every date and re-export every channel
+      (no checks).
+    - ``clobber_export``: re-export every channel; GENERATE only dates
+      whose store is incomplete (can't export from a broken store).
+    - ``generate_only``: ignore ``.nc`` files; GENERATE dates whose store
+      is incomplete.
+    - ``export_only``: never GENERATE; EXPORT channels whose ``.nc`` is
+      missing.
+
+    Parameters
+    ----------
+    fs_sync : fsspec filesystem (sync)
+        S3 filesystem.
+    work : list of (subset_name, dataset_name, channels)
+        Expanded work items.
+    date_pairs : list of (date_str, date_prefix)
+        Config dates with their directory prefixes.
+    run_id, bucket, folder, netcdf_base : str
+        Path components.
+    clobber, clobber_export, generate_only, export_only : bool
+        Mode flags (see above).
+
+    Returns
+    -------
+    dict
+        ``{subset_name: {date_prefix: (action, channels_to_export)}}`` with
+        *action* one of ``check_existence.{SKIP, EXPORT, GENERATE}``.
+    """
+    plans = {}
+    for subset_name, dataset_name, channels in work:
+        subset_plan = {}
+        for _date_str, dp in date_pairs:
+            output_dir = os.path.join(netcdf_base, run_id, dp)
+            store_path = make_run_prefix(bucket, folder, run_id,
+                                         dataset_name, date_prefix=dp)
+
+            if clobber:
+                subset_plan[dp] = (check_existence.GENERATE, list(channels))
+            elif clobber_export:
+                complete = check_existence.store_is_complete(
+                    fs_sync, store_path, channels)
+                action = (check_existence.EXPORT if complete
+                          else check_existence.GENERATE)
+                subset_plan[dp] = (action, list(channels))
+            elif generate_only:
+                complete = check_existence.store_is_complete(
+                    fs_sync, store_path, channels)
+                subset_plan[dp] = (
+                    (check_existence.SKIP, []) if complete
+                    else (check_existence.GENERATE, [])
+                )
+            elif export_only:
+                missing = check_existence.missing_netcdfs(
+                    output_dir, dp, run_id, channels)
+                subset_plan[dp] = (
+                    (check_existence.EXPORT, missing) if missing
+                    else (check_existence.SKIP, [])
+                )
+            else:
+                subset_plan[dp] = check_existence.plan_subset_date(
+                    fs_sync, store_path, output_dir, dp, run_id, channels)
+
+        plans[subset_name] = subset_plan
+    return plans
 
 
 # ---------------------------------------------------------------------------
@@ -534,6 +647,7 @@ def main():
         log.error("data.date_iterations must be set in the config YAML.")
         sys.exit(1)
     date_prefixes = [_date_to_prefix(d) for d in date_iterations]
+    date_pairs = list(zip(date_iterations, date_prefixes))
 
     # ---- Resolve output S3 location ----
     from dbof.global_dataset_creation.config import default_output_folder
@@ -565,13 +679,37 @@ def main():
         dataset_name = defn["dataset_name"]
         work.append((subset_name, dataset_name, channels))
 
-    # ---- Log the plan ----
     log.info("Pipeline: %s  |  run_id: %s  |  dates: %d  |  subsets: %d",
              pipeline, run_id, len(date_prefixes), len(work))
     for subset_name, dataset_name, channels in work:
         log.info("  %s  (%s, %d channels)", subset_name, dataset_name, len(channels))
 
     wall_start = time.monotonic()
+
+    # ---- Plan: decide per subset x date what needs doing (.nc-first) ----
+    _, fs_sync = create_s3_filesystems(s3_endpoint)
+    plans = _plan_work(
+        fs_sync=fs_sync,
+        work=work,
+        date_pairs=date_pairs,
+        run_id=run_id,
+        bucket=bucket,
+        folder=folder,
+        netcdf_base=args.netcdf_base,
+        clobber=args.clobber,
+        clobber_export=args.clobber_export,
+        generate_only=args.generate_only,
+        export_only=args.export_only,
+    )
+
+    log.info("")
+    log.info("WORK PLAN (.nc-first: check .nc -> check zarr -> generate/export)")
+    for subset_name, dataset_name, channels in work:
+        for dp, (action, export_channels) in plans[subset_name].items():
+            detail = (f"export {len(export_channels)}/{len(channels)} channel(s)"
+                      if export_channels else "")
+            log.info("  %-22s %s  %-8s %s",
+                     subset_name, dp, action.upper(), detail)
 
     # ---- Pre-flight: ensure icearea.zarr exists when ice masking ----
     if args.ice_mask and not args.export_only:
@@ -580,7 +718,7 @@ def main():
                 config_file=args.config,
                 pipeline=pipeline,
                 run_id=run_id,
-                s3_endpoint=s3_endpoint,
+                fs_sync=fs_sync,
                 bucket=bucket,
                 folder=folder,
                 date_prefixes=date_prefixes,
@@ -600,6 +738,16 @@ def main():
         log.info("=" * 60)
 
         for subset_name, dataset_name, channels in work:
+            plan = plans[subset_name]
+            dates_to_generate = [
+                date_str for date_str, dp in date_pairs
+                if plan[dp][0] == check_existence.GENERATE
+            ]
+            if not dates_to_generate:
+                log.info("Subset '%s': zarr stores complete (or exports "
+                         "already on disk) for all dates — skipping generate.",
+                         subset_name)
+                continue
             try:
                 _run_generate(
                     config_file=args.config,
@@ -608,6 +756,7 @@ def main():
                     pipeline=pipeline,
                     dry_run=args.dry_run,
                     clobber=args.clobber,
+                    dates=dates_to_generate,
                 )
             except Exception:
                 log.exception("FAILED to generate subset '%s'", subset_name)
@@ -636,6 +785,15 @@ def main():
         log.info("=" * 60)
 
         for subset_name, dataset_name, channels in work:
+            channels_by_date = {
+                dp: export_channels
+                for dp, (_action, export_channels) in plans[subset_name].items()
+                if export_channels
+            }
+            if not channels_by_date:
+                log.info("Subset '%s': all channel NetCDFs exist — "
+                         "skipping export.", subset_name)
+                continue
             try:
                 _run_export_subset(
                     s3_endpoint=s3_endpoint,
@@ -644,8 +802,7 @@ def main():
                     run_id=run_id,
                     subset_name=subset_name,
                     dataset_name=dataset_name,
-                    channels=channels,
-                    date_prefixes=date_prefixes,
+                    channels_by_date=channels_by_date,
                     netcdf_base=args.netcdf_base,
                     dry_run=args.dry_run,
                     ice_mask=args.ice_mask,
