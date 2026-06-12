@@ -147,6 +147,41 @@ config YAML.
 Subsets exist because the full set of derived fields is large — grouping
 related fields together lets you generate and export only what you need.
 
+### Re-running and changing `depth_suffixes`
+
+Re-runs are incremental ("`.nc`-first"): for each subset × date,
+`run-all-subsets` checks the exported `.nc` files first. If all exist the
+subset/date is skipped entirely; if some are missing it checks the Zarr
+store, exports the missing channels when the store is complete, and only
+regenerates the store when it is missing or incomplete (wrong channels, or
+no data written). The work plan is logged at startup — use `--dry-run` to
+preview it.
+
+**Changing `depth_suffixes` (or channel definitions) for an existing
+run_id/date is refused by design.** A store's channel axis is fixed at
+creation, so writing a different channel set would corrupt it. You will see:
+
+```
+ValueError: Channel mismatch for existing zarr store at s3://...
+Refusing to write -- this would corrupt the store.
+```
+
+The pipeline never deletes data; to move forward either:
+
+1. **Delete that subset's store manually** and re-run (only the affected
+   subset/date is rebuilt):
+
+   ```bash
+   aws --endpoint-url https://s3-west.nrp-nautilus.io s3 rm --recursive \
+     s3://dbof/{folder}/{run_id}/{date_prefix}/{subset}.zarr
+   ```
+
+2. **Use a new `run_id`**, keeping the old outputs intact.
+
+`run_meta.yaml` (next to the logs, and at
+`s3://{bucket}/{folder}/{run_id}/run_meta.yaml`) records the suffixes and
+channels each subset was actually built with.
+
 ### Surface pipeline subsets (SURF / OSN)
 
 | Subset              | Fields                                                                                      | Requires wind/ice data |

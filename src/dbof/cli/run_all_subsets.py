@@ -731,6 +731,9 @@ def main():
             )
 
     # ---- Phase 1: Generate ----
+    # subset -> date_prefixes whose generation failed (exports skipped later).
+    failed_generates: dict[str, set[str]] = {}
+
     if not args.export_only:
         log.info("")
         log.info("=" * 60)
@@ -739,11 +742,11 @@ def main():
 
         for subset_name, dataset_name, channels in work:
             plan = plans[subset_name]
-            dates_to_generate = [
-                date_str for date_str, dp in date_pairs
+            to_generate = [
+                (date_str, dp) for date_str, dp in date_pairs
                 if plan[dp][0] == check_existence.GENERATE
             ]
-            if not dates_to_generate:
+            if not to_generate:
                 log.info("Subset '%s': zarr stores complete (or exports "
                          "already on disk) for all dates — skipping generate.",
                          subset_name)
@@ -756,10 +759,11 @@ def main():
                     pipeline=pipeline,
                     dry_run=args.dry_run,
                     clobber=args.clobber,
-                    dates=dates_to_generate,
+                    dates=[d for d, _ in to_generate],
                 )
             except Exception:
                 log.exception("FAILED to generate subset '%s'", subset_name)
+                failed_generates[subset_name] = {dp for _, dp in to_generate}
 
     # ---- Clear stale S3 filesystem cache between phases ----
     if not args.export_only and not args.generate_only:
@@ -785,11 +789,17 @@ def main():
         log.info("=" * 60)
 
         for subset_name, dataset_name, channels in work:
-            channels_by_date = {
-                dp: export_channels
-                for dp, (_action, export_channels) in plans[subset_name].items()
-                if export_channels
-            }
+            failed = failed_generates.get(subset_name, set())
+            channels_by_date = {}
+            for dp, (_action, export_channels) in plans[subset_name].items():
+                if not export_channels:
+                    continue
+                if dp in failed:
+                    log.info("Subset '%s' date %s: skipping export — "
+                             "generation failed (see Phase 1 error above).",
+                             subset_name, dp)
+                    continue
+                channels_by_date[dp] = export_channels
             if not channels_by_date:
                 log.info("Subset '%s': all channel NetCDFs exist — "
                          "skipping export.", subset_name)
