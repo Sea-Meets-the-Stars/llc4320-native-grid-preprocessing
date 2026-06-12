@@ -48,22 +48,33 @@ l_1 = 1/2(1/4 W) + 1/2 sqrt[(1/4 W)^2 + |Q|^2/f_0^2]
 
 where Q is the quasigeostrophic Q vector:
 
-Q = (-u_x dot grad_h(b), -u_y dot grad_h(b))
+Q = (-U_x dot grad_h(b), -U_y dot grad_h(b))
 
-with u_x and u_y are the 
+with U_x and U_y are the x and y derivatives of the total horizontal velocity field, and grad_h(b) is the horizontal buoyancy gradient.  Furthermore, f_0 is the Coriolis parameter. 
+
+Explicitly, then 
+
+|Q|^2 = Q_1^2 + Q_2^2
+
+with 
+
+Q_1 = -(du/dx db/dx + dv/dx db/dy)
+Q_2 = -(du/dy db/dx + dv/dy db/dy)
+
 
 ### Implementation
 
 1. Please:
 
-- Plan the code to add R_ib as a new field.  Put that under the Planning section.
-- If you have any questions, put them under the Clarification section and I will answer them.
+- Plan the code to add W* as a new field.  Put that under the Planning section.
+- There are existing methods in the calculated_fields_at_depth.py module that you might be able to reuse.  
 - Log your work under the Logs section
 
-2. Ok, your planning looks excellent.  And I have answered your clarifications. Please go forth and:
+2. Ok, your planning looks excellent.  Please go forth and:
 
  - generate the new methods (and modules if needed).
- - add one or more tests for the new field in tests/test_calculated_fields_at_depth.py.  Follow the approach as in test_generate_tile.py
+ - add tests for the new field in tests/test_calculated_fields_at_depth.py.  
+ - Build a Juptyer notebook named notebooks/notebooks_dev/Wstar_field.ipynb that demonstrates the new field.
  - Log your work under the Logs section
 
 ### Tests
@@ -76,123 +87,136 @@ with u_x and u_y are the
 
 ### Planning
 
-**Physical definition**
+#### 1. Goal
 
-R_ib = N² · f² / |∇_h b|²
+Add **W\*** (modified Okubo–Weiss parameter, Bachman 2021) as a new
+depth-resolved diagnostic field, wired through the same pipeline that already
+produces `okubo_weiss` and `R_ib`.
 
-This is the *balanced Richardson number* (Thomas, Tandon & Mahadevan 2013):
-the gradient Richardson number of a flow in thermal-wind balance. It is
-dimensionless: N² [s⁻²] · f² [s⁻²] / |∇_h b|² [s⁻⁴] → dimensionless.
+#### 2. Math, as I read the prompt
 
-**Building blocks — all already exist in
-`src/dbof/preprocessing/calculated_fields_at_depth.py`**
+```
+W*  = 4 · sgn(l_2) · sqrt(l_1² + l_2²)
 
-| Ingredient | Existing function | Units |
-|------------|-------------------|-------|
-| N²         | `buoyancy_frequency_squared_3d(ds_merge)` | s⁻² |
-| f          | `coriolis_parameter(ds_merge, grid)`      | s⁻¹ |
-| \|∇_h b\|² | `grad_b2_3d(ds_merge, grid)`              | s⁻⁴ |
+l_2 = W / 4                                   # W = Okubo–Weiss (s⁻²)
+l_1 = ½·(¼W) + ½·sqrt[ (¼W)² + |Q|²/f_0² ]    # = ½·l_2 + ½·sqrt(l_2² + |Q|²/f_0²)
 
-No new physics primitives are required — R_ib is a pure composition of three
-fields the codebase already computes lazily.
+W   = σ_n² + σ_s² − ω²                         # already = okubo_weiss_3d
+|Q|² = Q_1² + Q_2²
+Q_1 = −(∂u/∂x·∂b/∂x + ∂v/∂x·∂b/∂y)
+Q_2 = −(∂u/∂y·∂b/∂x + ∂v/∂y·∂b/∂y)
+```
 
-**Where R_ib lives in the pipeline**
+Every ingredient already exists in `calculated_fields_at_depth.py`:
 
-- N² is a *vertical* derivative of density, so R_ib is inherently a
-  depth-resolved (3D → 2D) quantity. It belongs to the **DEPTH pipeline
-  only**, not the surface (SURF/OSN) pipeline (which has no vertical
-  derivative available).
-- It is reduced to 2D through the standard depth strategies
-  (`sfc`, `z25m`, `mld`, `mld_mean`) exactly like `Ri`, `Fr`, `Bu`.
+| Ingredient | Existing source to reuse |
+|---|---|
+| ∂u/∂x, ∂u/∂y, ∂v/∂x, ∂v/∂y | `compute_velocity_jacobian_3d` → `VelocityJacobian` |
+| ∂b/∂x, ∂b/∂y | `compute_buoyancy_gradients_3d` → `BuoyancyGradients` |
+| W (Okubo–Weiss) | `okubo_weiss_3d(..., jacobian=jac)` |
+| f_0 | `coriolis_parameter(ds_merge, grid)` |
+| sgn / sqrt | `np.sign`, `np.sqrt` (lazy on dask) |
 
-**Implementation steps (for the follow-up prompt — not done yet)**
+So W\* is a thin combiner over intermediates the kinematic/frontogenesis
+subsets already build — no new gradient machinery required.
 
-1. **New field function** in `calculated_fields_at_depth.py`, modelled on
-   `richardson_number_3d` / `burger_number_3d`:
+#### 3. New code (proposed)
 
-   ```python
-   def balanced_richardson_number_3d(ds_merge, grid, *,
-                                     n2=None, gradb2=None):
-       # R_ib = N² f² / |∇_h b|² ; NaN where |∇_h b|² == 0
-       if n2 is None:
-           n2 = buoyancy_frequency_squared_3d(ds_merge)
-       if gradb2 is None:
-           gradb2 = grad_b2_3d(ds_merge, grid)
-       f = coriolis_parameter(ds_merge, grid)
-       return xr.where(gradb2 > 0, n2 * f**2 / gradb2, np.nan)
-   ```
-   Fully lazy (dask-backed), optional pre-computed `n2`/`gradb2` kwargs so a
-   caller that already built them (stratification → N², frontal_structure →
-   |∇b|²) can share, matching the existing `jacobian=`/`buoyancy_gradients=`
-   reuse pattern.
+**`calculated_fields_at_depth.py`** — one new lazy 3D field function in
+GROUP 6b (next to `okubo_weiss_3d`), following the established
+`(ds_merge, grid, *, jacobian=None, buoyancy_gradients=None)` signature so
+callers can share already-computed intermediates:
 
-2. **Register in a compute subset** in `depth_subsets.py` — add an
-   `if any(c.startswith("R_ib_") ...)` branch that calls
-   `apply_depth_strategies(..., "R_ib", ...)`. Candidate hosts:
-   `vertical_shear` (next to `Ri`), `mixing_parameters` (next to
-   `Fr`/`Ro`/`Bu`), or a new subset. → see Clarification 3.
+```python
+def modified_okubo_weiss_3d(ds_merge, grid, *, jacobian=None,
+                            buoyancy_gradients=None):
+    # W  = okubo_weiss_3d(...)                 (reuse)
+    # l_2 = W / 4
+    # Q_1, Q_2 from jacobian × buoyancy_gradients
+    # Qmag2 = Q_1**2 + Q_2**2
+    # f = coriolis_parameter(...);  l_1 = 0.5*l_2 + 0.5*sqrt(l_2**2 + Qmag2/f**2)
+    # Wstar = 4 * sign(l_2) * sqrt(l_1**2 + l_2**2)
+    # name="Wstar", long_name="Modified Okubo-Weiss parameter (W*)", units="s^-2"
+```
 
-3. **Declare the channel** in `subset_definitions.py`: add `"R_ib"` to the
-   chosen subset's `compute_features_channels`, with `DEFAULT_DEPTH_SUFFIXES`,
-   so it expands to `R_ib_sfc`, `R_ib_z25m`, `R_ib_mld`, `R_ib_mld_mean`.
+Stays fully lazy (no `.compute()`); guard `f**2` against the equator
+(`f→0`) the same way `ekman_pumping` / `R_ib` do.
 
-4. **Testing** (`pytest`, `ocean14` env): synthetic dataset with constant
-   stratification and a linear buoyancy front → assert R_ib equals the
-   analytic N²f²/|∇b|²; verify NaN where |∇b|²=0 and near the equator
-   (f→0); confirm the result stays dask-backed (lazy) before
-   `dask.compute()`.
+#### 4. Pipeline wiring (mirrors `okubo_weiss` / `R_ib`)
 
-5. **Plot** (matplotlib): map `log10(R_ib)` over one tile at a single depth
-   as a visual sanity check.
+1. **`depth_subsets.py`** — add a `Wstar_` branch inside `compute_kinematic`
+   (it already builds the shared `jac`); add `buoyancy_gradients` as a shared
+   intermediate there, and add `"Wstar"` to the `bases` tuple so the subset
+   knows to run.
+2. **`subset_definitions.py`** — add `"Wstar"` to the `kinematic`
+   `compute_features_channels` (both SURFACE_SUBSETS and DEPTH_SUBSETS).
+3. **`variable_selection.py`** — add `'Wstar_'` to *both* the tracer rule
+   (`['Theta','Salt']`, for ∂b) and the velocity rule (`['U','V']`, for the
+   Jacobian). This is the key difference from plain `okubo_weiss`, which
+   needs only U/V — W\* additionally needs Theta/Salt.
+4. **`defs.py`** — add a `"Wstar"` entry to `fields_dmodel` with `desc` and
+   `units` (`"s^-2"`), matching the `R_ib` / `gradb2` style.
 
-**Consistency caveat to resolve before coding (see Clarification 2)**
+#### 5. Reuse over rewrite
 
-`buoyancy_field_3d` multiplies buoyancy by `×1e3` ("project convention"), so
-`grad_b2_3d` carries a 1e6 factor relative to physical b. N², however, is
-built from *unscaled* density via `(g/ρ₀) dρ/dz`. For R_ib to be physically
-dimensionless the buoyancy used in N² and in ∇b must be the *same* b — so we
-must either drop the 1e3 scaling for the R_ib gradient or document a known
-constant offset.
+No new gradient/EOS code. W\* is assembled entirely from
+`okubo_weiss_3d`, `compute_velocity_jacobian_3d`,
+`compute_buoyancy_gradients_3d`, and `coriolis_parameter`.
 
-### Clarifications
+#### 6. Clarifications — RESOLVED 2026-06-12
 
-1. **Meaning of `(b_x)²`** — I read this as the full horizontal buoyancy
-   gradient magnitude squared, |∇_h b|² = (∂b/∂x)² + (∂b/∂y)², which is the
-   standard balanced-Richardson definition (recommended). Did you instead
-   mean only the zonal component (∂b/∂x)²?
+- **C1 — `f_0`:** use the **local** `coriolis_parameter` field `f(YC)`,
+  masking `f→0` at the equator.
+- **C2 — buoyancy for ∂b:** use the **unscaled physical** buoyancy
+  `b=(g/ρ₀)ρ` (the `R_ib` convention), so `|Q|²/f_0²` is s⁻⁴ and W\* is s⁻².
+- **C3 — channel name:** **`Wstar`** (→ `Wstar_sfc`, `Wstar_mld`, …).
+- **C4 — subset:** **`frontogenesis`**. It already loads U/V *and*
+  Theta/Salt and builds both the `VelocityJacobian` and `BuoyancyGradients`,
+  so W\* reuses those shared intermediates with no extra I/O. Wiring updates
+  for step 2 therefore target `compute_frontogenesis` (not `compute_kinematic`),
+  the `frontogenesis` entries in `subset_definitions.py`, and the existing
+  `frontogenesis_` rules in `variable_selection.py` (which already pull
+  Theta/Salt + U/V) — so only the `defs.py` entry and the new channel name
+  need adding there.
 
-I mean the full horizontal buoyancy gradient magnitude squared, |∇_h b|² = (∂b/∂x)² + (∂b/∂y)².
+#### 6b. Original clarifications (for reference)
 
-2. **Buoyancy scaling / consistency** — `buoyancy_field_3d` applies a ×1e3
-   scaling that `grad_b2_3d` inherits, while N² uses unscaled density. Should
-   R_ib use a *physically consistent* unscaled buoyancy for both terms
-   (recommended, gives a truly dimensionless R_ib), or keep the project's
-   scaled convention and accept a constant offset?
+- **C1 — `f_0`.** The formula writes `f_0`, suggesting a *reference*
+  (constant) Coriolis parameter, but the codebase only carries the local
+  field `f(YC)`. **Recommend:** use the local `coriolis_parameter` (consistent
+  with how `R_ib` uses `f²`), masking `f→0` at the equator. OK, or do you want
+  a fixed `f_0` (e.g. evaluated at a reference latitude)?
+- **C2 — buoyancy for ∂b.** `compute_buoyancy_gradients_3d` uses the ×1e3
+  *scaled* buoyancy (`buoyancy_field_3d`). `R_ib` deliberately switched to the
+  *unscaled* physical buoyancy `b=(g/ρ₀)ρ` (`_buoyancy_gradient_squared_phys_3d`)
+  to keep dimensions honest. **Recommend:** use the unscaled physical buoyancy
+  for `∂b` so `|Q|²/f_0²` lands in s⁻⁴ and W\* in s⁻². Confirm?
+- **C3 — channel name.** **Recommend** base name `Wstar` (→ `Wstar_sfc`,
+  `Wstar_mld`, …). Alternative: `okubo_weiss_star` / `W_star`.
+- **C4 — subset placement.** **Recommend** the `kinematic` subset (it's a
+  modified Okubo–Weiss). Trade-off: kinematic currently loads only U/V; adding
+  W\* makes that subset also pull Theta/Salt when `Wstar` is requested
+  (handled cleanly by C3's `variable_selection` rule). Alternative: a
+  dedicated subset, or fold into `frontogenesis` (already loads both).
 
-Yes, use a physically consistent unscaled buoyancy for both terms.
+#### 7. Tests (step 2 / Tests section)
 
-3. **Host subset** — should R_ib be added to `vertical_shear` (alongside
-   `Ri`), to `mixing_parameters` (alongside `Fr`/`Ro`/`Bu`), or get its own
-   new subset? (Recommend `mixing_parameters` — it groups dimensionless
-   stability numbers.)
+- Offline unit tests in `tests/test_calculated_fields_at_depth.py` mirroring
+  the `R_ib` tests: analytic check on a tiny synthetic dataset (known
+  Jacobian + buoyancy gradients → hand-computed W\*), laziness assertion
+  (`isinstance(.data, da.Array)`), sign behaviour (`sgn(l_2)=sgn(W)`),
+  equator/`f→0` guard, and `name`/`units` metadata.
+- One network integration test (`..._against_real_tile`) following
+  `test_generate_tile.py`: load one (or two neighbouring) real LLC4320 tiles
+  (grid + Theta/Salt/U/V) from S3, run `modified_okubo_weiss_3d`, push through
+  `apply_depth_strategies`, write to NetCDF, reload, and assert the field +
+  provenance metadata round-trip correctly.
 
-Mixing parameters is the best choice.
+#### 8. Docs (Docs section)
 
-4. **Depth suffixes** — OK to use the default
-   `sfc / z25m / mld / mld_mean`?
+- Define W\* alongside `R_ib`/`okubo_weiss` in `defs.py` and in
+  `docs/Global_Maps.md`; add a short derivation note referencing Bachman 2021.
 
-Yes, use the default sfc / z25m / mld / mld_mean.
-
-5. **Output transform** — store R_ib directly, or `log10(R_ib)` given its
-   large dynamic range (as done for `log_grad_b`)?
-
-Store R_ib directly.llc4320-native-grid-preprocessing/prompts
-
-6. **DEPTH-only confirmation** — agree that R_ib is computed only in the
-   DEPTH pipeline (since the surface pipeline has no vertical density
-   derivative for N²)?
-
-I agree.
 
 ## Docs
 
@@ -205,22 +229,10 @@ I agree.
 
 ## Modifications
 
-1. We would prefer to not include negative N^2 values in the calculation.  Please:
-
-- floor its value to 0 when calculating R_ib
-- do the same for R_i
-- update the docs to reflect the change
-- update the tests, if needed
-- Log your work
-
 ## Prompts
 
-1. Re-read this document.  Implement the first item under Implementation
+1. Re-read this document.  Implement the 1st item under Implementation
 2. Re-read this document.  Implement the 2nd item under Implementation
-3. Re-read this document.  Implement the 1st item under Testing
-4. Re-read this document.  Implement the 1st item under Docs
-5. Re-read this document.  Implement the 1st item under Modifications
-
 
 ## Logging
 
@@ -238,205 +250,104 @@ The "Logs" section will record Claude's work.  Please use the following format:
 
 ## Logs
 
-### 2026-06-11 (Planned R_ib — balanced Richardson number)
+### 2026-06-12 (Planned the W* field; produced reuse map and clarifications)
 
-Executed the first item under R_ib/Implementation: planned the field, raised
-clarifications, logged the work. No production code written yet.
+Examined the `dbof` preprocessing code with emphasis on the global
+depth pipeline. Traced how an existing diagnostic (`okubo_weiss`) and the
+most-similar recent addition (`R_ib`) are wired end-to-end:
 
-**What I examined** (emphasis on the global / depth calculations):
+- **3D field fn** in `calculated_fields_at_depth.py` (lazy, dask-backed),
+- **subset dispatch** in `depth_subsets.py::compute_kinematic` /
+  `compute_mixing_parameters` (shares a single `VelocityJacobian`),
+- **channel registration** in
+  `global_dataset_creation/subset_definitions.py`,
+- **raw-variable selection** in
+  `global_dataset_creation/variable_selection.py`,
+- **field metadata** in `defs.py::fields_dmodel`,
+- **depth reduction** via `depth_strategies.apply_depth_strategies`
+  (sfc / z25m / mld / mld_mean).
 
-- `src/dbof/preprocessing/calculate_additional_fields.py` — surface derived
-  fields (grad_b2, Turner angle, kinematic, frontogenesis) and the shared
-  `coriolis_parameter`.
-- `src/dbof/preprocessing/calculated_fields_at_depth.py` — the 3D field
-  functions, incl. `buoyancy_frequency_squared_3d` (N²),
-  `richardson_number_3d`, `grad_b2_3d`, `buoyancy_field_3d`. All are lazy
-  (dask graphs, single `dask.compute()` at the subset entry point).
-- `src/dbof/preprocessing/depth_subsets.py` — the `compute_*` subset entry
-  points and the `SUBSET_COMPUTE_FNS` dispatch table; the
-  `apply_depth_strategies` reduction to (sfc, z25m, mld, mld_mean).
-- `src/dbof/global_dataset_creation/subset_definitions.py` — how subsets and
-  their `compute_features_channels` are declared and expanded with depth
-  suffixes.
+Key finding: every ingredient of W\* already exists and is reusable —
+`okubo_weiss_3d` (= W), `compute_velocity_jacobian_3d` (∂u, ∂v),
+`compute_buoyancy_gradients_3d` (∂b), and `coriolis_parameter` (f). W\* is
+therefore a thin lazy combiner, not new gradient/EOS machinery. The only
+wrinkle vs. plain `okubo_weiss`: W\* also needs Theta/Salt (for ∂b), so the
+`variable_selection` rule for `Wstar_` must pull both U/V and Theta/Salt.
 
-**What I learned**
+Wrote the full plan under **Planning** (new fn `modified_okubo_weiss_3d`,
+4-file wiring, test plan, docs plan) and surfaced four clarifications (C1
+`f_0` local-vs-reference; C2 scaled-vs-unscaled buoyancy for ∂b; C3 channel
+name; C4 subset placement) with recommendations. No code written yet —
+awaiting answers per Implementation step 2.
 
-- R_ib = N² f² / |∇_h b|² needs *no new physics* — all three ingredients
-  already exist as lazy functions. Adding it is one new composition function
-  + a dispatch branch + a channel declaration.
-- The architecture is two orthogonal abstractions: lazy 3D field functions ×
-  depth-selection strategies. R_ib slots in cleanly as another 3D field.
-- Key subtlety: `buoyancy_field_3d` carries a ×1e3 scaling that
-  `grad_b2_3d` inherits, but N² is built from unscaled density. These must
-  be reconciled for R_ib to be a true dimensionless ratio — raised as
-  Clarification 2.
-- R_ib is inherently DEPTH-pipeline-only (N² is a vertical derivative).
+Clarifications answered same day: C1 local f(YC); C2 unscaled physical
+buoyancy; C3 name `Wstar`; C4 subset = **frontogenesis** (reuses its
+already-shared Jacobian + buoyancy gradients; only `defs.py` and the new
+channel name need adding, since `frontogenesis_` already loads U/V +
+Theta/Salt). Recorded under Planning §6. Ready for step 2 implementation
+on request.
 
-Awaiting answers to the 6 clarifications before implementing the field.
+### 2026-06-12 (Implemented W*: field fn, pipeline wiring, tests, notebook)
 
-### 2026-06-11 (Implemented R_ib — balanced Richardson number)
+Executed Implementation step 2. All code carries inline comments, lazy
+dask graphs, ≤80-char lines, and "Generated by JXP and Claude" docstrings.
 
-Executed the second item: generated the field, registered it, added tests,
-logged. All clarifications applied (full |∇_h b|², physically consistent
-unscaled buoyancy, hosted in `mixing_parameters`, default depth suffixes,
-R_ib stored directly, DEPTH-only).
+**New field function** — `modified_okubo_weiss_3d(ds_merge, grid, *,
+jacobian=None, okubo_weiss=None, q_squared=None)` in
+`calculated_fields_at_depth.py` (GROUP 6b, beside `okubo_weiss_3d`):
 
-**Code changes**
+- Reuses `okubo_weiss_3d` for W, `compute_velocity_jacobian_3d` for the
+  Q-vector velocity gradients, and `coriolis_parameter` for f.
+- For ∂b it uses a new helper `_buoyancy_gradient_phys_3d` returning the
+  components (b_x, b_y) of the *unscaled physical* buoyancy b=(g/ρ₀)ρ —
+  the C2 decision.  I refactored the existing
+  `_buoyancy_gradient_squared_phys_3d` (used by R_ib) to delegate to this
+  helper, so W* and R_ib now share one buoyancy-gradient source of truth.
+- Builds l₂=W/4, l₁=½l₂+½√(l₂²+|Q|²/f²), W*=4·sgn(l₂)·√(l₁²+l₂²); masks
+  the equator (f→0) like `ekman_pumping`/`R_ib`.  Units s⁻²; verified
+  dimensionally (∂b ~ s⁻², Q ~ s⁻³, |Q|²/f² ~ s⁻⁴).
+- Added `okubo_weiss`/`q_squared` injection kwargs (mirroring R_ib's
+  `n2`/`gradb2`) so the formula is unit-testable with no xgcm grid.
 
-- `src/dbof/preprocessing/calculated_fields_at_depth.py` — added two new
-  lazy functions in GROUP 2 (shear & dimensionless numbers):
-  - `_buoyancy_gradient_squared_phys_3d(ds_merge, grid)` — computes
-    |∇_h b|² from a buoyancy `b = (g/ρ₀) ρ` that is *consistent with N²*
-    (Boussinesq ρ₀, no ×1e3 scaling). This deliberately does **not** reuse
-    `grad_b2_3d`, whose ×1e3 scaling would bias R_ib by 1e6 (Clarification
-    2).
-  - `balanced_richardson_number_3d(ds_merge, grid, *, n2=None, gradb2=None)`
-    — R_ib = N² f² / |∇_h b|²; NaN where |∇_h b|² = 0; optional `n2`/
-    `gradb2` kwargs for reuse, matching the codebase's
-    `jacobian=`/`buoyancy_gradients=` pattern.
-- `src/dbof/preprocessing/depth_subsets.py` — imported the new function and
-  added an `R_ib_*` branch to `compute_mixing_parameters` that runs it
-  through `apply_depth_strategies`.
-- `src/dbof/global_dataset_creation/subset_definitions.py` — added `"R_ib"`
-  to the `mixing_parameters` `compute_features_channels`. With the default
-  suffixes it expands to `R_ib_sfc`, `R_ib_z25m`, `R_ib_mld`,
-  `R_ib_mld_mean` (verified).
+**Pipeline wiring** (subset = `frontogenesis`, per C4):
 
-**Tests** — `tests/test_calculated_fields_at_depth.py` (new), following the
-synthetic / dask-backed approach of `test_generate_tile.py`:
-  1. formula matches the closed-form N² f² / |∇_h b|² and the result stays
-     dask-backed (lazy) with the right name/units;
-  2. |∇_h b|² = 0 cells → NaN while others stay finite;
-  3. equator (f→0) → R_ib = 0 (finite, not NaN).
-N²/∇b are injected via kwargs so the test runs in ~0.1 s without an xgcm
-grid. All 3 pass in `ocean14`.
+- `depth_subsets.py`: imported the fn under the frontogenesis import group;
+  in `compute_frontogenesis` added `need_wstar`, hoisted the shared
+  velocity `jac` (now computed once when the full tendency *or* W* needs
+  it), and added a `Wstar` branch via `apply_depth_strategies`.  W* builds
+  its own physical buoyancy gradient internally, so it deliberately does
+  NOT reuse the subset's ×-scaled `bg`.
+- `subset_definitions.py`: added `"Wstar"` to the `frontogenesis`
+  `compute_features_channels` in both SURFACE and DEPTH tables.
+- `variable_selection.py`: added `'Wstar_'` to BOTH the tracer rule
+  (Theta/Salt, for ∂b) and the velocity rule (U/V, for the Jacobian).
+- `defs.py`: registered a `"Wstar"` entry (desc + units `(s^-2)`).
+- Verified end-to-end: `required_model_variables(['Wstar_sfc'])` →
+  `['Theta','Salt','U','V']`; dispatch resolves to `compute_frontogenesis`.
 
-**What I learned**
+**Tests** — four offline unit tests in
+`tests/test_calculated_fields_at_depth.py` mirroring the R_ib style:
+formula+laziness+metadata, sign-follows-W, NaN-at-equator, and the
+no-shear (|Q|²=0) reduction.  `pytest -k "modified_okubo_weiss"` → 4
+passed (8 passed incl. R_ib) in 0.14 s.  (The network real-tile test
+belongs to the separate "### Tests" item and is deferred to that prompt.)
 
-- The N²/∇b consistency point from the planning phase was the crux:
-  reusing the scaled `grad_b2_3d` would have silently introduced a 1e6
-  factor. Deriving both terms from the same density via the shared
-  `(G/RHO0_BOUSSINESQ)` constant keeps R_ib dimensionless.
-- `apply_depth_strategies` keys channels by exact `f"{base}_{suffix}"`
-  membership, so a multi-underscore base like `R_ib` needs no special
-  handling — it slots in like `Fr`/`Ro`/`Bu`.
+**Notebook** — `notebooks/notebooks_dev/Wstar_field.ipynb` (built with
+nbformat).  Part 1: an always-runnable synthetic demo sweeping W vs |Q|²/f²
+and plotting W* against the classical W with matplotlib (shows the √2
+strain amplification and shear sensitivity).  Part 2: an optional
+network section that loads one real 720×720 LLC4320 tile (Theta/Salt/U/V),
+computes surface W and W* via the production functions +
+`apply_depth_strategies`, and plots them side by side; wrapped in
+try/except so the notebook still runs offline.
 
-### 2026-06-11 (Added a real-grid network test for R_ib)
+**Lessons learned:**
 
-Executed the first item under Testing: added a network-dependent
-integration test on a real LLC4320 tile and a metadata-round-trip check, in
-the style of `test_generate_tile.py`'s
-`test_rect_ij_to_tile_against_grid_zarr`.
-
-**Test added** — `test_balanced_richardson_against_real_tile` in
-`tests/test_calculated_fields_at_depth.py`:
-  1. resolves one 720×720 tile (mid-grid pixel → open-ocean tile on face 4)
-     and loads its *real* grid (XC, YC, Z, dxC, dyC, CS, SN, drF) plus
-     Theta/Salt for `2012-11-09 12:00:00` from the LLC4320 S3 store, reusing
-     the tile loaders `tile_utils._load_grid_for_tile` /
-     `_load_tracers_for_tile`;
-  2. runs the production `balanced_richardson_number_3d` and reduces to the
-     surface with `apply_depth_strategies` (the `mixing_parameters` path);
-  3. writes the field + provenance to a NetCDF, reloads, and asserts the
-     field metadata (`long_name`, `units`) and provenance attrs
-     (`timestamp`, `tile_index`, `face_index`, `property`) round-trip
-     correctly, plus that the tile interior is predominantly finite.
-
-All 4 tests in the file pass in `ocean14` (~90 s incl. the S3 fetch +
-compute; the network test is documented as deselectable for offline runs).
-
-**What I learned**
-
-- The tile loaders (`_load_grid_for_tile`) slice only the tracer dims
-  (i, j) and leave the staggered dims (`i_g`, `j_g`) at the full face width
-  (4320). To build a valid single-face xgcm grid for the horizontal
-  gradients, those staggered dims must be sliced to the same tile extent;
-  then `set_xgcm_grid(..., use_connections=False)` works and
-  `calculate_native_gradient_tracer` produces correct interior gradients
-  (fill-boundary edges aside).
-- On the real tile the surface R_ib is ~99.99% finite with a median ≈ 100
-  in the interior — physically sensible for an open-ocean, stratified
-  region.
-- R_ib needs no velocity fields (only Theta/Salt + grid + latitude), which
-  keeps the network test light (two tracer variables).
-
-### 2026-06-11 (Documented R_ib)
-
-Executed the first item under Docs: examined `docs/`, added R_ib
-documentation, and made R_ib well-defined alongside the other fields in the
-code base.
-
-**What I examined** — the `docs/` tree (`Global_Maps.md`, `Tiles.md`,
-`index.md`, `Sampling_With_GradB2.md`, …) and the in-code field catalogue
-`src/dbof/defs.py` (`fields_dmodel`). `Global_Maps.md` is the canonical
-reference for pipeline × subset × channel combinations; field channel lists
-come from `subset_definitions.py` (code), not the YAML, so no config doc
-needed updating.
-
-**Changes**
-
-- `docs/Global_Maps.md`:
-  - Added `R_ib` to the `mixing_parameters` row of the **Depth pipeline
-    subsets** table (so the doc matches `subset_definitions.py`).
-  - Added a new **Balanced Richardson number (`R_ib`)** subsection defining
-    the field (formula `N² f² / |∇_h b|²`, dimensionless, DEPTH-only, the
-    physically-consistent unscaled buoyancy rationale, NaN/equator
-    behaviour, and a pointer to `balanced_richardson_number_3d`).
-- `src/dbof/defs.py`: added an `R_ib` entry to `fields_dmodel` (desc +
-  `dimensionless` units), so R_ib is catalogued where `gradb2` / `log_gradb`
-  are.
-
-The canonical code-level definition already lives in the
-`balanced_richardson_number_3d` docstring (added in the implementation
-step); these doc changes make R_ib discoverable in the same places as the
-other derived fields.
-
-**What I learned**
-
-- The repo keeps field definitions in three complementary places: the
-  function docstrings (authoritative formula/units), `defs.py`
-  (`fields_dmodel`, a lightweight catalogue), and `docs/Global_Maps.md`
-  (the subset/channel reference). Documenting a new field well means
-  touching all three; the docstring was done at implementation time, so
-  this step covered the latter two.
-- Other dimensionless numbers (`Ri`, `Fr`, `Ro`, `Bu`) carry no formula in
-  the docs — only the subset tables — so a dedicated `R_ib` definition
-  subsection is a net improvement to the docs rather than an inconsistency.
-
-### 2026-06-11 (Floored negative N² in R_ib and Ri)
-
-Executed the first item under Modifications: stopped negative (statically
-unstable) N² values from entering the Richardson-number calculations.
-
-**Code changes** (`calculated_fields_at_depth.py`):
-
-- `balanced_richardson_number_3d` — floor N² with `n2 = n2.clip(min=0.0)`
-  right after it is obtained (whether computed internally or passed via the
-  `n2=` kwarg). Unstable columns now give `R_ib = 0` instead of a negative
-  value.
-- `richardson_number_3d` (R_i) — same `n2.clip(min=0.0)` floor before
-  dividing by shear². Unstable columns now give `Ri = 0`.
-
-Both clips are lazy (dask-backed) so the fully-lazy pipeline is preserved.
-Updated both docstrings to state the N² ≥ 0 floor.
-
-**Docs** (`docs/Global_Maps.md`): extended the **Balanced Richardson number
-(`R_ib`)** subsection to note that `N² < 0` is floored to 0 (R_ib = 0 in
-unstable columns), and added a sentence that the same floor applies to the
-gradient Richardson number `Ri` in the `vertical_shear` subset.
-
-**Tests** (`tests/test_calculated_fields_at_depth.py`): added
-`test_balanced_richardson_floors_negative_n2`, which injects an N² field
-with one negative cell and asserts that cell → `R_ib = 0` while stable
-cells keep the closed-form value. The existing tests still pass (they used
-positive N²). All 5 tests pass in `ocean14` (incl. the network test).
-
-**What I learned**
-
-- `xr.DataArray.clip(min=0.0)` is the cleanest lazy way to floor — it
-  dispatches to dask and keeps the graph lazy, unlike an eager comparison.
-- Ri's flooring can't be unit-tested via kwargs (it computes N² and shear
-  internally from a grid), so the focused floor test targets R_ib, which
-  accepts an injected `n2`; the one-line clip is identical in both
-  functions and the real-grid network test exercises the R_ib path
-  end-to-end.
+- The tile loaders (`_load_tracers_for_tile`) slice only the tracer dims
+  (i, j); velocities live on staggered dims (U on i_g, V on j_g), so a
+  single-tile demo with U/V must also slice i_g/j_g to avoid a merge
+  dimension conflict — fixed in the notebook's loader.
+- On a real open-ocean tile, surface W* is 100% finite in the interior,
+  its sign agrees with the classical W everywhere (sgn(l₂)=sgn(W) holds),
+  and |W*| ≳ |W| (the QG term amplifies the signal) — a good physical
+  sanity check that the wiring and units are correct.

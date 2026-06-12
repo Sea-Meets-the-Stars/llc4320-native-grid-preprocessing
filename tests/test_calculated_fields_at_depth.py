@@ -192,6 +192,129 @@ def test_balanced_richardson_floors_negative_n2():
 
 
 # ---------------------------------------------------------------------------
+# Modified Okubo-Weiss parameter W* (Bachman 2021)
+# ---------------------------------------------------------------------------
+#
+# W* shares the synthetic-data philosophy above.  Its unit-testable core is
+# the eigenvalue combination
+#     l2 = W / 4
+#     l1 = l2/2 + sqrt(l2**2 + |Q|**2 / f**2) / 2
+#     W* = 4 sgn(l2) sqrt(l1**2 + l2**2)
+# which is exercised by injecting W (``okubo_weiss``) and |Q|**2
+# (``q_squared``) through the function's keywords — exactly as the R_ib
+# tests inject n2/gradb2 — so the heavy Jacobian/gradient internals (covered
+# by their own field functions and the integration pipeline) are bypassed.
+
+
+def _wstar_closed_form(okubo_weiss, q_squared, lat):
+    """Reference W* from the closed-form eigenvalue combination.
+
+    Independent NumPy re-implementation used to check the production
+    formula in :func:`cfad.modified_okubo_weiss_3d`.
+
+    Parameters
+    ----------
+    okubo_weiss : float or np.ndarray
+        Classical Okubo-Weiss parameter W [s⁻²].
+    q_squared : float or np.ndarray
+        QG Q-vector magnitude squared |Q|² [s⁻⁶].
+    lat : float
+        Latitude [deg N] (sets the Coriolis parameter f).
+
+    Returns
+    -------
+    float or np.ndarray
+        Modified Okubo-Weiss parameter W* [s⁻²].
+    """
+    f = _coriolis(lat)
+    l2 = okubo_weiss / 4.0
+    l1 = 0.5 * l2 + 0.5 * np.sqrt(l2**2 + q_squared / f**2)
+    return 4.0 * np.sign(l2) * np.sqrt(l1**2 + l2**2)
+
+
+def test_modified_okubo_weiss_formula_and_laziness():
+    """W* equals the closed-form eigenvalue combination and stays lazy."""
+    lat = 30.0
+    w_val = 4.0e-9       # s⁻², Okubo-Weiss (strain-dominated, l2 > 0)
+    qsq_val = 1.0e-26    # s⁻⁶, non-zero QG forcing
+
+    ds_merge = _make_ds_merge(lat)
+    okubo_weiss = _dask_const(w_val)
+    q_squared = _dask_const(qsq_val)
+
+    wstar = cfad.modified_okubo_weiss_3d(
+        ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
+    )
+
+    # Must remain lazy (dask graph) before any .compute().
+    assert isinstance(wstar.data, da.Array), "W* must stay dask-backed"
+
+    # Metadata wired through.
+    assert wstar.name == "Wstar"
+    assert wstar.attrs["units"] == "s^-2"
+    assert wstar.attrs["long_name"] == "Modified Okubo-Weiss parameter (W*)"
+
+    # Value matches the independent closed-form reference.
+    expected = _wstar_closed_form(w_val, qsq_val, lat)
+    np.testing.assert_allclose(wstar.values, expected, rtol=1e-12)
+
+
+def test_modified_okubo_weiss_sign_follows_okubo_weiss():
+    """sgn(W*) follows sgn(l2) = sgn(W): + for strain, − for vorticity."""
+    lat = 45.0
+    ds_merge = _make_ds_merge(lat)
+    q_squared = _dask_const(1.0e-26)  # same QG forcing in every cell
+
+    # One strain-dominated cell (W > 0) and one vorticity-dominated (W < 0).
+    w_np = np.full((1, 3, 3), 4.0e-9, dtype=float)
+    w_np[0, 0, 0] = -4.0e-9
+    okubo_weiss = xr.DataArray(
+        da.from_array(w_np, chunks=w_np.shape), dims=("face", "j", "i"),
+    )
+
+    wstar = cfad.modified_okubo_weiss_3d(
+        ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
+    ).values
+
+    # Sign of W* tracks the sign of the underlying Okubo-Weiss parameter.
+    assert wstar[0, 0, 0] < 0.0, "vorticity-dominated cell must give W* < 0"
+    assert (wstar[0, 1:, 1:] > 0.0).all(), "strain cells must give W* > 0"
+
+
+def test_modified_okubo_weiss_nan_at_equator():
+    """At the equator f → 0, so |Q|²/f² diverges and W* is NaN."""
+    ds_merge = _make_ds_merge(0.0)
+    okubo_weiss = _dask_const(4.0e-9)
+    q_squared = _dask_const(1.0e-26)
+
+    wstar = cfad.modified_okubo_weiss_3d(
+        ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
+    ).values
+
+    assert np.isnan(wstar).all(), "equatorial f → 0 must yield NaN W*"
+
+
+def test_modified_okubo_weiss_reduces_to_okubo_weiss_when_q_zero():
+    """With |Q|² = 0 (no vertical shear) W* reduces to the classical limit.
+
+    When q_squared = 0, l1 = l2/2 + |l2|/2.  For a vorticity-dominated cell
+    (W < 0 → l2 < 0) this gives l1 = 0, so W* = 4 sgn(l2)|l2| = 4 l2 = W —
+    W* collapses onto the classical Okubo-Weiss value.
+    """
+    lat = 30.0
+    w_val = -4.0e-9   # vorticity-dominated → l2 < 0
+    ds_merge = _make_ds_merge(lat)
+    okubo_weiss = _dask_const(w_val)
+    q_squared = _dask_const(0.0)
+
+    wstar = cfad.modified_okubo_weiss_3d(
+        ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
+    ).values
+
+    np.testing.assert_allclose(wstar, w_val, rtol=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # Network integration: R_ib on a real LLC4320 tile from S3
 # ---------------------------------------------------------------------------
 

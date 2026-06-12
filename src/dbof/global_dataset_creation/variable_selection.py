@@ -20,7 +20,7 @@ _CHANNEL_VARIABLE_RULES = [
         ('N2_', 'mixed_layer', 'ml_heat', 'Ri_', 'Fr_', 'Bu_',
          'ertel_pv', 'uB', 'vB', 'wB', 'Ro_', 'KE_',
          'gradb2_', 'gradtheta2_', 'gradsalt2_', 'gradrho2_',
-         'turner_angle_', 'frontogenesis_'),
+         'turner_angle_', 'frontogenesis_', 'Wstar_'),
         ['Theta', 'Salt'],
     ),
     # Velocity: shear, dimensionless numbers, fluxes, kinematics
@@ -28,7 +28,7 @@ _CHANNEL_VARIABLE_RULES = [
         ('vertical_shear', 'Ri_', 'Fr_', 'Ro_', 'Bu_',
          'ertel_pv', 'uB', 'vB',
          'relative_vorticity_', 'strain_', 'divergence_',
-         'okubo_weiss_', 'frontogenesis_', 'ug_', 'vg_'),
+         'okubo_weiss_', 'frontogenesis_', 'ug_', 'vg_', 'Wstar_'),
         ['U', 'V'],
     ),
     # Vertical velocity: PV and wB

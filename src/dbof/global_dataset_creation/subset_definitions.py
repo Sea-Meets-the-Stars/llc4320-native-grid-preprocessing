@@ -81,7 +81,7 @@ SURFACE_SUBSETS = {
         "model_data_feature_channels": [],
         "compute_features_channels": [
             "frontogenesis_tendency", "ug", "vg",
-            "frontogenesis_geo", "frontogenesis_ageo",
+            "frontogenesis_geo", "frontogenesis_ageo", "Wstar",
         ],
     },
 }
@@ -185,7 +185,7 @@ DEPTH_SUBSETS = {
         "model_data_feature_channels": [],
         "compute_features_channels": [
             "frontogenesis_tendency", "frontogenesis_geo",
-            "frontogenesis_ageo", "ug", "vg",
+            "frontogenesis_ageo", "ug", "vg", "Wstar",
         ],
         "depth_suffixes": DEFAULT_DEPTH_SUFFIXES,
     },

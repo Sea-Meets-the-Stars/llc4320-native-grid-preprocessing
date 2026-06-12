@@ -56,6 +56,20 @@ The native gradients are computed using the native_gradient.py module.  We wish 
 - Generate a Jupyter Notebook for each Case that shows figures related to the tests in test_native_gradient.py.  Call it notebooks_tests/jacobian_tests_B.ipynb for Case B, notebooks_tests/jacobian_tests_C.ipynb for Case C, etc.  Use the code you generate in test_jacobian.py to make the figures.
 - Log your work below including the plan
 
+5. Proceed to implement Test Case F.  Please:
+
+- Generate the tests as described in the Logs.  Put these in tests/test_jacobian.py 
+- Generate a Jupyter Notebook for this Case that shows figures related to the tests in test_native_gradient.py.  Call it notebooks_tests/jacobian_tests_F.ipynb.  Use the code you generate in test_jacobian.py to make the figures.
+- Log your work below including the plan
+
+6. Proceed to implement Test Case G.  Please:
+
+- Generate the tests as described in the Logs.  Put these in tests/test_jacobian.py 
+- Where possible, use cached data from s3
+- Generate a Jupyter Notebook for this Case that shows figures related to the tests in test_native_gradient.py.  Call it notebooks_tests/jacobian_tests_G.ipynb.  Use the code you generate in test_jacobian.py to make the figures.
+- Log your work below including the plan
+
+
 ## Docs
 
 ## Modifications
@@ -66,7 +80,8 @@ The native gradients are computed using the native_gradient.py module.  We wish 
 2. Re-read this document.  Implement the 2nd item under Native gradients/Jacobian
 3. Re-read this document.  Implement the 3rd item under Native gradients/Jacobian
 4. Re-read this document.  Implement the 4th item under Native gradients/Jacobian
-
+5. Re-read this document.  Implement the 5th item under Native gradients/Jacobian
+6. Re-read this document.  Implement the 6th item under Native gradients/Jacobian
 
 ## Logging
 
@@ -351,3 +366,59 @@ passed." (D passes for all 5 angles).
   had broken `jacobian_tests_A.ipynb`'s `import test_native_gradient`;
   patched that import (2 cells) and re-ran A clean (4 figures, passes).
 - Cases F/G (real LLC grid, `slow`/`network`) remain for a later prompt.
+
+### 2026-06-12 (Implemented Test Case F — real LLC4320 grid, constant field)
+
+Implemented the 5th item under Native gradients/Jacobian: the real-grid
+constant-field test in `tests/test_jacobian.py` plus
+`notebooks/notebooks_tests/jacobian_tests_F.ipynb`. Both reuse the test
+code; the notebook calls `tj.load_real_llc_grid`, `tj.add_constant_velocity`
+and the test function itself.
+
+**Real grid source (corrected from the plan).** The plan named the
+LLC_DEPTH store, but `s3://dbof/depth_fields/grid.zarr` does not exist and
+`native_grid_dbof_training_data/llc4320_grid.zarr` is a *flat global mosaic*
+(12960×17280, no `dimension_names`) — unusable with `face_connections`.
+The face-separated grid is at **`s3://dbof/LLC4320/grid.zarr`**, read with
+`get_raw_data.get_llc_depth_gridfile(endpoint, 'dbof', 'LLC4320')`. It is
+the **full LLC4320**: `(face=13, j=4320, i=4320)`. I cache the 5 needed
+fields (`CS, SN, dxC, dyC, hFacC`) to a local NetCDF (~4.85 GB) so the
+download (~100 s) happens once; path overridable via `LLC_TEST_GRID_CACHE`.
+
+**Gating (no shared-config change).** The user declined a `conftest.py`
+edit, so gating is self-contained in `test_jacobian.py`: the test carries
+`@pytest.mark.slow`/`@pytest.mark.network` and
+`@pytest.mark.skipif(not RUN_LLC_NETWORK_TESTS)`. Default `pytest` →
+**9 passed, 1 skipped** (no network touched). `RUN_LLC_NETWORK_TESTS=1
+pytest -k real_grid` → **1 passed in 103 s**.
+
+**The key finding that shaped the assertion.** `calculate_jacobian`
+rotates to geographic axes *before* differencing, so it differentiates
+`u_lambda = U0·CS − V0·SN`. With real, spatially-varying `CS/SN` a constant
+*model* field is therefore NOT constant after rotation, so the gradient is
+*not* exactly zero everywhere. Measured over 5.6e8 ocean-interior points
+(edge ring trimmed, `hFacC>0`):
+- median `|grad|` = **3.2e-17** (machine zero) — 80% of points < 1e-12;
+- 99th pct = **5.0e-7**, 99.99th = 5.1e-6;
+- max = **6.7e-4**, concentrated on faces 2/6/9 (Arctic cap + cube-sphere
+  corners) where `grad(CS)` is large; faces 1/4/8/11 (near-constant
+  rotation) are ~8e-16 even at their max.
+
+So the residual is the **physical `grad(rotation)` term**, not a bug. The
+test asserts on robust statistics — `median < 1e-12` and `99th pct < 1e-5`
+(plus all-finite and the tracer-point coordinate contract) — rather than
+the max. This makes Case F a genuine real-grid integration + invariance
+check (it exercises the true metrics, `face_connections`, and the whole
+load→rotate→diff→interp→rotate pipeline).
+
+**Notebook** `jacobian_tests_F.ipynb` (executed via `nbconvert`, reusing
+the cache: 0 errors, 3 figures, ends "Test Case F passed."): (1) load +
+run + print median/99th/max; (2) log-scale `|du_λ/dλ|` maps on a smooth
+face vs the Arctic-cap face (downsampled, land-masked) showing where the
+curvature term lives; (3) histogram of pooled `|grad|` with the median,
+99th-pct and the two test thresholds; (4) per-face median-vs-max bars.
+
+**Decision / note:** Case F (constant field) cannot test the `/dxC,/dyC`
+magnitude scaling (diff of a constant is 0 before the divide) — that is
+covered by synthetic Cases A–D. Case G (rotation-invariance of trace/curl
+with *real* velocities) is still outstanding for a later prompt.

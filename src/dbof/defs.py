@@ -19,4 +19,10 @@ fields_dmodel = {
                  "N^2 f^2 / |grad_h b|^2)"),
         "units": "dimensionless",
     },
+    "Wstar": {
+        "desc": ("Wstar (modified Okubo-Weiss parameter, Bachman 2021; "
+                 "4 sgn(l_2) sqrt(l_1^2 + l_2^2) with l_2 = W/4 and "
+                 "l_1 = l_2/2 + sqrt(l_2^2 + |Q|^2/f^2)/2)"),
+        "units": "(s^-2)",
+    },
 }
