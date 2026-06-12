@@ -438,3 +438,42 @@ positive N²). All 5 tests pass in `ocean14` (incl. the network test).
   accepts an injected `n2`; the one-line clip is identical in both
   functions and the real-grid network test exercises the R_ib path
   end-to-end.
+
+### 2026-06-11 (Demonstration notebook for R_ib)
+
+Executed the second item under Modifications: added
+`notebooks/notebooks_dev/Rib_field.ipynb`, a demonstration notebook for the
+balanced Richardson number, mimicking `Wstar_field.ipynb` and reusing the
+code patterns from `tests/test_calculated_fields_at_depth.py`.
+
+**Notebook structure** (mirrors `Wstar_field.ipynb`):
+
+- *Title / definition* — `R_ib = N² f² / |∇_h b|²`, dimensionless, the
+  physically-consistent-buoyancy note, NaN / equator / N²-floor behaviour,
+  and the `mixing_parameters` home.
+- *Part 1 — synthetic formula demo (offline)*: a `rib_eval` helper that
+  drives the production `balanced_richardson_number_3d` via injected
+  `n2`/`gradb2` (the unit-test injection pattern), plus two figures —
+  (1) `R_ib ∝ |∇_h b|⁻²` on log-log axes for three N² values, and
+  (2) the `f²` latitude dependence (→ 0 at the equator) together with a
+  negative-N² curve showing the floor → R_ib = 0.
+- *Part 2 — real LLC4320 tile (network)*: a `load_tile_rib` function copied
+  from the network test's approach (resolve one open-ocean tile, slice the
+  staggered dims, build a single-face xgcm grid, run the production fn +
+  `apply_depth_strategies`), wrapped in `try/except` so the notebook still
+  runs offline. Plots `log10(R_ib)` maps at the surface and 25 m.
+- *Takeaways*.
+
+Executed the notebook in `ocean14` via `jupyter nbconvert --execute`:
+3 figures embedded, no errors; the real-tile cell reports finite fraction
+0.9999 and median R_ib ≈ 100 (matching the network test).
+
+**What I learned**
+
+- The notebook's real-tile cell first timed out because it called
+  `.compute()` twice (surface + 25 m), re-evaluating the expensive
+  full-column N²/gradient graph each time. Materialising both slices in a
+  single `dask.compute(...)` (as the pipeline's `_materialise_results`
+  does) evaluates the shared upstream once and brought it well under the
+  timeout. A good reminder that separate `.compute()` calls on a shared
+  lazy graph duplicate the upstream work.
