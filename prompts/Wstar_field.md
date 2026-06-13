@@ -26,9 +26,7 @@ Follow these guidelines:
 
 If you need to run Python, use the "ocean14" conda environment.
 
-## R_ib: the balanced Richardson number 
-
-### Definition of W*
+## Definition of W*
 
 We wish to add a field to the codebase that computes the modified Okubu-Weiss parameter, hereafter W*.  Like Okubu-Weiss, this is a metric comparing the strain and vorticity of the flow.  However, unlike Okubu-Weiss, it is modified to be sensitive to the vertical shear.  It is defined as:
 
