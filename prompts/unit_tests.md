@@ -69,6 +69,24 @@ The native gradients are computed using the native_gradient.py module.  We wish 
 - Generate a Jupyter Notebook for this Case that shows figures related to the tests in test_native_gradient.py.  Call it notebooks_tests/jacobian_tests_G.ipynb.  Use the code you generate in test_jacobian.py to make the figures.
 - Log your work below including the plan
 
+### Gradient tracer
+
+We wish to generate unit tests for the calculate_native_gradient_tracer() function.
+
+1. Please do the following:
+  - Examine the method calculate_native_gradient_tracer() in src/dbof/utils/native_gradient.py
+  - Examine the tests we have generated for the calculate_jacobian() function in 
+    tests/test_jacobian.py
+  - Generate a set of tests for the calculate_native_gradient_tracer() function.
+  - The tests should confirm:
+    - derivative values are correct
+    - sign conventions are correct
+  - Place these in a new module named tests/test_native_gradient_tracer.py
+  - These should be a mix of offline (artificial) and online (real grid) tests
+  - It is best to use a cached version of the grid, when you can
+  - Generate a Jupyter Notebook named notebooks_tests/native_gradient_tracer_tests.ipynb that demonstrates the tests.
+    - It should use the code you create in tests/test_native_gradient_tracer.py 
+  - Log your work
 
 ## Docs
 
@@ -82,6 +100,7 @@ The native gradients are computed using the native_gradient.py module.  We wish 
 4. Re-read this document.  Implement the 4th item under Native gradients/Jacobian
 5. Re-read this document.  Implement the 5th item under Native gradients/Jacobian
 6. Re-read this document.  Implement the 6th item under Native gradients/Jacobian
+7. Re-read this document.  Implement the 1st item under Native gradients/Gradient tracer
 
 ## Logging
 
@@ -485,3 +504,60 @@ off-plot zero fraction).
 
 All synthetic (A–E) and real-grid (F, G) Jacobian test cases from the plan
 are now implemented.
+
+### 2026-06-13 (Implemented Gradient tracer tests — `calculate_native_gradient_tracer`)
+
+Implemented the 1st item under Native gradients/Gradient tracer: a new
+module `tests/test_native_gradient_tracer.py` (9 offline + 2 online tests)
+and `notebooks/notebooks_tests/native_gradient_tracer_tests.ipynb`. The
+module **reuses the Jacobian fixtures** via
+`from test_jacobian import make_synthetic_grid, interior, load_real_llc_grid,
+N_FACES, EDGE_MARGIN, RUN_NETWORK, REAL_UV_DATE` so the two modules stay
+consistent.
+
+**What the function does.** `calculate_native_gradient_tracer(s, ds, grid)`
+differences a centre tracer in model x/y (`grid.diff/dxC`, `/dyC`),
+interpolates to centres, then rotates the gradient *vector* by
+`R=[[CS,-SN],[SN,CS]]`: `grad_lambda = gx·CS−gy·SN`, `grad_phi = gx·SN+gy·CS`.
+For linear `s=p·x+q·y` the model gradient is exactly `(p,q)`, so the target
+is `R·(p,q)`. Verified algebra numerically before writing asserts.
+
+**Key structural difference from the Jacobian** (drives the online tests):
+the rotation acts on the *already-differenced* gradient, so —
+- a **constant tracer → exactly zero gradient even on the real grid**
+  (no `grad(CS)` term can appear, unlike the velocity Jacobian's Case F);
+- the **gradient magnitude is exactly rotation-invariant**
+  (`|R·g|=|g|` since `CS²+SN²=1`).
+
+**Offline tests (always run; `pytest` → 9 passed):** no-rotation recovers
+`(p,q)`; 90° → `(−q,p)` (signs); constant→0; parametrized angle sweep
+`{0,30,45,90,137}°` vs analytic; coordinate contract. Linear-field interior
+errors ~1e-19 (machine precision).
+
+**Online tests (slow/network, skipped by default; same
+`RUN_LLC_NETWORK_TESTS` gate; → 2 passed in ~91 s):**
+- constant tracer on the real grid → max |grad| = **0.0** over the ocean
+  interior (asserted < 1e-12);
+- magnitude invariance with real surface **Theta** (SST), comparing the
+  geographic-frame `|grad|` to the model-frame `|grad|` (identity-rotation
+  via new helper `model_frame_gradient`): over 139.8M finite ocean points,
+  signalRMS=6.1e-5, **median diff 0.0**, max=4.7e-10, **rel RMS=2.9e-8**
+  (float32 machine precision). Asserts signalRMS>1e-6, median<1e-12,
+  relRMS<1e-5, 99th pct<1e-9.
+
+**Caching (per the prompt's "use cached data when you can").** Grid reuses
+the existing `load_real_llc_grid` cache. Real tracer added a small loader
+`load_real_llc_surface_tracer` reading surface Theta from the LLC_SURF OSN
+kerchunk (true surface-only, ~1 GB, ~45 s), cached to NetCDF
+(`LLC_TEST_TRACER_CACHE`).
+
+**Notebook** (executed via `nbconvert`: 0 errors, 4 figures, ends "offline
+tests passed." / "online tests passed."): (1) linear-tracer component maps
+vs analytic at 45°; (2) component-vs-angle sweep (computed markers on
+analytic curves); (3) real SST gradient-magnitude map on a face (the ocean
+fronts); (4) `y=x` magnitude scatter + machine-precision residual
+histogram. Same float32 `log10(0)` gotcha handled as in Case G (histogram
+the `d>0` tail, report the exact-zero fraction).
+
+Full default suite (`pytest tests/`): the two Jacobian + tracer modules run
+**18 passed, 4 skipped** (4 network tests skipped without the opt-in).
