@@ -88,9 +88,27 @@ We wish to generate unit tests for the calculate_native_gradient_tracer() functi
     - It should use the code you create in tests/test_native_gradient_tracer.py 
   - Log your work
 
-## Docs
+### Vertical Helpers
 
-## Modifications
+We wish to generate unit tests for the vertical_helpers.py module.
+
+1. Please do the following:
+  - Examine the methods in src/dbof/preprocessing/vertical_helpers.py
+  - Examine the tests we have generated in tests/test_jacobian.py and
+    tests/test_native_gradient_tracer.py.  
+  - Generate a set of tests for the vertical_helpers.py module.
+  - The tests should confirm:
+    - detection of vertical dimension
+    - sign conversion errors with MITgcm depth orientation  
+    - vertical spacing usage
+    - anything else you consider important
+  - These should be a mix of offline (artificial) and online (real grid) tests
+  - It is best to use a cached version of the grid, when you can
+  - Generate a Jupyter Notebook named notebooks_tests/vertical_helpers_tests.ipynb that demonstrates the tests.
+    - It should use the code you create in tests/test_vertical_helpers.py 
+    - It should include figures
+    - Mimic it after the other Notebooks in notebooks_tests/
+  - Log your work
 
 ## Prompts
 
@@ -101,6 +119,8 @@ We wish to generate unit tests for the calculate_native_gradient_tracer() functi
 5. Re-read this document.  Implement the 5th item under Native gradients/Jacobian
 6. Re-read this document.  Implement the 6th item under Native gradients/Jacobian
 7. Re-read this document.  Implement the 1st item under Native gradients/Gradient tracer
+8. Re-read this document.  Implement the 1st item under Native gradients/Vertical Helpers
+
 
 ## Logging
 
@@ -561,3 +581,63 @@ the `d>0` tail, report the exact-zero fraction).
 
 Full default suite (`pytest tests/`): the two Jacobian + tracer modules run
 **18 passed, 4 skipped** (4 network tests skipped without the opt-in).
+
+### 2026-06-13 (Implemented Vertical Helpers tests — `vertical_helpers.py`)
+
+Implemented the 1st item under Native gradients/Vertical Helpers: a new
+module `tests/test_vertical_helpers.py` (15 offline + 3 online tests) and
+`notebooks/notebooks_tests/vertical_helpers_tests.ipynb`. Reuses the
+network gate + real-grid S3 config from `test_jacobian`
+(`from test_jacobian import REAL_GRID_S3, RUN_NETWORK`).
+
+**Functions covered** (`dbof.preprocessing.vertical_helpers`):
+`_get_vertical_dim`, `_get_depth_coord`, `_get_vertical_spacing`,
+`_nearest_k_to_depth`, `_vertical_derivative`, `_select_at_depth`,
+`_extract_at_mld`, `_interp_w_to_tracer_levels`, `_masked_ml_mean`. (These
+are underscore-prefixed by the module's own convention; accessing them from
+the tests is intentional — the linter "protected member" hints are noise.)
+
+**The two error-prone behaviours the prompt called out, tested directly:**
+- **MITgcm sign conversion:** `_get_depth_coord` flips native
+  negative-upward `Z` to positive-downward depth. Offline: synthetic
+  negative `Z` → all ≥0, strictly increasing, equals `-Z`; plus a
+  positive-`Z`-unchanged case (no double flip) and a `Z`-on-dim-`'Z'`
+  rename-to-`'k'` case. Online: the real `Z` (mean<0) converts to a
+  monotonic 0.5→945.6 m depth.
+- **Vertical spacing usage:** `k`→`drF` returned unchanged; missing
+  spacing var → `np.gradient(depth)` fallback. Online: real `drF` is
+  positive, refines toward the surface, and `sum(drF)=968.62 m` equals the
+  `Zp1` interface span exactly.
+
+**Other tests:** vertical-dim detection across all known axis names +
+`ValueError` on none; `_nearest_k_to_depth` (incl. tie→lower index);
+`_vertical_derivative` exact for a linear profile (offline uniform **and**
+online real non-uniform `Z` — centered/forward/backward all reproduce the
+slope since the spacing cancels) and correct negative sign for a
+depth-decreasing profile; `_select_at_depth` nearest level;
+`_extract_at_mld` per-column nearest-k; `_interp_w_to_tracer_levels` =
+`0.5*(W[k]+W[k+1])`; `_masked_ml_mean` constant→constant and
+thickness-weighted average matching an explicit hand computation.
+
+**Caching (per prompt).** Online tests use only the real **1-D vertical
+coordinates** (`Z, Zl, Zu, Zp1, drF`, ~51 values, ~16 KB), fetched once via
+`get_llc_depth_gridfile` and cached (`LLC_TEST_VERTICAL_CACHE`). This
+exercises the genuine LLC4320 non-uniform depth structure (where sign/
+spacing bugs bite) without any heavy 3-D download — the online tests run in
+seconds. Field values for the online derivative test are analytic on the
+real `Z`, so the answer stays exact.
+
+**Gotcha fixed:** two offline tests initially mutated a fixture dataset
+(`ds["Z"]`/`ds["W"]` with a different dim length than an existing dim) →
+xarray alignment error; rebuilt those as minimal standalone datasets.
+
+**Verification:** offline `pytest tests/test_vertical_helpers.py` →
+**15 passed, 3 skipped**; `RUN_LLC_NETWORK_TESTS=1 -k real` →
+**3 passed**. Notebook executed via `nbconvert`: 0 errors, 5 figures
+(sign-conversion profiles, derivative+sign, ML-mean band, real vertical
+structure, real-grid derivative), ends "offline/online tests passed."
+
+**All three test modules together** (`pytest tests/test_jacobian.py
+tests/test_native_gradient_tracer.py tests/test_vertical_helpers.py`):
+**33 passed, 7 skipped** by default (7 network tests gated by
+`RUN_LLC_NETWORK_TESTS`).
