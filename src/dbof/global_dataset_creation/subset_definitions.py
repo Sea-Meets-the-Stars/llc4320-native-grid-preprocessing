@@ -94,6 +94,9 @@ SURFACE_SUBSETS = {
 #: Default depth suffixes applied when the YAML does not override.
 DEFAULT_DEPTH_SUFFIXES = ["sfc", "z25m", "mld", "mld_mean"]
 
+#: Surface-only (2D) bases: only ever emit ``_sfc``, never depth suffixes.
+SURFACE_ONLY_BASES = frozenset({"Eta", "gradeta2", "ug", "vg"})
+
 DEPTH_SUBSETS = {
 
     # -- Depth-resolved diagnostic subsets -----------------------------------
@@ -320,6 +323,10 @@ def expand_channels_with_suffixes(
     If *depth_suffixes* is ``None`` or empty, *channels* is returned as-is
     with any *extra_channels* appended.
 
+    Surface-only bases (:data:`SURFACE_ONLY_BASES`, e.g. ``Eta``) are never
+    expanded across the depth suffixes: they only ever get the ``_sfc``
+    channel, matching what the depth compute functions actually produce.
+
     Parameters
     ----------
     channels : list[str]
@@ -342,8 +349,12 @@ def expand_channels_with_suffixes(
 
     result = []
     for base in (channels or []):
-        for suffix in depth_suffixes:
-            result.append(f"{base}_{suffix}")
+        if base in SURFACE_ONLY_BASES:
+            # Inherently 2D field -- only the surface channel is produced.
+            result.append(f"{base}_sfc")
+        else:
+            for suffix in depth_suffixes:
+                result.append(f"{base}_{suffix}")
     if extra_channels:
         result.extend(extra_channels)
     return result

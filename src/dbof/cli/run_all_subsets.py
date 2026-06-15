@@ -456,6 +456,9 @@ def _plan_work(
 ) -> dict:
     """Build the per-subset x per-date work plan.
 
+    The purpose of this plan is to decide what needs doing for each subset/date based on the
+    presence of the final NetCDF files (".nc-first" ordering) and generated Zarr stores.  
+
     Default (full) mode uses the ".nc-first" ordering from
     ``check_existence.plan_subset_date``.  Mode flags adjust it:
 
@@ -800,6 +803,7 @@ def main():
             failed = failed_generates.get(subset_name, set())
             channels_by_date = {}
             clobber_dates = set()  # regenerated dates: overwrite their .nc
+            skipped_failed = False  # a date was skipped due to generate failure
             for dp, (action, export_channels) in plans[subset_name].items():
                 if not export_channels:
                     continue
@@ -807,13 +811,21 @@ def main():
                     log.info("Subset '%s' date %s: skipping export — "
                              "generation failed (see Phase 1 error above).",
                              subset_name, dp)
+                    skipped_failed = True
                     continue
                 channels_by_date[dp] = export_channels
                 if action == check_existence.GENERATE:
                     clobber_dates.add(dp)
             if not channels_by_date:
-                log.info("Subset '%s': all channel NetCDFs exist — "
-                         "skipping export.", subset_name)
+                if skipped_failed:
+                    # Nothing left to export only because every candidate date
+                    # failed to generate -- NOT because the .nc files exist.
+                    log.info("Subset '%s': nothing exported — all dates with "
+                             "missing channels failed generation (see Phase 1 "
+                             "errors above).", subset_name)
+                else:
+                    log.info("Subset '%s': all channel NetCDFs exist — "
+                             "skipping export.", subset_name)
                 continue
             try:
                 _run_export_subset(
