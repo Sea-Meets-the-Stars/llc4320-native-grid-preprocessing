@@ -507,9 +507,11 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
             okubo_weiss_3d(ds_merge, grid, jacobian=jac),
             "okubo_weiss", ds_merge, mld=mld, requested=requested))
 
-    # coriolis_f is 2D (latitude-only) — no depth strategies needed.
+    # coriolis_f has no depth dependence — no depth strategies needed.
+    # Keep it as a DataArray (dims (face, j, i) on the native grid) so
+    # _materialise_results preserves dimension names and coordinates.
     if "coriolis_f" in requested:
-        results["coriolis_f"] = coriolis_parameter(ds_merge, grid).values
+        results["coriolis_f"] = coriolis_parameter(ds_merge, grid)
 
     return _materialise_results(results)
 
