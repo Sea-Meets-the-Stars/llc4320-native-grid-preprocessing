@@ -337,11 +337,6 @@ def main(
         active_subsets = [subset]
     else:
         active_subsets = raw.get("active_subsets")
-        if active_subsets is None:
-            # Backward compat: single active_subset key
-            single = raw.get("active_subset")
-            if single is not None:
-                active_subsets = [single]
         if not active_subsets:
             raise ValueError(
                 "No subsets specified.  Set 'active_subsets' (list) in the "
