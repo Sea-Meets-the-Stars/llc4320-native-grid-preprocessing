@@ -1,0 +1,224 @@
+# Claude generated
+# ---------------------------------------------------------------------------
+# Per-channel colormap + physical label registry for LLC4320 global fields.
+#
+# Single source of truth shared across notebooks and downstream plotting code
+# (SURF / OSN / DEPTH pipelines).  Each entry maps a channel name to:
+#   [cmocean_colormap_name, physical_label]
+#
+# cmocean colormaps: https://matplotlib.org/cmocean/
+#
+# Load with dbof.plotting.field_cmaps.load_field_cmaps().
+# ---------------------------------------------------------------------------
+
+# Diverging colormaps that should be centred at zero when plotting.
+diverging_cmaps:
+  - balance
+  - curl
+
+cmaps:
+  # --- native model variables (surface-only, no suffix) ---
+  Theta:    [thermal, "Potential temperature (°C)"]
+  Salt:     [haline,  "Salinity (psu)"]
+  Eta:      [gray,    "Sea surface height (m)"]
+  U:        [balance, "Zonal velocity U (m s⁻¹)"]
+  V:        [balance, "Meridional velocity V (m s⁻¹)"]
+  W:        [balance, "Vertical velocity W (m s⁻¹)"]
+  SIarea:   [ice,     "Sea-ice area fraction (0–1)"]
+  oceTAUX:  [balance, "Zonal wind stress τˣ (N m⁻²)"]
+  oceTAUY:  [balance, "Meridional wind stress τʸ (N m⁻²)"]
+
+  # --- native model variables (depth-suffixed) ---
+  Theta_sfc:      [thermal, "Potential temperature (°C)"]
+  Theta_z25m:     [thermal, "Potential temperature at 25 m (°C)"]
+  Theta_mld:      [thermal, "Potential temperature at MLD (°C)"]
+  Theta_mld_mean: [thermal, "Potential temperature ML mean (°C)"]
+  Salt_sfc:       [haline,  "Salinity (psu)"]
+  Salt_z25m:      [haline,  "Salinity at 25 m (psu)"]
+  Salt_mld:       [haline,  "Salinity at MLD (psu)"]
+  Salt_mld_mean:  [haline,  "Salinity ML mean (psu)"]
+  U_sfc:          [balance, "Zonal velocity U (m s⁻¹)"]
+  U_z25m:         [balance, "Zonal velocity U at 25 m (m s⁻¹)"]
+  U_mld:          [balance, "Zonal velocity U at MLD (m s⁻¹)"]
+  U_mld_mean:     [balance, "Zonal velocity U ML mean (m s⁻¹)"]
+  V_sfc:          [balance, "Meridional velocity V (m s⁻¹)"]
+  V_z25m:         [balance, "Meridional velocity V at 25 m (m s⁻¹)"]
+  V_mld:          [balance, "Meridional velocity V at MLD (m s⁻¹)"]
+  V_mld_mean:     [balance, "Meridional velocity V ML mean (m s⁻¹)"]
+  W_sfc:          [balance, "Vertical velocity W (m s⁻¹)"]
+  W_z25m:         [balance, "Vertical velocity W at 25 m (m s⁻¹)"]
+  W_mld:          [balance, "Vertical velocity W at MLD (m s⁻¹)"]
+  W_mld_mean:     [balance, "Vertical velocity W ML mean (m s⁻¹)"]
+  Eta_sfc:        [gray,    "Sea surface height (m)"]
+
+  # --- stratification ---
+  mixed_layer_depth: [deep,    "Mixed layer depth (m)"]
+  N2_sfc:            [tempo,   "N² surface (s⁻²)"]
+  N2_z25m:           [tempo,   "N² at 25 m (s⁻²)"]
+  N2_mld:            [tempo,   "N² at MLD (s⁻²)"]
+  N2_mld_mean:       [tempo,   "N² ML mean (s⁻²)"]
+  ml_heat_content:   [thermal, "ML heat content (J m⁻²)"]
+
+  # --- vertical shear ---
+  vertical_shear_sfc:      [speed, "Shear |S| surface (s⁻¹)"]
+  vertical_shear_z25m:     [speed, "Shear |S| at 25 m (s⁻¹)"]
+  vertical_shear_mld:      [speed, "Shear |S| at MLD (s⁻¹)"]
+  vertical_shear_mld_mean: [speed, "Shear |S| ML mean (s⁻¹)"]
+  Ri_sfc:                  [curl,  "Ri surface"]
+  Ri_z25m:                 [curl,  "Ri at 25 m"]
+  Ri_mld:                  [curl,  "Ri at MLD"]
+  Ri_mld_mean:             [curl,  "Ri ML mean"]
+
+  # --- mixing parameters ---
+  Fr_sfc:        [amp,     "Fr surface"]
+  Fr_z25m:       [amp,     "Fr at 25 m"]
+  Fr_mld:        [amp,     "Fr at MLD"]
+  Fr_mld_mean:   [amp,     "Fr ML mean"]
+  Ro_sfc:        [balance, "Ro surface"]
+  Ro_z25m:       [balance, "Ro at 25 m"]
+  Ro_mld:        [balance, "Ro at MLD"]
+  Ro_mld_mean:   [balance, "Ro ML mean"]
+  Bu_sfc:        [matter,  "Bu surface"]
+  Bu_z25m:       [matter,  "Bu at 25 m"]
+  Bu_mld:        [matter,  "Bu at MLD"]
+  Bu_mld_mean:   [matter,  "Bu ML mean"]
+
+  # --- Ertel PV ---
+  ertel_pv_sfc:               [curl, "Ertel PV surface (s⁻³)"]
+  ertel_pv_z25m:              [curl, "Ertel PV at 25 m (s⁻³)"]
+  ertel_pv_mld:               [curl, "Ertel PV at MLD (s⁻³)"]
+  ertel_pv_mld_mean:          [curl, "Ertel PV ML mean (s⁻³)"]
+  ertel_pv_vertical_sfc:      [curl, "PV vertical surface (s⁻³)"]
+  ertel_pv_vertical_z25m:     [curl, "PV vertical at 25 m (s⁻³)"]
+  ertel_pv_vertical_mld:      [curl, "PV vertical at MLD (s⁻³)"]
+  ertel_pv_vertical_mld_mean: [curl, "PV vertical ML mean (s⁻³)"]
+  ertel_pv_tilt_sfc:          [curl, "PV tilt surface (s⁻³)"]
+  ertel_pv_tilt_z25m:         [curl, "PV tilt at 25 m (s⁻³)"]
+  ertel_pv_tilt_mld:          [curl, "PV tilt at MLD (s⁻³)"]
+  ertel_pv_tilt_mld_mean:     [curl, "PV tilt ML mean (s⁻³)"]
+
+  # --- advective buoyancy fluxes ---
+  uB_sfc:      [balance, "uB surface (m² s⁻³)"]
+  uB_z25m:     [balance, "uB at 25 m (m² s⁻³)"]
+  uB_mld:      [balance, "uB at MLD (m² s⁻³)"]
+  uB_mld_mean: [balance, "uB ML mean (m² s⁻³)"]
+  vB_sfc:      [balance, "vB surface (m² s⁻³)"]
+  vB_z25m:     [balance, "vB at 25 m (m² s⁻³)"]
+  vB_mld:      [balance, "vB at MLD (m² s⁻³)"]
+  vB_mld_mean: [balance, "vB ML mean (m² s⁻³)"]
+  wB_sfc:      [balance, "wB surface (m² s⁻³)"]
+  wB_z25m:     [balance, "wB at 25 m (m² s⁻³)"]
+  wB_mld:      [balance, "wB at MLD (m² s⁻³)"]
+  wB_mld_mean: [balance, "wB ML mean (m² s⁻³)"]
+
+  # --- surface wind diagnostics ---
+  oceQnet:          [thermal, "Net heat flux (W m⁻²)"]
+  wind_stress_curl: [balance, "Wind stress curl (N m⁻³)"]
+  ekman_pumping:    [balance, "Ekman pumping (m s⁻¹)"]
+  u_ekman:          [balance, "Ekman transport u (m s⁻¹)"]
+  v_ekman:          [balance, "Ekman transport v (m s⁻¹)"]
+
+  # --- energetics ---
+  KE_sfc:      [speed, "Kinetic energy surface (m² s⁻²)"]
+  KE_z25m:     [speed, "Kinetic energy at 25 m (m² s⁻²)"]
+  KE_mld:      [speed, "Kinetic energy at MLD (m² s⁻²)"]
+  KE_mld_mean: [speed, "Kinetic energy ML mean (m² s⁻²)"]
+
+  # --- frontal structure (surface-only, no suffix) ---
+  gradb2:       [amp,     "Buoyancy gradient magnitude (m s⁻²)"]
+  gradsalt2:    [amp,     "Salinity gradient magnitude² (psu² m⁻²)"]
+  gradtheta2:   [amp,     "Temperature gradient magnitude (°C m⁻¹)"]
+  gradeta2:     [amp,     "SSH gradient magnitude (m m⁻¹)"]
+  gradrho2:     [amp,     "Density gradient magnitude² (kg² m⁻⁶)"]
+  turner_angle: [balance, "Turner angle (°)"]
+
+  # --- frontal structure (depth-suffixed) ---
+  gradb2_sfc:            [amp,     "Buoyancy grad mag surface (m s⁻²)"]
+  gradb2_z25m:           [amp,     "Buoyancy grad mag 25 m (m s⁻²)"]
+  gradb2_mld:            [amp,     "Buoyancy grad mag MLD (m s⁻²)"]
+  gradb2_mld_mean:       [amp,     "Buoyancy grad mag ML mean (m s⁻²)"]
+  gradtheta2_sfc:        [amp,     "Temp grad mag surface (°C m⁻¹)"]
+  gradtheta2_z25m:       [amp,     "Temp grad mag 25 m (°C m⁻¹)"]
+  gradtheta2_mld:        [amp,     "Temp grad mag MLD (°C m⁻¹)"]
+  gradtheta2_mld_mean:   [amp,     "Temp grad mag ML mean (°C m⁻¹)"]
+  gradsalt2_sfc:         [amp,     "Salt grad mag² surface (psu² m⁻²)"]
+  gradsalt2_z25m:        [amp,     "Salt grad mag² 25 m (psu² m⁻²)"]
+  gradsalt2_mld:         [amp,     "Salt grad mag² MLD (psu² m⁻²)"]
+  gradsalt2_mld_mean:    [amp,     "Salt grad mag² ML mean (psu² m⁻²)"]
+  gradrho2_sfc:          [amp,     "Density grad mag² surface (kg² m⁻⁶)"]
+  gradrho2_z25m:         [amp,     "Density grad mag² 25 m (kg² m⁻⁶)"]
+  gradrho2_mld:          [amp,     "Density grad mag² MLD (kg² m⁻⁶)"]
+  gradrho2_mld_mean:     [amp,     "Density grad mag² ML mean (kg² m⁻⁶)"]
+  gradeta2_sfc:          [amp,     "SSH grad mag surface (m m⁻¹)"]
+  gradeta2_z25m:         [amp,     "SSH grad mag 25 m (m m⁻¹)"]
+  gradeta2_mld:          [amp,     "SSH grad mag MLD (m m⁻¹)"]
+  gradeta2_mld_mean:     [amp,     "SSH grad mag ML mean (m m⁻¹)"]
+  turner_angle_sfc:      [balance, "Turner angle surface (°)"]
+  turner_angle_z25m:     [balance, "Turner angle 25 m (°)"]
+  turner_angle_mld:      [balance, "Turner angle MLD (°)"]
+  turner_angle_mld_mean: [balance, "Turner angle ML mean (°)"]
+
+  # --- kinematic (surface-only, no suffix) ---
+  relative_vorticity: [curl,    "Relative vorticity (s⁻¹)"]
+  strain_n:           [curl,    "Normal strain (s⁻¹)"]
+  strain_s:           [curl,    "Shear strain (s⁻¹)"]
+  strain_mag:         [curl,    "Strain magnitude (s⁻¹)"]
+  divergence:         [curl,    "Divergence (s⁻¹)"]
+  coriolis_f:         [balance, "Coriolis f (s⁻¹)"]
+  rossby_number:      [balance, "Rossby number"]
+  okubo_weiss:        [curl,    "Okubo-Weiss parameter (s⁻²)"]
+
+  # --- kinematic (depth-suffixed) ---
+  relative_vorticity_sfc:      [curl, "Rel. vorticity surface (s⁻¹)"]
+  relative_vorticity_z25m:     [curl, "Rel. vorticity 25 m (s⁻¹)"]
+  relative_vorticity_mld:      [curl, "Rel. vorticity MLD (s⁻¹)"]
+  relative_vorticity_mld_mean: [curl, "Rel. vorticity ML mean (s⁻¹)"]
+  divergence_sfc:              [curl, "Divergence surface (s⁻¹)"]
+  divergence_z25m:             [curl, "Divergence 25 m (s⁻¹)"]
+  divergence_mld:              [curl, "Divergence MLD (s⁻¹)"]
+  divergence_mld_mean:         [curl, "Divergence ML mean (s⁻¹)"]
+  strain_n_sfc:                [curl, "Normal strain surface (s⁻¹)"]
+  strain_n_z25m:               [curl, "Normal strain 25 m (s⁻¹)"]
+  strain_n_mld:                [curl, "Normal strain MLD (s⁻¹)"]
+  strain_n_mld_mean:           [curl, "Normal strain ML mean (s⁻¹)"]
+  strain_s_sfc:                [curl, "Shear strain surface (s⁻¹)"]
+  strain_s_z25m:               [curl, "Shear strain 25 m (s⁻¹)"]
+  strain_s_mld:                [curl, "Shear strain MLD (s⁻¹)"]
+  strain_s_mld_mean:           [curl, "Shear strain ML mean (s⁻¹)"]
+  strain_mag_sfc:              [curl, "Strain mag surface (s⁻¹)"]
+  strain_mag_z25m:             [curl, "Strain mag 25 m (s⁻¹)"]
+  strain_mag_mld:              [curl, "Strain mag MLD (s⁻¹)"]
+  strain_mag_mld_mean:         [curl, "Strain mag ML mean (s⁻¹)"]
+  okubo_weiss_sfc:             [curl, "Okubo-Weiss surface (s⁻²)"]
+  okubo_weiss_z25m:            [curl, "Okubo-Weiss 25 m (s⁻²)"]
+  okubo_weiss_mld:             [curl, "Okubo-Weiss MLD (s⁻²)"]
+  okubo_weiss_mld_mean:        [curl, "Okubo-Weiss ML mean (s⁻²)"]
+
+  # --- frontogenesis (surface-only, no suffix) ---
+  frontogenesis_tendency: [curl,    "Frontogenesis tendency (s⁻²)"]
+  ug:                     [balance, "Geostrophic U (m s⁻¹)"]
+  vg:                     [balance, "Geostrophic V (m s⁻¹)"]
+  frontogenesis_geo:      [curl,    "Geostrophic frontogenesis (s⁻²)"]
+  frontogenesis_ageo:     [curl,    "Ageostrophic frontogenesis (s⁻²)"]
+
+  # --- frontogenesis (depth-suffixed) ---
+  frontogenesis_tendency_sfc:      [curl, "Frontogenesis surface (s⁻²)"]
+  frontogenesis_tendency_z25m:     [curl, "Frontogenesis 25 m (s⁻²)"]
+  frontogenesis_tendency_mld:      [curl, "Frontogenesis MLD (s⁻²)"]
+  frontogenesis_tendency_mld_mean: [curl, "Frontogenesis ML mean (s⁻²)"]
+  frontogenesis_geo_sfc:           [curl, "Geo frontogenesis surface (s⁻²)"]
+  frontogenesis_geo_z25m:          [curl, "Geo frontogenesis 25 m (s⁻²)"]
+  frontogenesis_geo_mld:           [curl, "Geo frontogenesis MLD (s⁻²)"]
+  frontogenesis_geo_mld_mean:      [curl, "Geo frontogenesis ML mean (s⁻²)"]
+  frontogenesis_ageo_sfc:          [curl, "Ageo frontogenesis surface (s⁻²)"]
+  frontogenesis_ageo_z25m:         [curl, "Ageo frontogenesis 25 m (s⁻²)"]
+  frontogenesis_ageo_mld:          [curl, "Ageo frontogenesis MLD (s⁻²)"]
+  frontogenesis_ageo_mld_mean:     [curl, "Ageo frontogenesis ML mean (s⁻²)"]
+  ug_sfc:      [balance, "Geostrophic U surface (m s⁻¹)"]
+  ug_z25m:     [balance, "Geostrophic U 25 m (m s⁻¹)"]
+  ug_mld:      [balance, "Geostrophic U MLD (m s⁻¹)"]
+  ug_mld_mean: [balance, "Geostrophic U ML mean (m s⁻¹)"]
+  vg_sfc:      [balance, "Geostrophic V surface (m s⁻¹)"]
+  vg_z25m:     [balance, "Geostrophic V 25 m (m s⁻¹)"]
+  vg_mld:      [balance, "Geostrophic V MLD (m s⁻¹)"]
+  vg_mld_mean: [balance, "Geostrophic V ML mean (m s⁻¹)"]
