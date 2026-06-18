@@ -441,7 +441,7 @@ def main(
     bucket: str = 'dbof',
     folder: str = None,
     run_id: str = None,
-    dataset_name: str = 'dataset_creation.zarr',
+    dataset_name: str = 'cutout_dataset_creation.zarr',
     dates: list = None,
     channels: list = None,
     grid_dataset_name: str = 'llc4320_grid.zarr',
@@ -467,7 +467,7 @@ def main(
     run_id : str
         [snapshots] run_id used when writing the Zarr store.
     dataset_name : str
-        [snapshots] Zarr dataset name (default: 'dataset_creation.zarr').
+        [snapshots] Zarr dataset name (default: 'cutout_dataset_creation.zarr').
     dates : list of str, optional
         [snapshots] Model dates in 'YYYY-MM-DD HH:MM:SS' format.
         Each date is converted to a date_prefix and the corresponding

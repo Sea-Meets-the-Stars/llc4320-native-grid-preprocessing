@@ -1,23 +1,39 @@
 #config
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, List
 import yaml
 import argparse
 
-@dataclass(frozen=True)
-class RunConfig:
-    run_id: str
-    log_dir: str = "./logs"
+from dbof.config import BaseRunConfig
 
 @dataclass(frozen=True)
-class DataConfig:
-    endpoint_url: str = "https://mghp.osn.xsede.org"
-    sampling_step: int = 168
-    start_record: int = 1180
-    timestep_hours: Optional[int] = None
-    date_iterations: Optional[List[str]] = None  # explicit timestamps as 'DDMMYYYY-HH:MM:SS'; overrides range logic
-    MIT_data_path: Optional[str] = None           # path to MIT LLC4320 zarr store (MIT surface pipeline)
-    k_levels: Optional[List[int]] = None         # depth indices to process; None = all 51 levels
+class RunConfig(BaseRunConfig):
+    """Cutout run config; inherits run_id + log_dir. Extend here as needed."""
+
+@dataclass(frozen=True)
+class GridAccessConfig:
+    """Rectangular llc4320 grid store written by generate-global-grid."""
+    s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
+    bucket: str = "dbof"
+    folder: str = "native_grid_dbof_training_data"
+    dataset_name: str = "llc4320_grid.zarr"
+
+@dataclass(frozen=True)
+class InputConfig:
+    """Generate-global output consumed as cutout input.
+
+    `folder` is the path (under `bucket`) to the directory holding the
+    `date_prefix` snapshots — the generate-global run is just part of this
+    path, so no run_id/pipeline is needed.  Each requested feature field is
+    mapped to the subset store that contains it at read time.
+    """
+    folder: str                                  # required: path under bucket to the date_prefix snapshots
+    s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
+    bucket: str = "dbof"
+    # Timestamps 'YYYYMMDD_HHMMSS' to process.  Omit / leave empty to process
+    # every date_prefix found in the source.
+    date_prefixes: Optional[List[str]] = None
+    grid_access: GridAccessConfig = field(default_factory=GridAccessConfig)
 
 @dataclass(frozen=True)
 class SamplingConfig:
@@ -29,7 +45,7 @@ class OutputConfig:
     s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
     bucket: str = "llc/"
     folder: str = "native_grid_dbof_training_data/"
-    dataset_name: str = "dataset_creation.zarr"
+    dataset_name: str = "cutout_dataset_creation.zarr"
     target_km_res: int = 150
     down_sample_res: int = 64
 
@@ -63,7 +79,7 @@ class RuntimeConfig:
 @dataclass(frozen=True)
 class JobConfig:
     run: RunConfig
-    data: DataConfig
+    input: InputConfig
     sampling: SamplingConfig
     output: OutputConfig
     features: FeaturesConfig
@@ -80,17 +96,21 @@ def load_config(path: str) -> JobConfig:
     def get(section, default=None):
         return raw.get(section, default if default is not None else {})
 
+    input_raw = dict(get("input"))
+    if not input_raw.get("folder"):
+        raise ValueError("input.folder must point to the generate-global output directory")
+    grid_raw = input_raw.pop("grid_access", {})
+    input_cfg = InputConfig(**input_raw, grid_access=GridAccessConfig(**grid_raw))
+
     cfg = JobConfig(
         run=RunConfig(**get("run")),
-        data=DataConfig(**get("data")),
+        input=input_cfg,
         sampling=SamplingConfig(**get("sampling")),
         output=OutputConfig(**get("output")),
         features=FeaturesConfig(**get("features")),
         runtime=RuntimeConfig(**get("runtime")),
     )
 
-    if cfg.data.sampling_step <= 0:
-        raise ValueError("data.sampling_step must be > 0")
     if cfg.sampling.sample_points_per_snapshot <= 0:
         raise ValueError("sampling.sample_points_per_snapshot must be > 0")
     if cfg.output.down_sample_res <= 0:

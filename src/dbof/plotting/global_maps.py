@@ -133,6 +133,6 @@ def plot_global_field(ax, x, y, arr, field, cmap_cfg, *,
     im = ax.pcolormesh(x, y, arr, **kwargs)
 
     if add_coastline:
-        ax.add_feature(cfeature.COASTLINE, **(coastline_kw or {"linewidth": 0.6, "color": "k"}))
+        ax.add_feature(cfeature.COASTLINE, **(coastline_kw or {"linewidth": 0.6, "edgecolor": "k"}))
 
     return im, label

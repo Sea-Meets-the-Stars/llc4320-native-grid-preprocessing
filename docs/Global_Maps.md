@@ -374,21 +374,21 @@ iteration             = round((date - start) / 25 s)
 ## Python readers
 
 ```python
-from dbof.dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
-from dbof.dataset_creation.zarr_grid_global import GlobalGridZarrReader
+from dbof.cutout_dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
+from dbof.cutout_dataset_creation.zarr_grid_global import GlobalGridZarrReader
 from dbof.utils.filesystems import get_filesystem
 
 fs = get_filesystem(s3_endpoint, anon=False)
 
 reader = GlobalZarrDatasetReader(bucket, folder, run_id, dataset_name, fs)
-snap   = reader.get_snapshot(t=0)                          # (C, H, W)
-field  = reader.get_channel_snapshot(t=0, channel="N2_sfc") # (H, W)
-t_idx  = reader.iteration_to_index(iteration=1463616)
+snap = reader.get_snapshot(t=0)  # (C, H, W)
+field = reader.get_channel_snapshot(t=0, channel="N2_sfc")  # (H, W)
+t_idx = reader.iteration_to_index(iteration=1463616)
 
-grid   = GlobalGridZarrReader(bucket, folder, dataset_name="llc4320_grid.zarr", fs=fs)
+grid = GlobalGridZarrReader(bucket, folder, dataset_name="llc4320_grid.zarr", fs=fs)
 lon, lat = grid.lon, grid.lat
 land_mask = grid.land_mask
-ds_grid  = grid.to_dataset()
+ds_grid = grid.to_dataset()
 ```
 
 ---

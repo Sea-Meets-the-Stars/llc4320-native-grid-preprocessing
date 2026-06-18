@@ -1,9 +1,7 @@
 # TODO METAdata has extra id column unused. Get rid of it.
 
 # stdlib
-import sys
 import logging
-from pathlib import Path
 
 # numerical / compute
 import numpy as np
@@ -31,21 +29,8 @@ import dbof.cutout_dataset_creation.zarr_dataset as zarr_dataset
 import dbof.cutout_dataset_creation.metadata as metadata
 import dbof.cutout_dataset_creation.dask_pipeline as dask_pipeline
 import dbof.cutout_dataset_creation.config as config
+from dbof.utils.logging import generate_logging
 from dbof.preprocessing.calculate_additional_fields import relative_vorticity
-
-# Constants --------------------------
-# NOTE these are constants for the LLC 4320 model. If we look to support other models in the future
-# this will need to be updated or configurable.
-TS_PER_HOUR = 144 # model cadence: 25 s → 144 steps/hr
-MAX_ITER = 1_495_008
-FIRST_WIND_RECORD_OFFSET = 10_368
-LLC_FACES = range(13)
-
-# url of our raw data - this may need to be an input in the future
-endpoint_url = 'https://mghp.osn.xsede.org'
-
-# feature_channels_lazy = ["Eta", "Salt", "Theta", "U", "V", "W"] #,
-# feature_channels_computed = []
 
 metadata_cols = [
     "id",
@@ -63,35 +48,6 @@ metadata_cols = [
     "log_grad_b_2_center",
     "time_snapshot"
 ]
-
-def generate_logging(cfg: config.JobConfig):
-    log_root = Path(cfg.run.log_dir).expanduser().resolve()
-    run_dir = log_root / cfg.run.run_id
-    run_dir.mkdir(parents=True, exist_ok=False)
-
-    log_file = run_dir / "generate_front_training.log"
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(message)s",
-        handlers=[
-            logging.FileHandler(log_file),
-            logging.StreamHandler(sys.stdout),
-        ],
-        force=True,
-    )
-
-def calculate_iterations_for_llc(cfg: config.JobConfig):
-    # Calculate iterations based on input
-    iter_step = cfg.data.sampling_step * TS_PER_HOUR  # iteration Δ between samples
-    start_iter = FIRST_WIND_RECORD_OFFSET + cfg.data.start_record * TS_PER_HOUR
-
-    if (cfg.data.timestep_hours is None):
-        end_iter = MAX_ITER  # to the end of data
-    else:
-        end_iter = start_iter + cfg.data.timestep_hours * TS_PER_HOUR
-
-    return np.arange(start_iter, end_iter, iter_step)
 
 def set_up_grid_data_and_masks(cfg: config.JobConfig):
     logging.info("Fetching grid file")
@@ -175,37 +131,39 @@ def main():
     Orchestrates argument parsing, Dask setup, filesystem initialization,
     and iteration over time snapshots.
     """
-
     cli = config.parse_args()
     cfg = config.load_config(cli.config)
+    print(cfg)
 
     # override run_id if passed in through cli
     if cli.run_id is not None:
         cfg = config.JobConfig(
             run=config.RunConfig(run_id=cli.run_id, log_dir=cfg.run.log_dir),
-            data=cfg.data,
+            input=cfg.input,
             sampling=cfg.sampling,
             output=cfg.output,
             features=cfg.features,
             runtime=cfg.runtime,
         )
 
-    generate_logging(cfg)
+    generate_logging(cfg.run, log_filename="generate_cutout_dataset.log")
 
     logging.info("Arguments parsed successfully. Logging set up. Running script.")
 
+    # TODO prepare to load in all features we want from globals
     model_feature_channels = [c.strip() for c in cfg.features.model_data_feature_channels if c.strip()]
     computed_feature_channels = [c.strip() for c in cfg.features.compute_features_channels if c.strip()]
 
     # Set concurrency for zarr ds writes
     zarr.config.set({'async.concurrency':  cfg.runtime.zarr_async_concurrency})
-
     # set up dask distributed client
     dask_client = Client()  # default: uses all local cores
     logging.info(f"Dask Client {dask_client}")
 
-    iter_range = calculate_iterations_for_llc(cfg)
-    logging.info(f"Processing: {iter_range} time snapshots")
+
+    # todo dates in config
+    # iter_range = calculate_iterations_for_llc(cfg)
+    # logging.info(f"Processing: {iter_range} time snapshots")
 
     # Set up meta and zarr data writers
     fs, fs_synch = create_s3_filesystems(cfg.output.s3_endpoint)
@@ -229,10 +187,12 @@ def main():
 
     logging.info(f"Zarr cutout_dataset_creation created.")
 
+    # todo get these from globals
     # Get our grid and static masks once ever. These never change.
     ds_grid, land_face_mask = set_up_grid_data_and_masks(cfg)
     grid = xgcm.Grid(ds_grid, periodic=False)
 
+    # todo for date in globals
     for it in tqdm.tqdm(iter_range):
         # grab raw data for this iteration
         ds = get_raw_data.get_remote_llc_data(endpoint_url, it, LLC_FACES)
