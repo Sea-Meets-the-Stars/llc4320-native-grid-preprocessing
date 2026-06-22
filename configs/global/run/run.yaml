@@ -5,9 +5,9 @@
 # Data sources and subset variable lists are defined in code (not here).
 #
 # Usage:
-#   generate-global --config configs/global/run.yaml
-#   generate-global --config configs/global/run.yaml --subset kinematic
-#   generate-global --config configs/global/run.yaml --pipeline OSN
+#   generate-global --config configs/global/run/run.yaml
+#   generate-global --config configs/global/run/run.yaml --subset kinematic
+#   generate-global --config configs/global/run/run.yaml --pipeline OSN
 # ---------------------------------------------------------------------------
 
 # Pipeline: SURF | OSN | DEPTH
