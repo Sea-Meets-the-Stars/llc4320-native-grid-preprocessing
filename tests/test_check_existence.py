@@ -43,6 +43,14 @@ Two groups of tests live here:
   build), not fabricated.  It hits S3, needs credentials, and generates one
   subset twice from real data, so it is **skipped unless ``DBOF_E2E=1``** is
   set.  See the class docstring for the run command.
+
+CLI usage
+---------
+unit tests
+    pip install pytest        # 'test' extra isn't installed in fronts
+    pytest tests/test_check_existence.py -v
+end-to-end test
+    DBOF_E2E=1 pytest tests/test_check_existence.py::TestGenerateGlobalEndToEnd -v -s
 """
 
 import json
