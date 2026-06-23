@@ -441,7 +441,7 @@ def main(
     bucket: str = 'dbof',
     folder: str = None,
     run_id: str = None,
-    dataset_name: str = 'cutout_dataset_creation.zarr',
+    dataset_name: str = 'dataset.zarr',
     dates: list = None,
     channels: list = None,
     grid_dataset_name: str = 'llc4320_grid.zarr',

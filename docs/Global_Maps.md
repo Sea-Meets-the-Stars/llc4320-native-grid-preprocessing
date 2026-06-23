@@ -374,9 +374,9 @@ iteration             = round((date - start) / 25 s)
 ## Python readers
 
 ```python
-from dbof.cutout_dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
-from dbof.cutout_dataset_creation.zarr_grid_global import GlobalGridZarrReader
-from dbof.utils.filesystems import get_filesystem
+from dbof.global_dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
+from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
+from dbof.io.filesystems import get_filesystem
 
 fs = get_filesystem(s3_endpoint, anon=False)
 

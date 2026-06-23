@@ -38,7 +38,7 @@ Thumbs.db
 # Idea
 .idea/
 
-# Generated cutout_dataset_creation
+# Generated data. These should not be included in git as they tend to be massive.
 *.zarr
 *.parquet
 
