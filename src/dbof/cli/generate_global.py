@@ -396,35 +396,11 @@ def main(
     logging.info(f"Dates: {date_iterations}")
 
     # ------------------------------------------------------------------
-    # 6. One-time setup: dask client, S3 filesystem, grid
+    # 6. Resolve per-subset specs (cheap: no S3, no dask)
     # ------------------------------------------------------------------
-    data_source = get_data_source(cfg.pipeline)
-    dask_client = create_dask_client(cfg.runtime)
-    fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
-
-    # Save run metadata (local + S3).  Read-merge-write: per-subset entries
-    # accumulate across invocations instead of overwriting the file.
-    # Use the sync filesystem — the async one conflicts with the Dask
-    # distributed client's event loop.
-    save_run_metadata(cfg, log_file, fs=fs_sync, clobber=clobber)
-
-    ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
-
-    logging.info(f"LLC rectangular output shape: {RECTANGULAR_SHAPE}")
-
-    # ------------------------------------------------------------------
-    # 7. Main loop: subsets × dates
-    # ------------------------------------------------------------------
+    subset_specs = []
     for subset_name in cfg.active_subsets:
-        logging.info(f"\n{'='*60}")
-        logging.info(f"Processing subset: {subset_name}")
-        logging.info(f"{'='*60}")
-
         defn = get_subset_definition(cfg.pipeline, subset_name)
-        compute_fn = get_compute_fn(cfg.pipeline, subset_name)
-
-        surface_only = defn.get("surface_only", False)
-        dataset_name = defn["dataset_name"]
         model_channels = list(defn["model_data_feature_channels"])
 
         # Expand depth suffixes: YAML override > subset definition default.
@@ -432,96 +408,144 @@ def main(
         # declares depth_suffixes — surface subsets must never get suffixes.
         defn_suffixes = defn.get("depth_suffixes")
         depth_suffixes = (cfg.depth_suffixes or defn_suffixes) if defn_suffixes is not None else None
-        extra_channels = defn.get("extra_channels")
         compute_channels = expand_channels_with_suffixes(
             defn["compute_features_channels"],
             depth_suffixes=depth_suffixes,
-            extra_channels=extra_channels,
+            extra_channels=defn.get("extra_channels"),
         )
-
-        logging.info(f"  dataset_name: {dataset_name}")
-        logging.info(f"  surface_only: {surface_only}")
-        logging.info(f"  model_channels: {model_channels}")
-        logging.info(f"  compute_channels: {compute_channels}")
-
-        # Determine which raw variables to request from storage.
-        vars_needed = required_model_variables(model_channels, compute_channels)
-        logging.info(f"  vars_needed from storage: {vars_needed}")
-
-        channel_names = model_channels + compute_channels
-
-        for date_str in tqdm.tqdm(date_iterations, desc=subset_name):
-            date_prefix = date_to_run_id(date_str)
-            logging.info(f"  Date: {date_str}  →  date_prefix: {date_prefix}")
-
-            # zarr-store decision for each subset/date 
-            # via a tri-state plan_zarr classifier:
-            #   FULL       -> skip (already generated)
-            #   MISSING    -> generate
-            #   INCOMPLETE -> error (see below)
-            store_path = zarr_dataset.make_run_prefix(
-                cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
-                dataset_name, date_prefix=date_prefix,
-            )
-            if not clobber:
-                zarr_state = check_existence.plan_zarr(
-                    fs_sync, store_path, channel_names)
-                if zarr_state == check_existence.ZARR_FULL:
-                    logging.info(f"  SKIP (zarr store complete): {store_path}")
-                    continue
-                if zarr_state == check_existence.ZARR_INCOMPLETE:
-                    raise ValueError(
-                        f"Existing zarr store is incomplete: {store_path}\n"
-                        "  (missing expected channels and/or has 0 timesteps -- "
-                        "e.g. a crashed run or a different depth-suffix set).\n"
-                        "  Delete the store and rerun, or pass --clobber to "
-                        "regenerate it in place."
-                    )
-                # ZARR_MISSING falls through to generation below.
-
-            # Create zarr output store for this subset + date.
-            zarr_ds = zarr_dataset.GlobalZarrDataset(
-                cfg.output.bucket,
-                cfg.output.folder,
-                cfg.run.run_id,
-                dataset_name,
-                fs=fs,
-                channel_names=channel_names,
-                rectangular_shape=RECTANGULAR_SHAPE,
-                date_prefix=date_prefix,
-            )
-
-            # Load snapshot.
-            ds, ds_merge, it = load_snapshot(
-                cfg.pipeline, date_str, ds_grid, vars_needed,
-                surface_only, data_source,
-            )
-
-            # Process snapshot — dispatch to surface or depth processor.
-            if cfg.pipeline == "DEPTH":
-                data = process_depth.process_snapshot(
-                    ds, ds_merge, grid,
-                    model_channels, compute_channels,
-                    compute_fn, surface_only,
-                )
-            else:
-                data = process_surface.process_snapshot(
-                    ds, ds_merge, grid,
-                    model_channels, compute_channels,
-                    compute_fn,
-                )
-
-            # Write to zarr.
-            logging.info("Writing snapshot to zarr dataset")
-            zarr_ds.write_snapshot(data, it)
-
-            # Release references for GC.
-            ds = None
-            ds_merge = None
-            data = None
+        subset_specs.append({
+            "subset_name": subset_name,
+            "compute_fn": get_compute_fn(cfg.pipeline, subset_name),
+            "surface_only": defn.get("surface_only", False),
+            "dataset_name": defn["dataset_name"],
+            "model_channels": model_channels,
+            "compute_channels": compute_channels,
+            "channel_names": model_channels + compute_channels,
+            "vars_needed": required_model_variables(model_channels, compute_channels),
+        })
 
     # ------------------------------------------------------------------
-    # 8. Cleanup
+    # 7. Pre-flight: decide each subset/date BEFORE expensive setup.
+    # ------------------------------------------------------------------
+    fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
+
+    logging.info("Pre-flight plan (zarr existence per subset/date):")
+    to_generate = []  # list of (spec, date_str, date_prefix)
+    for spec in subset_specs:
+        for date_str in date_iterations:
+            date_prefix = date_to_run_id(date_str)
+            tag = f"{spec['subset_name']:<22} {date_str}"
+            store_path = zarr_dataset.make_run_prefix(
+                cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
+                spec["dataset_name"], date_prefix=date_prefix,
+            )
+
+            if clobber:
+                logging.info(f"  {tag}  ->  GENERATE (clobber: regenerate in place)")
+                to_generate.append((spec, date_str, date_prefix))
+                continue
+
+            zarr_state = check_existence.plan_zarr(
+                fs_sync, store_path, spec["channel_names"])
+            if zarr_state == check_existence.ZARR_FULL:
+                logging.info(f"  {tag}  ->  SKIP (zarr store complete)")
+            elif zarr_state == check_existence.ZARR_MISSING:
+                logging.info(f"  {tag}  ->  GENERATE (zarr store missing)")
+                to_generate.append((spec, date_str, date_prefix))
+            else:  # ZARR_INCOMPLETE
+                logging.error(f"  {tag}  ->  ERROR (zarr store incomplete)")
+                raise ValueError(
+                    f"Existing zarr store is incomplete: {store_path}\n"
+                    "  (missing expected channels and/or has 0 timesteps -- "
+                    "e.g. a crashed run or a different depth-suffix set).\n"
+                    "  Delete the store and rerun, or pass --clobber to "
+                    "regenerate it in place."
+                )
+
+    # ------------------------------------------------------------------
+    # 8. Nothing to generate?  Skip all expensive setup and return.
+    # ------------------------------------------------------------------
+    if not to_generate:
+        logging.info("All subset/date zarr stores are already complete -- "
+                     "nothing to generate (skipping dask client + grid load).")
+        try:
+            from s3fs import S3FileSystem
+            S3FileSystem.clear_instance_cache()
+        except Exception:
+            pass
+        logging.info("Run complete (no work).  Wall-clock time: %.1f s",
+                     time.monotonic() - wall_start)
+        return
+
+    # ------------------------------------------------------------------
+    # 9. Expensive one-time setup — only when there is work to do.
+    # ------------------------------------------------------------------
+    data_source = get_data_source(cfg.pipeline)
+    dask_client = create_dask_client(cfg.runtime)
+    # Save run metadata (local + S3).  Read-merge-write: per-subset entries
+    # accumulate across invocations instead of overwriting the file.
+    # Use the sync filesystem — the async one conflicts with the Dask
+    # distributed client's event loop.
+    save_run_metadata(cfg, log_file, fs=fs_sync, clobber=clobber)
+    ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
+    logging.info(f"LLC rectangular output shape: {RECTANGULAR_SHAPE}")
+
+    # ------------------------------------------------------------------
+    # 10. Generate each planned subset/date.
+    # ------------------------------------------------------------------
+    for spec, date_str, date_prefix in tqdm.tqdm(to_generate, desc="generate"):
+        logging.info(f"\n{'='*60}")
+        logging.info(f"Generating subset: {spec['subset_name']}  date: {date_str}")
+        logging.info(f"{'='*60}")
+        logging.info(f"  dataset_name: {spec['dataset_name']}")
+        logging.info(f"  surface_only: {spec['surface_only']}")
+        logging.info(f"  model_channels: {spec['model_channels']}")
+        logging.info(f"  compute_channels: {spec['compute_channels']}")
+        logging.info(f"  vars_needed from storage: {spec['vars_needed']}")
+
+        # Create zarr output store for this subset + date.
+        zarr_ds = zarr_dataset.GlobalZarrDataset(
+            cfg.output.bucket,
+            cfg.output.folder,
+            cfg.run.run_id,
+            spec["dataset_name"],
+            fs=fs,
+            channel_names=spec["channel_names"],
+            rectangular_shape=RECTANGULAR_SHAPE,
+            date_prefix=date_prefix,
+        )
+
+        # Load snapshot.
+        ds, ds_merge, it = load_snapshot(
+            cfg.pipeline, date_str, ds_grid, spec["vars_needed"],
+            spec["surface_only"], data_source,
+        )
+
+        # Process snapshot — dispatch to surface or depth processor.
+        if cfg.pipeline == "DEPTH":
+            data = process_depth.process_snapshot(
+                ds, ds_merge, grid,
+                spec["model_channels"], spec["compute_channels"],
+                spec["compute_fn"], spec["surface_only"],
+            )
+        else:
+            data = process_surface.process_snapshot(
+                ds, ds_merge, grid,
+                spec["model_channels"], spec["compute_channels"],
+                spec["compute_fn"],
+            )
+
+        # Write to zarr.
+        logging.info("Writing snapshot to zarr dataset")
+        zarr_ds.write_snapshot(data, it)
+
+        # Release references for GC.
+        ds = None
+        ds_merge = None
+        data = None
+
+    # ------------------------------------------------------------------
+    # 11. Cleanup
     # ------------------------------------------------------------------
     wall_elapsed = time.monotonic() - wall_start
     wall_hours = wall_elapsed / 3600.0
@@ -529,11 +553,12 @@ def main(
 
     logging.info("=" * 60)
     logging.info("Run complete.")
-    logging.info(f"  Pipeline        : {cfg.pipeline}")
-    logging.info(f"  Subsets         : {cfg.active_subsets}")
-    logging.info(f"  Wall-clock time : {wall_hours:.2f} h  ({wall_elapsed:.1f} s)")
-    logging.info(f"  Dask workers    : {n_workers}")
-    logging.info(f"  Dates           : {len(date_iterations)}")
+    logging.info(f"  Pipeline          : {cfg.pipeline}")
+    logging.info(f"  Subsets           : {cfg.active_subsets}")
+    logging.info(f"  Wall-clock time   : {wall_hours:.2f} h  ({wall_elapsed:.1f} s)")
+    logging.info(f"  Dask workers      : {n_workers}")
+    # 🔵 CHANGED: report stores actually generated, not just the date count.
+    logging.info(f"  Stores generated  : {len(to_generate)}")
     logging.info("=" * 60)
 
     dask_client.close()
