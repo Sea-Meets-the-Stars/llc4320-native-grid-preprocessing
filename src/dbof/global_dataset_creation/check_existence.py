@@ -23,10 +23,12 @@ ordering used by ``run_all_subsets``:
     check .nc files
         -> all exist:            SKIP (zarr store is not even consulted)
         -> some missing:         check zarr store completeness
-               -> complete:      EXPORT only the missing channels
+               -> complete:      EXPORT ALL channels (overwriting existing .nc)
                -> incomplete:    GENERATE the store, then re-export ALL
-                                 channels (existing .nc files are overwritten
-                                 so every export traces to one store build)
+                                 channels
+    Either way, whenever a subset/date is not fully exported every .nc is
+    rewritten from the one current store build, so all exports for a
+    subset/date share a single provenance.
 
 Written by LAH and Claude.
 """
@@ -47,6 +49,17 @@ log = logging.getLogger(__name__)
 SKIP = "skip"          #: nothing to do for this subset/date
 EXPORT = "export"      #: zarr store is complete; export missing channels
 GENERATE = "generate"  #: zarr store missing/incomplete; regenerate it
+
+
+# ---------------------------------------------------------------------------
+# Zarr store states
+# ---------------------------------------------------------------------------
+
+# Tri-state classification for a single zarr store, consumed by
+# generate_global (skip / generate / error) and by run_all_subsets planning.
+ZARR_MISSING = "missing"          #: no store on S3 (root metadata absent)
+ZARR_INCOMPLETE = "incomplete"    #: store exists but channels short / 0 timesteps
+ZARR_FULL = "full"                #: store exists, all channels, >= 1 timestep
 
 
 # ---------------------------------------------------------------------------
@@ -132,23 +145,28 @@ def store_n_timesteps(fs, store_path: str) -> int:
     return int(shape[0])
 
 
-def store_is_complete(
+# Single source of truth for a store's state.  Distinguishes
+# MISSING (no store at all) from INCOMPLETE (store present but unusable) so
+# callers can act differently -- generate_global generates the former and
+# errors on the latter.
+def plan_zarr(
     fs,
     store_path: str,
     expected_channels: list[str],
     min_timesteps: int = 1,
-) -> bool:
-    """Check that a zarr store exists AND contains the expected channels/data.
+) -> str:
+    """Classify a single zarr store as MISSING / INCOMPLETE / FULL.
 
-    A store is complete when:
+    Distinguishes the three states (all checks are metadata-only JSON GETs):
 
-    1. the root metadata object exists,
-    2. its ``channel_names`` attribute is a superset of *expected_channels*
-       (catches stores generated with a different depth-suffix set), and
-    3. its ``data`` array holds at least *min_timesteps* timesteps
-       (catches stores created but never written by a crashed run).
-
-    All three checks are metadata-only (small JSON GETs).
+    - :data:`ZARR_MISSING`    -- the store's root metadata object is absent.
+    - :data:`ZARR_INCOMPLETE` -- the store exists but is unusable: either its
+      ``channel_names`` attribute is missing / does not cover
+      *expected_channels* (e.g. built with a different depth-suffix set), or
+      its ``data`` array holds fewer than *min_timesteps* timesteps (e.g. a
+      store created but never written by a crashed run).
+    - :data:`ZARR_FULL`       -- the store exists, covers every expected
+      channel, and holds at least *min_timesteps* timesteps.
 
     Parameters
     ----------
@@ -164,26 +182,32 @@ def store_is_complete(
 
     Returns
     -------
-    bool
+    str
+        One of :data:`ZARR_MISSING`, :data:`ZARR_INCOMPLETE`,
+        :data:`ZARR_FULL`.
     """
+    if not store_exists(fs, store_path):
+        return ZARR_MISSING
+
     channels = store_channels(fs, store_path)
     if channels is None:
-        log.debug("Store missing or has no channel_names: %s", store_path)
-        return False
+        log.info("Store %s exists but has no channel_names -- incomplete.",
+                 store_path)
+        return ZARR_INCOMPLETE
 
     missing = set(expected_channels) - set(channels)
     if missing:
-        log.info("Store %s is missing channel(s): %s", store_path,
-                 sorted(missing))
-        return False
+        log.info("Store %s is missing channel(s): %s -- incomplete.",
+                 store_path, sorted(missing))
+        return ZARR_INCOMPLETE
 
     n_t = store_n_timesteps(fs, store_path)
     if n_t < min_timesteps:
-        log.info("Store %s has %d timestep(s) (< %d) -- treated as "
-                 "incomplete.", store_path, n_t, min_timesteps)
-        return False
+        log.info("Store %s has %d timestep(s) (< %d) -- incomplete.",
+                 store_path, n_t, min_timesteps)
+        return ZARR_INCOMPLETE
 
-    return True
+    return ZARR_FULL
 
 
 # ---------------------------------------------------------------------------
@@ -249,13 +273,17 @@ def plan_subset_date(
     Logic::
 
         all .nc files exist                -> (SKIP, [])
-        some missing, zarr complete        -> (EXPORT, missing_channels)
+        some missing, zarr complete        -> (EXPORT, ALL channels)
         some missing, zarr incomplete      -> (GENERATE, ALL channels)
+        some missing, zarr missing         -> (GENERATE, ALL channels)
 
-    GENERATE returns *all* channels (not just the missing ones) so that
-    every ``.nc`` file for this subset/date is re-exported from the freshly
-    built store -- a mix of exports from different store builds (e.g. before
-    and after a code change) would be inconsistent.
+    Both EXPORT and GENERATE return *all* channels (not just the missing
+    ones): the subset/date is the unit of consistency, so whenever it is not
+    fully exported every ``.nc`` is (re)written from the one current store
+    build (the caller overwrites existing files).  This matters when only some
+    depth suffixes were exported previously (e.g. ``sfc`` present, ``25m``
+    missing) -- the whole set is refreshed from the full store rather than
+    leaving a mix of provenances.
 
     Note the zarr store is only consulted when at least one ``.nc`` file is
     missing, so deleting a store whose exports are all on disk never
@@ -280,14 +308,14 @@ def plan_subset_date(
     -------
     (action, channels_to_export) : tuple[str, list[str]]
         *action* is one of :data:`SKIP`, :data:`EXPORT`, :data:`GENERATE`.
-        *channels_to_export* is empty for SKIP, the missing channels for
-        EXPORT, and ALL channels for GENERATE (overwriting stale exports).
+        *channels_to_export* is empty for SKIP and ALL channels for both
+        EXPORT and GENERATE (the caller overwrites existing ``.nc``).
     """
     missing = missing_netcdfs(output_dir, date_prefix, run_id, channels)
     if not missing:
         return SKIP, []
 
-    if store_is_complete(fs, store_path, channels):
-        return EXPORT, missing
+    if plan_zarr(fs, store_path, channels) == ZARR_FULL:
+        return EXPORT, list(channels)
 
     return GENERATE, list(channels)

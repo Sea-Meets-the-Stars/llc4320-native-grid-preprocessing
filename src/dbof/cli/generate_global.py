@@ -35,12 +35,12 @@ opening the zarr store with native ``face=1`` chunks.
 
 CLI usage
 ---------
-    generate-global --config configs/global/run.yaml
-    generate-global --config configs/global/run.yaml --subset kinematic
-    generate-global --config configs/global/run.yaml --pipeline OSN
+    generate-global --config configs/global/run/run.yaml
+    generate-global --config configs/global/run/run.yaml --subset kinematic
+    generate-global --config configs/global/run/run.yaml --pipeline OSN
 
 Each pipeline supports a specific set of subsets.  See the valid
-pipeline × subset combinations in ``configs/global/run.yaml``.
+pipeline × subset combinations in ``configs/global/run/run.yaml``.
 
 Output layout
 -------------
@@ -279,7 +279,6 @@ def main(
     subset: str = None,
     pipeline: str = None,
     clobber: bool = False,
-    dates: list = None,
 ) -> None:
     """
     Entry point for the unified global pipeline.
@@ -301,10 +300,7 @@ def main(
         exists on S3 *and* is complete (all expected channels present, at
         least one timestep written).  If ``True``, regenerate it (snapshots
         are overwritten in place; the store never grows duplicates).
-    dates : list of str, optional
-        Override ``data.date_iterations`` with a subset of dates (ISO
-        strings).  Used by ``run_all_subsets`` to regenerate only the dates
-        its plan flagged, leaving other dates untouched.
+
     """
     wall_start = time.monotonic()
 
@@ -362,18 +358,6 @@ def main(
             "Each entry should be a date string in ISO format "
             "(e.g. '2012-11-09 12:00:00')."
         )
-
-    # Optional override: process only a subset of the config's dates
-    # (validated against the YAML so callers can't introduce new dates).
-    if dates:
-        unknown = [d for d in dates if d not in date_iterations]
-        if unknown:
-            raise ValueError(
-                f"dates override contains entries not in the config's "
-                f"date_iterations: {unknown}"
-            )
-        date_iterations = list(dates)
-
     # ------------------------------------------------------------------
     # 4. Build GlobalJobConfig
     # ------------------------------------------------------------------
@@ -470,19 +454,30 @@ def main(
             date_prefix = date_to_run_id(date_str)
             logging.info(f"  Date: {date_str}  →  date_prefix: {date_prefix}")
 
-            # Skip this subset/date if its zarr store already exists on S3
-            # AND is complete: all expected channels present and >= 1
-            # timestep written (metadata-only checks).  A store from a
-            # crashed run (0 timesteps) or built with a different
-            # depth-suffix set is treated as incomplete and regenerated.
+            # zarr-store decision for each subset/date 
+            # via a tri-state plan_zarr classifier:
+            #   FULL       -> skip (already generated)
+            #   MISSING    -> generate
+            #   INCOMPLETE -> error (see below)
             store_path = zarr_dataset.make_run_prefix(
                 cfg.output.bucket, cfg.output.folder, cfg.run.run_id,
                 dataset_name, date_prefix=date_prefix,
             )
-            if not clobber and check_existence.store_is_complete(
-                    fs_sync, store_path, channel_names):
-                logging.info(f"  SKIP (zarr store complete): {store_path}")
-                continue
+            if not clobber:
+                zarr_state = check_existence.plan_zarr(
+                    fs_sync, store_path, channel_names)
+                if zarr_state == check_existence.ZARR_FULL:
+                    logging.info(f"  SKIP (zarr store complete): {store_path}")
+                    continue
+                if zarr_state == check_existence.ZARR_INCOMPLETE:
+                    raise ValueError(
+                        f"Existing zarr store is incomplete: {store_path}\n"
+                        "  (missing expected channels and/or has 0 timesteps -- "
+                        "e.g. a crashed run or a different depth-suffix set).\n"
+                        "  Delete the store and rerun, or pass --clobber to "
+                        "regenerate it in place."
+                    )
+                # ZARR_MISSING falls through to generation below.
 
             # Create zarr output store for this subset + date.
             zarr_ds = zarr_dataset.GlobalZarrDataset(
