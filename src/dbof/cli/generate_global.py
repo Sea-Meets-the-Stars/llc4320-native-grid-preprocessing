@@ -84,7 +84,8 @@ from dbof.global_dataset_creation.iterations import (
     osn_date_to_iteration,
 )
 from dbof.global_dataset_creation.dask import create_dask_client
-from dbof.global_dataset_creation.logging import setup_logging, save_run_metadata
+from dbof.global_dataset_creation.logging import setup_logging
+from dbof.global_dataset_creation.metadata import save_run_metadata
 from dbof.global_dataset_creation.subset_definitions import (
     expand_channels_with_suffixes,
     get_compute_fn,
@@ -270,43 +271,35 @@ def _parse_args():
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Pipeline stages — one function per numbered block of the original main().
 # ---------------------------------------------------------------------------
 
-def main(
+def _resolve_job_config(
     config_file: str = None,
     run_id: str = None,
     subset: str = None,
     pipeline: str = None,
     clobber: bool = False,
-) -> None:
+):
+    """1-4. Resolve the invocation into a fully-built ``GlobalJobConfig``.
+
+    Combines the four pure (no S3, no dask) configuration-resolution steps:
+
+    1. parse args (CLI ``--config`` etc. take effect only when called with no
+       ``config_file``) and load the raw YAML config;
+    2. resolve and validate the pipeline + active_subsets;
+    3. validate the date iterations; and
+    4. build the ``GlobalJobConfig``.
+
+    Returns
+    -------
+    cfg : GlobalJobConfig
+        Fully-built job configuration.  ``cfg.data.date_iterations`` carries
+        the validated dates.
+    clobber : bool
+        Resolved clobber flag.
     """
-    Entry point for the unified global pipeline.
-
-    Can be called from the CLI (no arguments) or programmatically.
-
-    Parameters
-    ----------
-    config_file : str, optional
-        Path to the YAML config.  If ``None``, read from ``--config``.
-    run_id : str, optional
-        Override for ``run.run_id``.
-    subset : str, optional
-        Override ``active_subsets`` with a single subset name.
-    pipeline : str, optional
-        Override the ``pipeline`` key in the YAML.
-    clobber : bool, optional
-        If ``False`` (default), skip any subset/date whose zarr store already
-        exists on S3 *and* is complete (all expected channels present, at
-        least one timestep written).  If ``True``, regenerate it (snapshots
-        are overwritten in place; the store never grows duplicates).
-
-    """
-    wall_start = time.monotonic()
-
-    # ------------------------------------------------------------------
-    # 1. Parse args, load YAML
-    # ------------------------------------------------------------------
+    # (1) Parse args, load YAML.
     if config_file is None:
         cli = _parse_args()
         config_file = cli.config
@@ -318,9 +311,7 @@ def main(
     with open(config_file, "r") as fh:
         raw = yaml.safe_load(fh) or {}
 
-    # ------------------------------------------------------------------
-    # 2. Resolve pipeline and active_subsets
-    # ------------------------------------------------------------------
+    # (2) Resolve pipeline and active_subsets (validate early).
     pipeline_str = pipeline or raw.get("pipeline")
     if pipeline_str is None:
         raise ValueError(
@@ -339,7 +330,6 @@ def main(
                 "YAML config, or pass --subset on the command line."
             )
 
-    # Validate subsets early.
     valid = valid_subsets(pipeline_str)
     for s in active_subsets:
         if s not in valid:
@@ -348,9 +338,7 @@ def main(
                 f"Valid subsets: {valid}"
             )
 
-    # ------------------------------------------------------------------
-    # 3. Date iterations (from YAML)
-    # ------------------------------------------------------------------
+    # (3) Date iterations (from YAML).
     date_iterations = raw.get("data", {}).get("date_iterations")
     if not date_iterations:
         raise ValueError(
@@ -358,9 +346,8 @@ def main(
             "Each entry should be a date string in ISO format "
             "(e.g. '2012-11-09 12:00:00')."
         )
-    # ------------------------------------------------------------------
-    # 4. Build GlobalJobConfig
-    # ------------------------------------------------------------------
+
+    # (4) Build GlobalJobConfig.
     run_cfg = config.RunConfig(**(raw.get("run") or {}))
     if run_id is not None:
         run_cfg = config.RunConfig(run_id=run_id, log_dir=run_cfg.log_dir)
@@ -384,20 +371,22 @@ def main(
         active_subsets=active_subsets,
         depth_suffixes=raw.get("depth_suffixes"),
     )
+    return cfg, clobber
 
-    # ------------------------------------------------------------------
-    # 5. Logging and run metadata
-    # ------------------------------------------------------------------
+
+def _setup_run_logging(cfg, date_iterations: list):
+    """5. Logging (run metadata is saved later, in _setup_generation)."""
     log_file = setup_logging(cfg)  # appends if the log already exists
     logging.info("Unified global pipeline starting.")
     logging.info(f"Pipeline: {cfg.pipeline}")
     logging.info(f"Active subsets: {cfg.active_subsets}")
     logging.info(f"Depth suffixes (YAML override): {cfg.depth_suffixes}")
     logging.info(f"Dates: {date_iterations}")
+    return log_file
 
-    # ------------------------------------------------------------------
-    # 6. Resolve per-subset specs (cheap: no S3, no dask)
-    # ------------------------------------------------------------------
+
+def _resolve_subset_specs(cfg) -> list:
+    """6. Resolve per-subset specs (cheap: no S3, no dask)."""
     subset_specs = []
     for subset_name in cfg.active_subsets:
         defn = get_subset_definition(cfg.pipeline, subset_name)
@@ -423,12 +412,22 @@ def main(
             "channel_names": model_channels + compute_channels,
             "vars_needed": required_model_variables(model_channels, compute_channels),
         })
+    return subset_specs
 
-    # ------------------------------------------------------------------
-    # 7. Pre-flight: decide each subset/date BEFORE expensive setup.
-    # ------------------------------------------------------------------
-    fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
 
+def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
+                    fs_sync, clobber: bool, wall_start: float) -> list:
+    """7-8. Pre-flight: decide each subset/date before any heavy setup.
+
+    Also handles the nothing-to-generate case: when no work remains, the
+    no-work summary is logged and the s3fs instance cache is cleared here,
+    and an empty list is returned so the caller can simply ``return``.
+
+    Returns
+    -------
+    to_generate : list of (spec, date_str, date_prefix)
+        Empty when every subset/date is already complete.
+    """
     logging.info("Pre-flight plan (zarr existence per subset/date):")
     to_generate = []  # list of (spec, date_str, date_prefix)
     for spec in subset_specs:
@@ -462,9 +461,7 @@ def main(
                     "regenerate it in place."
                 )
 
-    # ------------------------------------------------------------------
-    # 8. Nothing to generate?  Skip all expensive setup and return.
-    # ------------------------------------------------------------------
+    # 8. Nothing to generate: skip all downstream setup.
     if not to_generate:
         logging.info("All subset/date zarr stores are already complete -- "
                      "nothing to generate (skipping dask client + grid load).")
@@ -475,11 +472,21 @@ def main(
             pass
         logging.info("Run complete (no work).  Wall-clock time: %.1f s",
                      time.monotonic() - wall_start)
-        return
 
-    # ------------------------------------------------------------------
-    # 9. Expensive one-time setup — only when there is work to do.
-    # ------------------------------------------------------------------
+    return to_generate
+
+
+def _setup_generation(cfg, log_file, fs, fs_sync, clobber: bool):
+    """9. One-time setup performed only when there is work to do.
+
+    Builds the data source, dask client, run metadata, and grid.
+
+    Returns
+    -------
+    data_source : dict or None
+    dask_client : distributed.Client
+    ds_grid, grid : grid objects from ``set_up_grid``.
+    """
     data_source = get_data_source(cfg.pipeline)
     dask_client = create_dask_client(cfg.runtime)
     # Save run metadata (local + S3).  Read-merge-write: per-subset entries
@@ -489,10 +496,11 @@ def main(
     save_run_metadata(cfg, log_file, fs=fs_sync, clobber=clobber)
     ds_grid, land_mask, grid = set_up_grid(cfg.pipeline, data_source)
     logging.info(f"LLC rectangular output shape: {RECTANGULAR_SHAPE}")
+    return data_source, dask_client, ds_grid, grid
 
-    # ------------------------------------------------------------------
-    # 10. Generate each planned subset/date.
-    # ------------------------------------------------------------------
+
+def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
+    """10. Generate each planned subset/date."""
     for spec, date_str, date_prefix in tqdm.tqdm(to_generate, desc="generate"):
         logging.info(f"\n{'='*60}")
         logging.info(f"Generating subset: {spec['subset_name']}  date: {date_str}")
@@ -544,9 +552,10 @@ def main(
         ds_merge = None
         data = None
 
-    # ------------------------------------------------------------------
-    # 11. Cleanup
-    # ------------------------------------------------------------------
+
+def _report_and_cleanup(cfg, dask_client, to_generate: list,
+                        wall_start: float) -> None:
+    """11. Log the run summary and tear down the dask client / s3fs cache."""
     wall_elapsed = time.monotonic() - wall_start
     wall_hours = wall_elapsed / 3600.0
     n_workers = len(dask_client.scheduler_info().get("workers", {}))
@@ -568,6 +577,72 @@ def main(
         S3FileSystem.clear_instance_cache()
     except Exception:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+def main(
+    config_file: str = None,
+    run_id: str = None,
+    subset: str = None,
+    pipeline: str = None,
+    clobber: bool = False,
+) -> None:
+    """
+    Entry point for the unified global pipeline.
+
+    Can be called from the CLI (no arguments) or programmatically.  The body
+    is a thin orchestration of the numbered pipeline stages, each of which
+    lives in its own ``_*`` helper above.
+
+    Parameters
+    ----------
+    config_file : str, optional
+        Path to the YAML config.  If ``None``, read from ``--config``.
+    run_id : str, optional
+        Override for ``run.run_id``.
+    subset : str, optional
+        Override ``active_subsets`` with a single subset name.
+    pipeline : str, optional
+        Override the ``pipeline`` key in the YAML.
+    clobber : bool, optional
+        If ``False`` (default), skip any subset/date whose zarr store already
+        exists on S3 *and* is complete (all expected channels present, at
+        least one timestep written).  If ``True``, regenerate it (snapshots
+        are overwritten in place; the store never grows duplicates).
+
+    """
+    wall_start = time.monotonic()
+
+    # 1-4. Resolve the invocation + YAML into a GlobalJobConfig.
+    cfg, clobber = _resolve_job_config(
+        config_file, run_id, subset, pipeline, clobber)
+    date_iterations = cfg.data.date_iterations
+
+    # 5. Logging.
+    log_file = _setup_run_logging(cfg, date_iterations)
+
+    # 6. Resolve per-subset specs.
+    subset_specs = _resolve_subset_specs(cfg)
+
+    # 7-8. Pre-flight plan (returns empty + logs the no-work summary if done).
+    fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
+    to_generate = _preflight_plan(
+        cfg, subset_specs, date_iterations, fs_sync, clobber, wall_start)
+    if not to_generate:
+        return
+
+    # 9. One-time generation setup.
+    data_source, dask_client, ds_grid, grid = _setup_generation(
+        cfg, log_file, fs, fs_sync, clobber)
+
+    # 10. Generate each planned subset/date.
+    _generate(cfg, to_generate, ds_grid, grid, data_source, fs)
+
+    # 11. Report + cleanup.
+    _report_and_cleanup(cfg, dask_client, to_generate, wall_start)
 
 
 if __name__ == "__main__":
