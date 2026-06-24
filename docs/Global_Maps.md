@@ -64,12 +64,12 @@ A single unified entry point (`generate_global.py`) dispatches on the
 All variants share the same output format: S3 Zarr stores shaped
 `(T, C, 12960, 17280)` with chunk shape `(1, 1, 12960, 17280)`.
 
-Config: `configs/global/run.yaml`. Console command: `generate-global`.
+Config: `configs/global/run/run.yaml`. Console command: `generate-global`.
 
 ```bash
-generate-global --config configs/global/run.yaml
-generate-global --config configs/global/run.yaml --subset kinematic
-generate-global --config configs/global/run.yaml --pipeline OSN
+generate-global --config configs/global/run/run.yaml
+generate-global --config configs/global/run/run.yaml --subset kinematic
+generate-global --config configs/global/run/run.yaml --pipeline OSN
 ```
 
 Flags: `--subset`, `--pipeline`, `--run_id`, `--no-icemask`.
@@ -137,7 +137,7 @@ not its 3D computation machinery.
 Each pipeline supports a specific set of subsets.  Running a subset that
 does not belong to the chosen pipeline will raise a `ValueError`.  The
 canonical reference for valid pipeline × subset combinations is in
-`configs/global/run.yaml`.
+`configs/global/run/run.yaml`.
 
 A **subset** is a named group of related calculated fields/properties that are
 computed and written together as a single Zarr store. Each subset has its own
@@ -146,6 +146,43 @@ config YAML.
 
 Subsets exist because the full set of derived fields is large — grouping
 related fields together lets you generate and export only what you need.
+
+### Re-running and changing `depth_suffixes`
+
+Re-runs are incremental ("`.nc`-first"): for each subset × date,
+`run-all-subsets` checks the exported `.nc` files first. If all exist the
+subset/date is skipped entirely; if some are missing it checks the Zarr
+store, exports the missing channels when the store is complete, and only
+regenerates the store when it is missing or incomplete (wrong channels, or
+no data written). When a store **is** regenerated, *all* of its channels are
+re-exported (existing `.nc` files overwritten), so every export for a
+subset/date always comes from the same store build. The work plan is logged
+at startup — use `--dry-run` to preview it.
+
+**Changing `depth_suffixes` (or channel definitions) for an existing
+run_id/date is refused by design.** A store's channel axis is fixed at
+creation, so writing a different channel set would corrupt it. You will see:
+
+```
+ValueError: Channel mismatch for existing zarr store at s3://...
+Refusing to write -- this would corrupt the store.
+```
+
+The pipeline never deletes data; to move forward either:
+
+1. **Delete that subset's store manually** and re-run (only the affected
+   subset/date is rebuilt):
+
+   ```bash
+   aws --endpoint-url https://s3-west.nrp-nautilus.io s3 rm --recursive \
+     s3://dbof/{folder}/{run_id}/{date_prefix}/{subset}.zarr
+   ```
+
+2. **Use a new `run_id`**, keeping the old outputs intact.
+
+`run_meta.yaml` (next to the logs, and at
+`s3://{bucket}/{folder}/{run_id}/run_meta.yaml`) records the suffixes and
+channels each subset was actually built with.
 
 ### Surface pipeline subsets (SURF / OSN)
 
@@ -220,40 +257,40 @@ the CLI flag takes precedence.
 ```bash
 # DEPTH pipeline — generate + export all active subsets:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output
 
 # SURF pipeline:
 run-all-subsets --pipeline SURF \
-    --config configs/global/run.yaml --netcdf-base /path/to/output
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output
 
 # OSN pipeline:
 run-all-subsets --pipeline OSN \
-    --config configs/global/run.yaml --netcdf-base /path/to/output
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output
 
 # Only specific subsets (overrides active_subsets in YAML):
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output \
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output \
     --subsets stratification native_fields
 
 # Export only (assumes Zarr stores already exist):
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --export-only
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --export-only
 
 # Generate only (skip NetCDF export):
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --generate-only
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --generate-only
 
 # Override run_id:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --run-id my_run_01
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --run-id my_run_01
 
 # Dry run:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --dry-run
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --dry-run
 
 # With ice masking:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --ice-mask
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --ice-mask
 ```
 
 ### Ice masking

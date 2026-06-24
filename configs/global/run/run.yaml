@@ -5,16 +5,16 @@
 # Data sources and subset variable lists are defined in code (not here).
 #
 # Usage:
-#   generate-global --config configs/global/run.yaml
-#   generate-global --config configs/global/run.yaml --subset kinematic
-#   generate-global --config configs/global/run.yaml --pipeline OSN
+#   generate-global --config configs/global/run/run.yaml
+#   generate-global --config configs/global/run/run.yaml --subset kinematic
+#   generate-global --config configs/global/run/run.yaml --pipeline OSN
 # ---------------------------------------------------------------------------
 
 # Pipeline: SURF | OSN | DEPTH
-pipeline: "SURF"
+pipeline: "DEPTH"
 
 run:
-  run_id: "global_test00"
+  run_id: "vtest"
   log_dir: "notebooks/notebooks_global/test_logs"
 
 data:
@@ -66,6 +66,8 @@ runtime:
 # Only list subsets valid for the pipeline set above.
 active_subsets:
   - stratification
+  - frontal_structure
+  - vertical_shear
 
 # ---------------------------------------------------------------------------
 # Depth suffixes  (DEPTH pipeline only, optional)

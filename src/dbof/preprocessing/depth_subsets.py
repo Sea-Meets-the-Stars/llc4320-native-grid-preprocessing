@@ -59,6 +59,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     frontogenesis_geo_3d,
 )
 from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
+from dbof.preprocessing.vertical_helpers import _interp_w_to_tracer_levels
 
 
 # ---------------------------------------------------------------------------
@@ -507,9 +508,11 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
             okubo_weiss_3d(ds_merge, grid, jacobian=jac),
             "okubo_weiss", ds_merge, mld=mld, requested=requested))
 
-    # coriolis_f is 2D (latitude-only) — no depth strategies needed.
+    # coriolis_f has no depth dependence — no depth strategies needed.
+    # Keep it as a DataArray (dims (face, j, i) on the native grid) so
+    # _materialise_results preserves dimension names and coordinates.
     if "coriolis_f" in requested:
-        results["coriolis_f"] = coriolis_parameter(ds_merge, grid).values
+        results["coriolis_f"] = coriolis_parameter(ds_merge, grid)
 
     return _materialise_results(results)
 
@@ -727,11 +730,13 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
         results.update(apply_depth_strategies(
             V_c, "V", ds_merge, mld=mld, requested=requested))
 
-    # -- W (on k_l vertical grid, tracer horizontal grid) --
+    # -- W (on the vertical face grid) -> interpolate to tracer centres
+    #    (k / Z) so the depth strategies align with the tracer-centred MLD.
     if any(c.startswith("W_") for c in requested):
         _ensure_mld()
+        W_c = _interp_w_to_tracer_levels(ds_merge)
         results.update(apply_depth_strategies(
-            ds_merge.W, "W", ds_merge, mld=mld, requested=requested))
+            W_c, "W", ds_merge, mld=mld, requested=requested))
 
     return _materialise_results(results)
 

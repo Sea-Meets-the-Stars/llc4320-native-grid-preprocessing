@@ -114,7 +114,32 @@ class GlobalZarrDataset:
 
         # ---- create arrays once on first run; idempotent on resume ----
 
-        if "data" not in self.root:
+        if "data" in self.root:
+            # Resuming into an existing store: the channel axis (C) is fixed
+            # at creation, so the requested channel list MUST match what the
+            # store was built with.  Overwriting channel_names attrs against
+            # a mismatched data array would silently corrupt the store, so
+            # refuse loudly instead.  (Deletion is deliberately left to the
+            # user -- pipeline code never deletes S3 prefixes.)
+            existing_names = list(self.root.attrs.get("channel_names", []))
+            existing_c = int(self.root["data"].shape[1])
+            if existing_names and existing_names != self.channel_names:
+                raise ValueError(
+                    f"Channel mismatch for existing zarr store at {path}.\n"
+                    f"  store was built with : {existing_names}\n"
+                    f"  requested            : {self.channel_names}\n"
+                    "Refusing to write -- this would corrupt the store.  "
+                    "Either delete the store manually, or write under a "
+                    "different run_id."
+                )
+            if existing_c != self.n_channels:
+                raise ValueError(
+                    f"Channel-count mismatch for existing zarr store at {path}: "
+                    f"data array has C={existing_c}, requested "
+                    f"C={self.n_channels}.  Refusing to write.  Either delete "
+                    "the store manually, or write under a different run_id."
+                )
+        else:
             self.root.create_array(
                 "data",
                 shape=(0, self.n_channels, self.rectangular_h, self.rectangular_w),
@@ -142,7 +167,12 @@ class GlobalZarrDataset:
 
     def write_snapshot(self, data: np.ndarray, iteration: int) -> None:
         """
-        Append one global snapshot to the store.
+        Write one global snapshot to the store.
+
+        If *iteration* is already present in the ``time`` array (e.g. a
+        clobber/re-run), its existing slot is **overwritten in place** --
+        the store never grows with duplicate timesteps and nothing is
+        deleted.  Otherwise the snapshot is appended.
 
         Parameters
         ----------
@@ -164,6 +194,14 @@ class GlobalZarrDataset:
             f"write_snapshot: expected shape {expected}, got {data.shape}. "
             f"Check that all channels were converted to rectangular lat/lon correctly."
         )
+
+        # Overwrite in place if this iteration was already written
+        # (idempotent clobber: same chunks rewritten, no store growth).
+        existing = np.nonzero(self.root["time"][:] == int(iteration))[0]
+        if existing.size:
+            t = int(existing[0])
+            self.root["data"][t] = data.astype(np.float32)
+            return
 
         t = self.t_index
 

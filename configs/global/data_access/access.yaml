@@ -21,7 +21,7 @@ pipeline: "DEPTH"
 
 # Depth suffixes used during generation (DEPTH pipeline only).
 # This MUST match the depth_suffixes in the generation config
-# (configs/global/run.yaml) at the time the data was produced.
+# (configs/global/run/run.yaml) at the time the data was produced.
 # If omitted, the code default [sfc, z25m, mld, mld_mean] is used.
 depth_suffixes: [sfc, mld]
 
