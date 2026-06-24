@@ -150,6 +150,10 @@ def main():
 
     logging.info("Arguments parsed successfully. Logging set up. Running script.")
 
+    return
+
+
+
     # TODO prepare to load in all features we want from globals
     model_feature_channels = [c.strip() for c in cfg.features.model_data_feature_channels if c.strip()]
     computed_feature_channels = [c.strip() for c in cfg.features.compute_features_channels if c.strip()]
