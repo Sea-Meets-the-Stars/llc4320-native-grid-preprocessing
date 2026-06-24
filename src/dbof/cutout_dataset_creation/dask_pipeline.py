@@ -6,7 +6,7 @@ import numpy as np
 import dask.array as da
 import logging
 
-import dbof.dataset_creation.spatial_patches as spatial_patches
+import dbof.cutout_dataset_creation.spatial_patches as spatial_patches
 
 @delayed
 def downsample_image_and_write_image_and_metadata_lazy(zarr_ds, metadata_writer, patch_data, image, patch, down_sample_res, target_km_res, metadata_cols):
@@ -135,7 +135,7 @@ def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
     patch_meta_data_list = []
     patches = []
 
-    logger.info(f"Starting patch extents dataset_creation")
+    logger.info(f"Starting patch extents cutout_dataset_creation")
     for index in indices:
         patch, patch_meta_data = extract_patch_extents_and_metadata_in_series(index, ds_merge, calculated_fields["log_gradb_np"], target_km_res)
 
@@ -143,7 +143,7 @@ def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
             patch_meta_data_list.append(patch_meta_data)
             patches.append(patch)
 
-    logger.info("Starting batched image dataset_creation")
+    logger.info("Starting batched image cutout_dataset_creation")
     images = create_image_patches_batch_as_tensors_dask(ds_merge, calculated_fields, model_channels, patches, scheduler='threads')
 
     # Downsample images and get metadata ----------------------------------------------------

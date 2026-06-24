@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# Data-access config for generate_global.py SURF pipeline output.
+#
+# Consumed by view_globals_dev_cutouts.ipynb.  The notebook discovers
+# available timestamps and subsets at runtime, so no date_prefix is set here.
+#
+# Full S3 path to each subset:
+#   s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
+# ---------------------------------------------------------------------------
+
+pipeline: "SURF"
+
+data_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "surface_fields"
+  run_id: "global_SURF_test01"
+
+# Grid Zarr store written by generate_grid_global.py.
+# NOTE: The grid is stored WITHOUT a run_id prefix (shared across all runs):
+#   s3://{bucket}/{folder}/{dataset_name}
+grid_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "native_grid_dbof_training_data"
+  dataset_name: "llc4320_grid.zarr"
