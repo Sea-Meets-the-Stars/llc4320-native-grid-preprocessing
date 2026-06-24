@@ -20,7 +20,7 @@ def process_llc4320(ds, ds_grid):
     Returns
     -------
     ds_merge : xarray.Dataset
-        Merged cutout_dataset_creation containing model state variables, selected grid
+        Merged llc model state variables, selected grid
         geometry variables, and a land/ocean mask.
 
     """
@@ -49,7 +49,7 @@ def process_llc4320_grid (grid_ds):
     Returns
     -------
     ds_grid : xarray.Dataset
-        Grid-only cutout_dataset_creation containing selected geometry variables and the
+        Grid-only xarray containing selected geometry variables and the
         land/ocean mask.
 
     """
