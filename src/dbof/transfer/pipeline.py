@@ -1,27 +1,27 @@
 """Unified LLC4320 -> S3 transfer pipeline.
 
 A single :func:`run` drives both transfer extents; the *only* thing that varies
-is the spatial selection:
+is the spatial selection.  Everything lives under ``{bucket}/{raw_prefix}/``:
 
-* **full** -- transfer the whole native dataset (all faces, all 720x720 tiles)
-  to ``{output.folder}/...``.  Time-varying stores are named
-  ``{YYYYMMDDTHH}.zarr``.
-* **chunk** -- transfer a single native 720x720 chunk surrounding a lat/lon
-  (``transfer.location``) to ``{chunks_prefix}/{chunk_name}/...``.  Time-varying
-  stores are directories named by the run-id (``{YYYYMMDD_HHMMSS}``), and every
-  store carries chunk provenance attrs.
+* **full** -- the whole native dataset (all faces, all 720x720 tiles) under the
+  subset ``folder`` (``SURFACE`` / ``DEPTH``).
+* **chunk** -- a single native 720x720 chunk surrounding a lat/lon
+  (``transfer.location``) under ``{chunks_subdir}/{chunk_name}``; every store
+  also carries chunk provenance attrs.
 
-In both extents the flow is identical: open the source, resolve the spatial
-target, write the time-invariant **static grid once**, then loop over the
-configured dates (``data.date_iterations``, or a single ``date_override``)
-writing one time-varying store per date.  The per-store open/attrs/write/log is
+Both name their stores identically: ``grid.zarr`` for the static grid and
+``{YYYYMMDDTHH}.zarr`` per date (the latter matching what ``generate_global``
+reads).  The flow is identical: open the source, resolve the spatial target,
+write the time-invariant **static grid once**, then loop over the configured
+dates (``data.date_iterations``, or a single ``date_override``) writing one
+time-varying store per date.  The per-store open/attrs/write/log is
 :func:`dbof.transfer.zarr_io.write_store`.
 """
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, List, Optional
+from typing import List, Optional
 
 import xarray as xr
 
@@ -29,7 +29,6 @@ from dbof.transfer import config as config
 from dbof.transfer import chunk_selection, zarr_io
 from dbof.llc4320_ingestion.date_iterations import (
     DATE_FMT,
-    date_to_run_id,
     mit_date_to_iteration,
     mit_date_to_time_idx,
 )
@@ -40,7 +39,11 @@ from dbof.llc4320_ingestion.date_iterations import (
 # ---------------------------------------------------------------------------
 
 def _dataset_name_from_date(date_str: str) -> str:
-    """Full-dataset store naming: '2012-11-09 12:00:00' -> '20121109T12.zarr'."""
+    """Time-varying store naming (all extents): '2012-11-09 12:00:00' -> '20121109T12.zarr'.
+
+    Matches the name ``generate_global`` reads (see
+    ``dbof.llc4320_ingestion.get_raw_data.get_llc_timestep_data``).
+    """
     dt = datetime.strptime(date_str, DATE_FMT)
     return dt.strftime("%Y%m%dT%H") + ".zarr"
 
@@ -78,13 +81,19 @@ class _Target:
     tile_j: int
     tile_i: int
     base_attrs: dict                     # root attrs stamped on every store
-    time_leaf: Callable[[str], str]      # date_str -> time-store leaf name
 
 
 def _resolve_target(cfg: config.JobConfig, ds: xr.Dataset) -> _Target:
-    """Resolve the spatial target for this run (full dataset or one chunk)."""
+    """Resolve the spatial target for this run (full dataset or one chunk).
+
+    Both extents live under ``{raw_prefix}/...``: the full extent under the
+    subset ``folder`` (SURFACE / DEPTH), the chunk extent under
+    ``{chunks_subdir}/{chunk_name}``.
+    """
     t = cfg.transfer
+    out = cfg.output
     source = cfg.data.MIT_data_path
+    raw_prefix = out.raw_prefix.strip("/")
 
     if t.mode == "chunks":
         loc = t.location
@@ -95,7 +104,7 @@ def _resolve_target(cfg: config.JobConfig, ds: xr.Dataset) -> _Target:
             f"(nearest cell j={sel.nearest_j}, i={sel.nearest_i} at "
             f"lat={sel.nearest_lat:.4f}, lon={sel.nearest_lon:.4f})"
         )
-        folder = f"{cfg.output.chunks_prefix.strip('/')}/{loc.chunk_name.strip('/')}"
+        folder = f"{raw_prefix}/{out.chunks_subdir.strip('/')}/{loc.chunk_name.strip('/')}"
         return _Target(
             ds=chunk_selection.slice_to_chunk(ds, sel),
             folder=folder,
@@ -103,17 +112,15 @@ def _resolve_target(cfg: config.JobConfig, ds: xr.Dataset) -> _Target:
             tile_i=sel.tile,
             base_attrs=chunk_selection.chunk_provenance(sel, loc.lat, loc.lon,
                                                         loc.chunk_name, source),
-            time_leaf=date_to_run_id,
         )
 
-    # Full native dataset.
+    # Full native dataset -> {raw_prefix}/{folder} (e.g. LLC4320_RAW/SURFACE).
     return _Target(
         ds=ds,
-        folder=cfg.output.folder,
+        folder=f"{raw_prefix}/{out.folder.strip('/')}",
         tile_j=t.tile_j,
         tile_i=t.tile_i,
         base_attrs={"source_path": source},
-        time_leaf=_dataset_name_from_date,
     )
 
 
@@ -194,7 +201,7 @@ def run(
             iteration = mit_date_to_iteration(date_str)
             time_idx = mit_date_to_time_idx(date_str, ntime)
             s3_url = zarr_io._build_s3_url(cfg.output.bucket, target.folder,
-                                           target.time_leaf(date_str))
+                                           _dataset_name_from_date(date_str))
             zarr_io.write_store(
                 target.ds, time_variables,
                 s3_url=s3_url, s3_endpoint=cfg.output.s3_endpoint,

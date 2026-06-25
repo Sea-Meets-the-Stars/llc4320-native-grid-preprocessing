@@ -8,10 +8,9 @@
 # 3D chunk layout: (k=51, face=1, j=720, i=720)
 #   — one S3 GET retrieves the full water column for the chunk.
 #
-# Output layout (one directory per timestamp; grid written once):
-#   s3://{bucket}/{chunks_prefix}/{chunk_name}/grid.zarr            # XC, YC, Z, hFac, ...
-#   s3://{bucket}/{chunks_prefix}/{chunk_name}/{YYYYMMDD_HHMMSS}/   # Theta, Salt, U, ...
-#   (the timestamp dir is the directory-safe run-id form of each ISO timestamp)
+# Output layout (grid written once; one store per date):
+#   dbof/LLC4320_RAW/CHUNKS/{chunk_name}/grid.zarr            # XC, YC, Z, hFac, ...
+#   dbof/LLC4320_RAW/CHUNKS/{chunk_name}/{YYYYMMDDTHH}.zarr   # Theta, Salt, U, ...
 #
 # Usage:
 #   transfer-timestep --config configs/transfer/run_chunks_monterey_bay.yaml --init-store
@@ -44,8 +43,10 @@ data:
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
-  # Top-level prefix for all chunk transfers.
-  chunks_prefix: "LLC_CHUNKS_RAW"
+  # All raw transfers live under {bucket}/{raw_prefix}/; chunks land in
+  # {raw_prefix}/{chunks_subdir}/{chunk_name}/ (defaults: LLC4320_RAW / CHUNKS).
+  raw_prefix: "LLC4320_RAW"
+  chunks_subdir: "CHUNKS"
 
 # ---------------------------------------------------------------------------
 # Transfer-specific settings

@@ -8,7 +8,7 @@ them::
 
     run:        run_id, log_dir
     data:       MIT_data_path, date_iterations, endpoint_url
-    output:     s3_endpoint, bucket, folder, chunks_prefix
+    output:     s3_endpoint, bucket, raw_prefix, folder, chunks_subdir
     runtime:    zarr_async_concurrency, dask_scheduler
     transfer:   mode, variables, static_variables, tile_j, tile_i,
                 static_dataset_name, location{lat,lon,chunk_name}
@@ -48,13 +48,21 @@ class DataConfig:
 
 @dataclass(frozen=True)
 class OutputConfig:
-    """S3 output location."""
+    """S3 output location.
+
+    All raw transfers live under ``{bucket}/{raw_prefix}/``::
+
+        full  mode: {bucket}/{raw_prefix}/{folder}/{grid.zarr | YYYYMMDDTHH.zarr}
+        chunk mode: {bucket}/{raw_prefix}/{chunks_subdir}/{chunk_name}/{...}
+
+    For the full extent ``folder`` is the subset directory (``SURFACE`` /
+    ``DEPTH``) that downstream pipelines (e.g. generate_global) read from.
+    """
     s3_endpoint: str = "https://s3-west.nrp-nautilus.io"
     bucket: str = "dbof/"
-    # all-data mode: {bucket}/{folder}/{grid.zarr | YYYYMMDDTHH.zarr}
-    folder: str = "LLC4320"
-    # chunks mode: {bucket}/{chunks_prefix}/{chunk_name}/{grid.zarr | timestamp}
-    chunks_prefix: str = "LLC_CHUNKS_RAW"
+    raw_prefix: str = "LLC4320_RAW"     # top-level prefix shared by all transfers
+    folder: str = ""                    # full mode subdir: SURFACE | DEPTH
+    chunks_subdir: str = "CHUNKS"       # chunk mode subdir under raw_prefix
 
 
 @dataclass(frozen=True)
@@ -62,8 +70,8 @@ class LocationConfig:
     """A lat/lon point that resolves to one native 720x720 chunk.
 
     ``chunk_name`` is the human-readable directory label under
-    ``chunks_prefix`` (e.g. ``"monterey_bay"``).  The resolved face and
-    face-local slices are recorded as store attributes for provenance.
+    ``{raw_prefix}/{chunks_subdir}`` (e.g. ``"monterey_bay"``).  The resolved
+    face and face-local slices are recorded as store attributes for provenance.
     """
     lat: float
     lon: float
@@ -154,8 +162,14 @@ def _validate(cfg: JobConfig, path: str) -> None:
     if not cfg.data.MIT_data_path:
         raise ValueError(f"data.MIT_data_path must be set in {path}.")
 
-    if cfg.transfer.mode == "chunks" and cfg.transfer.location is None:
+    if cfg.transfer.mode == "chunks":
+        if cfg.transfer.location is None:
+            raise ValueError(
+                f"transfer.location (lat, lon, chunk_name) is required for "
+                f"mode 'chunks' in {path}."
+            )
+    elif not cfg.output.folder:
         raise ValueError(
-            f"transfer.location (lat, lon, chunk_name) is required for "
-            f"mode 'chunks' in {path}."
+            f"output.folder (e.g. 'SURFACE' or 'DEPTH') is required for "
+            f"mode 'all' in {path}."
         )
