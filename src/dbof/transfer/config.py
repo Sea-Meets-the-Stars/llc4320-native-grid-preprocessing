@@ -11,7 +11,10 @@ them::
     output:     s3_endpoint, bucket, folder, chunks_prefix
     runtime:    zarr_async_concurrency, dask_scheduler
     transfer:   mode, variables, static_variables, tile_j, tile_i,
-                static_dataset_name, location{lat,lon,chunk_name}, timestamps
+                static_dataset_name, location{lat,lon,chunk_name}
+
+Both modes transfer the dates in ``data.date_iterations`` (or a single CLI
+``--date``); ``transfer.location`` selects the chunk extent for mode 'chunks'.
 """
 
 from dataclasses import dataclass, field, fields
@@ -35,8 +38,8 @@ class RunConfig(BaseRunConfig):
 class DataConfig:
     """Source-data settings.
 
-    ``date_iterations`` is only used by the ``all`` mode; the ``chunks`` mode
-    uses ``transfer.timestamps`` instead.
+    ``date_iterations`` (ISO ``'YYYY-MM-DD HH:MM:SS'``) is the list of dates to
+    transfer; both the full and chunk extents loop over it.
     """
     MIT_data_path: str = ""
     date_iterations: Optional[List[str]] = None
@@ -78,7 +81,6 @@ class TransferConfig:
     tile_i: int = 720
     # chunks-mode only:
     location: Optional[LocationConfig] = None
-    timestamps: Optional[List[str]] = None  # ISO 'YYYY-MM-DD HH:MM:SS'
 
 
 @dataclass(frozen=True)
@@ -122,7 +124,7 @@ def load_config(path: str) -> JobConfig:
         raise ValueError(
             f"Missing 'transfer' section in {path}. "
             "Expected at least 'variables' (and 'static_variables' / "
-            "'location' / 'timestamps' depending on mode)."
+            "'location' for mode 'chunks')."
         )
     loc_raw = transfer_raw.pop("location", None)
     location = LocationConfig(**loc_raw) if loc_raw else None
@@ -152,14 +154,8 @@ def _validate(cfg: JobConfig, path: str) -> None:
     if not cfg.data.MIT_data_path:
         raise ValueError(f"data.MIT_data_path must be set in {path}.")
 
-    if cfg.transfer.mode == "chunks":
-        if cfg.transfer.location is None:
-            raise ValueError(
-                f"transfer.location (lat, lon, chunk_name) is required for "
-                f"mode 'chunks' in {path}."
-            )
-        if not cfg.transfer.timestamps:
-            raise ValueError(
-                f"transfer.timestamps (list of ISO 'YYYY-MM-DD HH:MM:SS') is "
-                f"required for mode 'chunks' in {path}."
-            )
+    if cfg.transfer.mode == "chunks" and cfg.transfer.location is None:
+        raise ValueError(
+            f"transfer.location (lat, lon, chunk_name) is required for "
+            f"mode 'chunks' in {path}."
+        )

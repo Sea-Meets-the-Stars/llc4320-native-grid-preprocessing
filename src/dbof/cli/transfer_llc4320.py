@@ -6,37 +6,41 @@ S3.  This is a thin dispatcher; the real work lives in the
 
 #NOTE: this script is designed to be run from the MIT machines.
 
-Two transfer modes, selected by ``transfer.mode`` in the YAML config:
+One unified pipeline (:mod:`dbof.transfer.pipeline`) handles both spatial
+extents, selected by ``transfer.mode`` in the YAML config:
 
-* ``all``    -- transfer every spatial tile of a timestep.  Static grid
-  variables go to ``{folder}/grid.zarr`` (once); time-varying fields go to
-  ``{folder}/{YYYYMMDDTHH}.zarr`` (per-date).  See
-  :mod:`dbof.transfer.all_data`.
-* ``chunks`` -- transfer a single native 720x720 spatial chunk (all depths)
-  surrounding a ``lat,lon``, for a list of timestamps.  See
-  :mod:`dbof.transfer.chunks`.
+* ``all``    -- transfer the whole native dataset.  Static grid variables go to
+  ``{folder}/grid.zarr`` (once); time-varying fields go to
+  ``{folder}/{YYYYMMDDTHH}.zarr`` (per-date).
+* ``chunks`` -- transfer a single native 720x720 chunk (all depths) surrounding
+  ``transfer.location`` (lat/lon).  Static grid goes to
+  ``{chunks_prefix}/{chunk_name}/grid.zarr`` (once); time-varying fields go to
+  ``{chunks_prefix}/{chunk_name}/{YYYYMMDD_HHMMSS}/`` (per-date).
+
+Both extents transfer the dates in ``data.date_iterations`` (looped in one run),
+or a single date via ``--date``.
 
 CLI usage
 ---------
-    # All-data mode (mode: all in the YAML):
+    # Full dataset (mode: all), all configured dates in one run:
     transfer-timestep --config configs/transfer/run.yaml --init-store
     transfer-timestep --config configs/transfer/run.yaml --subset static --init-store
     transfer-timestep --config configs/transfer/run.yaml --subset time --variables Theta
     transfer-timestep --config configs/transfer/run.yaml --date "2012-11-09 12:00:00"
 
-    # Chunks mode (mode: chunks in the YAML):
+    # Single chunk (mode: chunks), all configured dates in one run:
     transfer-timestep --config configs/transfer/run_chunks_monterey_bay.yaml --init-store
 
-In chunks mode the date/subset/variables flags do not apply (timestamps and the
-variable list come from the config); ``--init-store`` and ``--skip-existing``
-still apply.
+With ``--subset all`` the static grid is written once; subsequent dates write
+only the time-varying fields.  ``--date`` / ``--subset`` / ``--variables`` apply
+to both modes.
 """
 
 import argparse
 import logging
 
 from dbof.transfer import config as config
-from dbof.transfer import all_data, chunks
+from dbof.transfer import pipeline
 from dbof.utils.logging import generate_logging
 
 
@@ -101,25 +105,14 @@ def main(config_file: str = None, date: str = None, init_store: bool = False,
     generate_logging(cfg.run, log_filename="transfer_llc4320.log")
     logging.info(f"Config loaded from: {config_file} (mode={cfg.transfer.mode})")
 
-    if cfg.transfer.mode == "chunks":
-        chunks.run(cfg, init_store=init_store, skip_existing=skip_existing)
-        return
-
-    # all-data mode: resolve the date
-    if date is None and cfg.data.date_iterations:
-        date = cfg.data.date_iterations[0]
-    if date is None and cfg.transfer.variables and subset in ("time", "all"):
-        raise ValueError(
-            "No date provided.  Set data.date_iterations in the config or "
-            "pass --date on the CLI."
-        )
-
-    all_data.run(
+    # One pipeline handles both spatial extents (full dataset vs single chunk),
+    # selected by transfer.mode inside the config; the date loop lives in run().
+    pipeline.run(
         cfg=cfg,
-        date_str=date,
         init_store=init_store,
         subset=subset,
         skip_existing=skip_existing,
+        date_override=date,
         variables_override=variables_override,
     )
 
