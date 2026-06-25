@@ -54,8 +54,16 @@ output:
 # Transfer-specific settings
 # ---------------------------------------------------------------------------
 transfer:
+  # Transfer mode: "all" (every spatial tile of a timestep) or "chunks"
+  # (one 720x720 chunk for a lat/lon across timestamps — see
+  # run_chunks_monterey_bay.yaml).
+  mode: "all"
+
   # Static grid variables — written once to grid.zarr.
   # Geometry, masks, and vertical coordinates.
+  # Dimension coordinates (i, j, face, i_g, j_g, k, k_l, k_u, k_p1)
+  # are written automatically by ensure_coord_written() whenever a
+  # data variable that uses them is transferred — no need to list here.
   static_variables:
     - XC
     - YC
@@ -87,9 +95,6 @@ transfer:
     - PHrefC
     - PHrefF
     - rhoRef
-    # Dimension coordinates (i, j, face, i_g, j_g, k, k_l, k_u, k_p1)
-    # are written automatically by ensure_coord_written() whenever a
-    # data variable that uses them is transferred — no need to list here.
     - rA
     - rAz
     - rAw
