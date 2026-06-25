@@ -6,6 +6,9 @@ import argparse
 
 from dbof.config import BaseRunConfig
 
+# Channels every snapshot needs: gradb2 drives sampling, SIarea builds the ice mask.
+REQUIRED_FEATURE_CHANNELS = ["gradb2", "SIarea"]
+
 @dataclass(frozen=True)
 class RunConfig(BaseRunConfig):
     """Cutout run config; inherits run_id + log_dir. Extend here as needed."""
@@ -49,20 +52,14 @@ class OutputConfig:
     target_km_res: int = 150
     down_sample_res: int = 64
 
-#TODO jake fix downstream issues in cutouts logic
 @dataclass(frozen=True)
 class FeaturesConfig:
-    model_data_feature_channels: List[str] = None
-    compute_features_channels: List[str] = None
+    feature_channels: List[str] = None
 
     def __post_init__(self):
-        # dataclasses "frozen" workaround for defaults
-        if self.model_data_feature_channels is None:
-            object.__setattr__(self, "model_data_feature_channels",
-                               ["Eta", "Salt", "Theta", "U", "V", "W"])
-        if self.compute_features_channels is None:
-            object.__setattr__(self, "compute_features_channels", [])
-            #object.__setattr__(self, "compute_features_channels", ["log_gradb"])
+        if self.feature_channels is None:
+            object.__setattr__(self, "feature_channels",
+                               ["Eta", "Salt", "Theta", "U", "V", "W", "gradb2", "SIarea"])
 
 @dataclass(frozen=True)
 class RuntimeConfig:
@@ -107,7 +104,7 @@ def load_config(path: str) -> JobConfig:
         input=input_cfg,
         sampling=SamplingConfig(**get("sampling")),
         output=OutputConfig(**get("output")),
-        features=FeaturesConfig(**get("features")),
+        features=FeaturesConfig(feature_channels=raw.get("feature_channels")),
         runtime=RuntimeConfig(**get("runtime")),
     )
 
@@ -115,6 +112,13 @@ def load_config(path: str) -> JobConfig:
         raise ValueError("sampling.sample_points_per_snapshot must be > 0")
     if cfg.output.down_sample_res <= 0:
         raise ValueError("output.down_sample_res must be > 0")
+
+    missing_required = [c for c in REQUIRED_FEATURE_CHANNELS if c not in cfg.features.feature_channels]
+    if missing_required:
+        raise ValueError(
+            f"feature_channels must include required channels {missing_required} "
+            f"(gradb2 for sampling, SIarea for the ice mask)"
+        )
 
     return cfg
 

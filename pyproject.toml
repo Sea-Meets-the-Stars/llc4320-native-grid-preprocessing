@@ -71,6 +71,9 @@ test = ["pytest"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"dbof.plotting" = ["*.yaml"]
+
 [project.scripts]
 generate-llc-dataset = "dbof.cli.generate_cutout_dataset:main"
 generate-global = "dbof.cli.generate_global:main"

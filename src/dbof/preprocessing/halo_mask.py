@@ -2,7 +2,7 @@ import skfmm
 import numpy as np
 
 
-def llc_halo_mask(mask, dxC, dyC, halo_km):
+def llc_native_grid_halo_mask(mask, dxC, dyC, halo_km):
     """
     Generate a halo mask around masked regions on an LLC grid using
     fast marching distances.
@@ -79,3 +79,26 @@ def llc_halo_mask(mask, dxC, dyC, halo_km):
             halo_mask[face] = np.ones_like(mask_f, dtype=bool)
 
     return halo_mask
+
+
+def stitched_halo_mask(mask, dxC, dyC, halo_km):
+    """Halo mask for the stitched (j, i) grid: True where points are at least
+    halo_km from any True (masked-out) cell.  dxC/dyC in meters."""
+    mask = np.asarray(mask, dtype=bool)
+
+    if not mask.any():
+        return np.ones_like(mask, dtype=bool)
+    if mask.all():
+        raise ValueError(
+            "stitched_halo_mask: entire grid is masked out (all True); "
+            "expected ocean points on the global grid"
+        )
+
+    dx_v = float(np.asarray(dxC.mean())) / 1000.0
+    dy_v = float(np.asarray(dyC.mean())) / 1000.0
+
+    phi = np.ones(mask.shape, dtype=float)
+    phi[mask] = -1.0
+
+    dist_km = skfmm.distance(phi, dx=(dy_v, dx_v))
+    return dist_km >= halo_km

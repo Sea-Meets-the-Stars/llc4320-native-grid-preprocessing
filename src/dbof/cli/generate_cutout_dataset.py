@@ -7,6 +7,7 @@ import logging
 import numpy as np
 import xgcm
 import zarr
+import xarray as xr
 
 # distributed / IO
 from dask.distributed import Client
@@ -29,8 +30,11 @@ import dbof.cutout_dataset_creation.zarr_dataset as zarr_dataset
 import dbof.cutout_dataset_creation.metadata as metadata
 import dbof.cutout_dataset_creation.dask_pipeline as dask_pipeline
 import dbof.cutout_dataset_creation.config as config
+from dbof.cutout_dataset_creation.global_input import resolve_input_locations, resolve_date_prefixes, verify_feature_channels, verify_required_channels
+from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
 from dbof.utils.logging import generate_logging
 from dbof.preprocessing.calculate_additional_fields import relative_vorticity
+from dbof.cutout_dataset_creation.global_input import load_snapshot_features
 
 metadata_cols = [
     "id",
@@ -49,18 +53,26 @@ metadata_cols = [
     "time_snapshot"
 ]
 
-def set_up_grid_data_and_masks(cfg: config.JobConfig):
-    logging.info("Fetching grid file")
-    co = get_raw_data.get_remote_gridfile(cfg.data.endpoint_url)
-    ds_grid = preproc_llc_core_data.process_llc4320_grid(co)
+def set_up_grid_data_and_masks(cfg: config.JobConfig, fs):
+    logging.info("Fetching global stitched grid file")
+    grid = cfg.input.grid_access
+    grid_reader = GlobalGridZarrReader(
+        bucket=grid.bucket,
+        folder=grid.folder,
+        dataset_name=grid.dataset_name,
+        fs=fs,
+    )
+    ds_grid = grid_reader.to_dataset_lazy()
 
     logging.info("Calculating land and face masks")
-    land_face_mask = native_grid_masks.generate_static_land_face_masks_for_sampling(ds_grid, cfg.output.target_km_res)
+    land_halo_mask = native_grid_masks.generate_halo_land_mask(ds_grid, cfg.output.target_km_res, stitched=True)
 
-    return ds_grid, land_face_mask
+    return ds_grid, land_halo_mask
 
-def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, grid, land_face_mask, model_feature_channels, computed_feature_channels):
+
+def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels):
     # NOTE The ordering of the following steps matters
+    # TODO leaving off here util we can get a dataset with ice
 
     # Calculate Ice Mask
     logging.info(f"Calculating ice mask")
@@ -73,11 +85,11 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
 
     # This must be included so long as we are sampling using it.
     # If we support additional sampling methods in the future, this becomes optional.
-    log_gradb = calculate_additional_fields.log_grad_b(ds_merge, grid)
-
-    if "relative_vorticity" in computed_feature_channels:
-        relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
-        calculated_fields["relative_vorticity"] = relative_vorticity
+    # log_gradb = calculate_additional_fields.log_grad_b(ds_merge, grid)
+    #
+    # if "relative_vorticity" in computed_feature_channels:
+    #     relative_vorticity = calculate_additional_fields.relative_vorticity(ds_merge, grid)
+    #     calculated_fields["relative_vorticity"] = relative_vorticity
 
     logging.info(f"Sampling patch center points")
     # todo this should be updated to take in a numpy array since we compute loggradb later anyway
@@ -150,24 +162,28 @@ def main():
 
     logging.info("Arguments parsed successfully. Logging set up. Running script.")
 
-    return
+    input_base, grid_uri = resolve_input_locations(cfg.input)
+    logging.info(f"Input source : {input_base}")
+    logging.info(f"Grid store   : {grid_uri}")
 
+    fs_in, fs_in_sync = create_s3_filesystems(cfg.input.s3_endpoint)
 
+    date_prefixes = resolve_date_prefixes(cfg.input, fs_in_sync)
+    logging.info(f"Date prefixes : {date_prefixes}")
 
-    # TODO prepare to load in all features we want from globals
-    model_feature_channels = [c.strip() for c in cfg.features.model_data_feature_channels if c.strip()]
-    computed_feature_channels = [c.strip() for c in cfg.features.compute_features_channels if c.strip()]
+    feature_channels = [c.strip() for c in cfg.features.feature_channels if c.strip()]
+    logging.info(f"Feature Channels to load   : {feature_channels}")
+
+    verify_feature_channels(cfg.input, date_prefixes[0], feature_channels, fs_in, fs_in_sync)
+    logging.info(f"All requested feature channels present in {date_prefixes[0]}")
+
+    verify_required_channels(cfg.input, date_prefixes[0], fs_in, fs_in_sync)
 
     # Set concurrency for zarr ds writes
     zarr.config.set({'async.concurrency':  cfg.runtime.zarr_async_concurrency})
     # set up dask distributed client
     dask_client = Client()  # default: uses all local cores
     logging.info(f"Dask Client {dask_client}")
-
-
-    # todo dates in config
-    # iter_range = calculate_iterations_for_llc(cfg)
-    # logging.info(f"Processing: {iter_range} time snapshots")
 
     # Set up meta and zarr data writers
     fs, fs_synch = create_s3_filesystems(cfg.output.s3_endpoint)
@@ -185,26 +201,23 @@ def main():
         cfg.run.run_id,
         cfg.output.dataset_name,
         fs=fs,
-        num_channels=len(model_feature_channels) + len(computed_feature_channels) + 1, # +1 for log_gradb
+        num_channels=len(feature_channels),
         down_sample_res=cfg.output.down_sample_res,
     )
 
-    logging.info(f"Zarr cutout_dataset_creation created.")
+    logging.info(f"Zarr dataset created.")
 
-    # todo get these from globals
-    # Get our grid and static masks once ever. These never change.
-    ds_grid, land_face_mask = set_up_grid_data_and_masks(cfg)
-    grid = xgcm.Grid(ds_grid, periodic=False)
+    ds_grid, land_face_mask = set_up_grid_data_and_masks(cfg, fs_in)
 
-    # todo for date in globals
-    for it in tqdm.tqdm(iter_range):
-        # grab raw data for this iteration
-        ds = get_raw_data.get_remote_llc_data(endpoint_url, it, LLC_FACES)
-        ds_merge = preproc_llc_core_data.process_llc4320(ds, ds_grid)
-        logging.info(f"Data loaded for iteration: {it}")
 
-        # now process this iteration of data
-        process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, grid, land_face_mask, model_feature_channels, computed_feature_channels)
+    for snapshot in tqdm.tqdm(date_prefixes):
+
+        ds = load_snapshot_features(cfg.input, snapshot, feature_channels, fs_in, fs_in_sync)
+        ds_merge = xr.merge([ds, ds_grid])
+
+        print(ds_merge.dims)
+
+        process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels)
 
         ds_merge = None
         del ds_merge

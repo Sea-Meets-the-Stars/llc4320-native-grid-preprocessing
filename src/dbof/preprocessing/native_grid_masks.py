@@ -2,54 +2,57 @@ import xarray as xr
 
 import dbof.preprocessing.halo_mask as halo_mask
 
-def generate_static_land_face_masks_for_sampling(ds_grid, target_km_res):
+# def generate_static_land_face_masks_for_sampling(ds_grid, target_km_res):
+#     """
+#     Construct a composite sampling mask for the LLC native grid. These are the unchanging masks, so not ice.
+#
+#     The mask excludes:
+#       - land points (via hFacC)
+#       - grid-face perimeter cells
+#     and applies a halo buffer based on the target physical resolution to land and face perimeter cells.
+#
+#     Parameters
+#     ----------
+#     ds_grid : xarray.Dataset
+#         LLC grid cutout_dataset_creation containing metric terms.
+#     target_km_res : float
+#         Target physical resolution (km) used to define halo width.
+#
+#     Returns
+#     -------
+#     ndarray of bool
+#         Boolean halo mask of the same shape as ``mask`` where ``True``
+#         indicates points retained after applying the halo criterion.
+#     """
+#
+#     halo_km = target_km_res  # buffer to account for mean usage
+#
+#     DXC = ds_grid["dxC"].persist()
+#     DYC = ds_grid["dyC"].persist()
+#
+#     halo_land_mask = generate_static_land_mask_for_sampling(ds_grid, target_km_res, DXC=DXC, DYC=DYC)
+#     halo_faces_perimeter_mask = generate_static_face_mask_for_sampling(ds_grid, target_km_res, DXC=DXC, DYC=DYC)
+#
+#     merged_mask = halo_land_mask & halo_faces_perimeter_mask
+#
+#     return merged_mask
+
+
+def generate_halo_land_mask(ds_grid, target_km_res, DXC=None, DYC=None, stitched=True):
     """
-    Construct a composite sampling mask for the LLC native grid. These are the unchanging masks, so not ice.
-
-    The mask excludes:
-      - land points (via hFacC)
-      - grid-face perimeter cells
-    and applies a halo buffer based on the target physical resolution to land and face perimeter cells.
-
-    Parameters
-    ----------
-    ds_grid : xarray.Dataset
-        LLC grid cutout_dataset_creation containing metric terms.
-    target_km_res : float
-        Target physical resolution (km) used to define halo width.
-
-    Returns
-    -------
-    ndarray of bool
-        Boolean halo mask of the same shape as ``mask`` where ``True``
-        indicates points retained after applying the halo criterion.
-    """
-
-    halo_km = target_km_res  # buffer to account for mean usage
-
-    DXC = ds_grid["dxC"].persist()
-    DYC = ds_grid["dyC"].persist()
-
-    halo_land_mask = generate_static_land_mask_for_sampling(ds_grid, target_km_res, DXC=DXC, DYC=DYC)
-    halo_faces_perimeter_mask = generate_static_face_mask_for_sampling(ds_grid, target_km_res, DXC=DXC, DYC=DYC)
-
-    merged_mask = halo_land_mask & halo_faces_perimeter_mask
-
-    return merged_mask
-
-
-def generate_static_land_mask_for_sampling(ds_grid, target_km_res, DXC=None, DYC=None):
-    """
-    Construct a the static *land-only* sampling mask for the LLC native grid.
+    Construct a static *land-only* sampling mask for the LLC grid.
 
     Excludes land points (via hFacC) and applies a halo buffer based on the 
         target physical resolution to land perimeter cells.
 
-    Notes
+    Parameters
     ----------
-    This is one component of the overall sampling mask, which also includes a face perimeter mask. 
-    See ``generate_static_land_face_masks_for_sampling`` for full mask conventions (e.g., ``True`` means retained).
-    
+    ds_grid : xarray.Dataset
+    target_km_res : int
+    DXC : xarray.DataArray
+    DYC : xarray.DataArray
+    stitched : bool
+    stitched is telling if the grid is in the native coords or has been stitched to a flat array.
     """
 
     halo_km = target_km_res  # buffer to account for mean usage
@@ -58,13 +61,20 @@ def generate_static_land_mask_for_sampling(ds_grid, target_km_res, DXC=None, DYC
     DYC = ds_grid["dyC"].persist() if DYC is None else DYC
     land_mask = (ds_grid.hFacC == 0).persist()
 
-    halo_land_mask = halo_mask.llc_halo_mask(
-        mask=land_mask,
-        dxC=DXC,
-        dyC=DYC,
-        halo_km=halo_km
-    )
-
+    if stitched:
+        halo_land_mask = halo_mask.stitched_halo_mask(
+            mask=land_mask,
+            dxC=DXC,
+            dyC=DYC,
+            halo_km=halo_km
+        )
+    else :
+        halo_land_mask = halo_mask.llc_native_grid_halo_mask(
+            mask=land_mask,
+            dxC=DXC,
+            dyC=DYC,
+            halo_km=halo_km
+        )
     return halo_land_mask
 
 

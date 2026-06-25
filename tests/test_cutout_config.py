@@ -58,3 +58,31 @@ def test_missing_input_section_raises(tmp_path):
     cfg_file.write_text("run:\n  run_id: x\n")
     with pytest.raises(ValueError, match="input.folder"):
         load_config(str(cfg_file))
+
+
+def test_feature_channels_loaded_from_top_level():
+    """Top-level `feature_channels` is read into FeaturesConfig."""
+    cfg = load_config(str(EXAMPLE_CONFIG))
+    assert cfg.features.feature_channels == [
+        "Eta", "Salt", "Theta", "U", "V", "W", "gradb2", "SIarea",
+    ]
+
+
+def test_feature_channels_default_when_omitted(tmp_path):
+    """Omitting `feature_channels` falls back to the default channel list."""
+    cfg_file = tmp_path / "no_features.yaml"
+    cfg_file.write_text("run:\n  run_id: x\ninput:\n  folder: surface_fields/run\n")
+    cfg = load_config(str(cfg_file))
+    assert cfg.features.feature_channels == ["Eta", "Salt", "Theta", "U", "V", "W", "gradb2", "SIarea"]
+
+
+def test_missing_required_channel_raises(tmp_path):
+    """A config whose feature_channels omits a required channel fails."""
+    cfg_file = tmp_path / "missing_required.yaml"
+    cfg_file.write_text(
+        "run:\n  run_id: x\n"
+        "input:\n  folder: surface_fields/run\n"
+        "feature_channels:\n  - Theta\n  - gradb2\n"  # missing SIarea
+    )
+    with pytest.raises(ValueError, match="SIarea"):
+        load_config(str(cfg_file))

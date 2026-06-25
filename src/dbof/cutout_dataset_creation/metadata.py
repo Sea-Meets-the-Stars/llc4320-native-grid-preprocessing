@@ -26,9 +26,6 @@ class MetadataWriter:
 
         self.lock = threading.Lock()
 
-        # if not os.path.exists(meda_data_file_path):
-        #     pd.DataFrame(columns=metadata_cols).to_parquet(meda_data_file_path)
-
     def add(self, meta: dict):
         # add one record
         with self.lock:
@@ -46,11 +43,6 @@ class MetadataWriter:
 
         fname = f"part-{uuid.uuid4().hex}.parquet"
         full_path = f"{self.path.rstrip('/')}/{fname}"
-
-
-        # if self.fs.exists(self.path):
-        #     old = pd.read_parquet(self.path, filesystem=self.fs)
-        #     df = pd.concat([old, df], ignore_index=True)
 
         df.to_parquet(
             full_path,
