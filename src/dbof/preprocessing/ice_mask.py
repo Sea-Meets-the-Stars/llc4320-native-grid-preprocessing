@@ -52,7 +52,6 @@ def load_siarea_mask(
     fs,
     dataset_name: str = "icearea.zarr",
     channel_name: str = "SIarea",
-    timestep: int = 0,
 ) -> np.ndarray:
     """Load SIarea from the icearea zarr store and return an ice mask.
 
@@ -67,8 +66,6 @@ def load_siarea_mask(
         Zarr store name for the sea-ice data (default: ``icearea.zarr``).
     channel_name :
         Channel within the store (default: ``SIarea``).
-    timestep :
-        Timestep index within the store (default: 0).
 
     Returns
     -------
@@ -84,13 +81,13 @@ def load_siarea_mask(
         fs=fs,
         date_prefix=date_prefix,
     )
-    siarea = reader.get_channel_snapshot(timestep, channel_name).astype(np.float32)
+    siarea = reader.get_channel_snapshot(channel_name).astype(np.float32)
     mask = siarea > 0
     n_masked = int(np.sum(mask))
     n_total = mask.size
     log.info(
-        "Ice mask from %s (t=%d): %d / %d points masked (%.1f%%)",
-        dataset_name, timestep, n_masked, n_total, 100.0 * n_masked / n_total,
+        "Ice mask from %s: %d / %d points masked (%.1f%%)",
+        dataset_name, n_masked, n_total, 100.0 * n_masked / n_total,
     )
     return mask
 
