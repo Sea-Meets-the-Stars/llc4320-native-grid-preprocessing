@@ -50,30 +50,27 @@ RUN_ID = "test_run00"
 class FakeSnapshotReader:
     """Stand-in for ``GlobalZarrDatasetReader``.
 
-    Holds an in-memory ``(T, C, H, W)`` array.  Channel ``c`` of timestep
-    ``t`` is filled with the constant ``t * 100 + c`` so every cell is
-    uniquely identifiable in assertions.
+    Holds an in-memory ``(C, H, W)`` array (single snapshot, no time axis).
+    Channel ``c`` is filled with the constant ``c`` so every cell is uniquely
+    identifiable in assertions.
     """
 
     def __init__(self, channel_names=CHANNELS, rectangular_shape=SHAPE,
-                 n_timesteps=1, **_ignored):
+                 iteration=42, **_ignored):
         self.channel_names = list(channel_names)
         self.rectangular_shape = tuple(rectangular_shape)
+        self.iteration = iteration
         h, w = self.rectangular_shape
         c = len(self.channel_names)
-        data = np.empty((n_timesteps, c, h, w), dtype=np.float32)
-        for t in range(n_timesteps):
-            for ci in range(c):
-                data[t, ci] = float(t * 100 + ci)
+        data = np.empty((c, h, w), dtype=np.float32)
+        for ci in range(c):
+            data[ci] = float(ci)
         self._data = data
 
-    def __len__(self):
-        return self._data.shape[0]
-
-    def get_channel_snapshot(self, t, channel):
+    def get_channel_snapshot(self, channel):
         if isinstance(channel, str):
             channel = self.channel_names.index(channel)
-        return self._data[t, channel]
+        return self._data[channel]
 
 
 class FakeGridReader:
@@ -279,3 +276,75 @@ def test_main_grid_dispatch(tmp_path, fake_grid_reader, monkeypatch):
         assert "Depth" in ds.data_vars
         assert "XC" not in ds.data_vars
         assert np.allclose(ds["Depth"].values, 30.0)
+
+
+# ---------------------------------------------------------------------------
+# Real writer -> reader round-trip (3-D, no time axis)
+#
+# Exercises the actual GlobalZarrDataset writer + GlobalZarrDatasetReader on an
+# in-memory fsspec filesystem.  Needs zarr v3 (``zarr.storage.FsspecStore``),
+# so it is skipped on environments with an older zarr (e.g. zarr 2.x).
+# ---------------------------------------------------------------------------
+
+import fsspec        # noqa: E402
+import zarr          # noqa: E402
+
+_HAS_FSSPEC_STORE = hasattr(getattr(zarr, "storage", None), "FsspecStore")
+
+
+@pytest.mark.skipif(not _HAS_FSSPEC_STORE,
+                    reason="needs zarr v3 (zarr.storage.FsspecStore)")
+def test_writer_reader_roundtrip_3d():
+    from dbof.global_dataset_creation.zarr_dataset_global import (
+        GlobalZarrDataset, GlobalZarrDatasetReader,
+    )
+
+    fs = fsspec.filesystem("memory")
+    fs.store.clear()
+    fs.pseudo_dirs.clear()
+
+    chans = ["A", "B", "C"]
+    h, w = 4, 5
+    writer = GlobalZarrDataset(
+        "b", "f", "run", "d.zarr", fs=fs,
+        channel_names=chans, rectangular_shape=(h, w),
+        date_prefix="20121109_120000",
+    )
+    data = np.stack(
+        [np.full((h, w), i, dtype=np.float32) for i in range(len(chans))]
+    )  # channel i filled with value i
+    writer.write_snapshot(data, iteration=7)
+
+    reader = GlobalZarrDatasetReader(
+        "b", "f", "run", "d.zarr", fs=fs, date_prefix="20121109_120000",
+    )
+    # Storage is 3-D: (C, H, W); no time axis.
+    assert reader.shape == (len(chans), h, w)
+    assert reader.n_channels == len(chans)
+    assert reader.channel_names == chans
+    assert reader.rectangular_shape == (h, w)
+    assert reader.iteration == 7
+    # Accessors take no t.
+    assert np.allclose(reader.get_channel_snapshot("B"), 1.0)
+    assert np.allclose(reader.get_snapshot()[2], 2.0)
+
+
+@pytest.mark.skipif(not _HAS_FSSPEC_STORE,
+                    reason="needs zarr v3 (zarr.storage.FsspecStore)")
+def test_incomplete_store_has_no_iteration_marker():
+    """A store created but never written carries no 'iteration' attr."""
+    from dbof.global_dataset_creation.zarr_dataset_global import GlobalZarrDataset
+    import dbof.global_dataset_creation.check_existence as ce
+
+    fs = fsspec.filesystem("memory")
+    fs.store.clear()
+    fs.pseudo_dirs.clear()
+
+    chans = ["A", "B"]
+    store_path = "s3://b/f/run/20121109_120000/d.zarr"
+    GlobalZarrDataset(  # construct only -> array exists, no write
+        "b", "f", "run", "d.zarr", fs=fs,
+        channel_names=chans, rectangular_shape=(3, 3),
+        date_prefix="20121109_120000",
+    )
+    assert ce.plan_zarr(fs, store_path, chans) == ce.ZARR_INCOMPLETE
