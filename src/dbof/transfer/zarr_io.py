@@ -9,8 +9,9 @@ This module spans the transfer-specific IO machinery:
   the native ``(k, face, j, i)`` LLC4320 layout, read-back verification, and the
   variable dispatcher.
 
-Both :mod:`dbof.transfer.all_data` and :mod:`dbof.transfer.chunks` import from
-here so there is a single implementation of the read/write/verify logic.
+The unified pipeline (:mod:`dbof.transfer.pipeline`) imports from here so there
+is a single implementation of the read/write/verify logic for both spatial
+extents.
 
 The writers are extent-agnostic: each sizes its target array from the
 *dimension sizes of the dataset it is handed* and iterates ``tile_j x tile_i``
@@ -22,7 +23,7 @@ S3 filesystem construction is reused from
 :func:`dbof.io.filesystems.create_s3_filesystems` rather than re-implemented.
 Date/iteration conversions live in
 :mod:`dbof.llc4320_ingestion.date_iterations`; the all-data store-naming
-convention lives in :mod:`dbof.transfer.all_data`.
+convention lives in :mod:`dbof.transfer.pipeline`.
 """
 
 # stdlib
@@ -444,6 +445,56 @@ def transfer_variables(ds, variables, root, tile_j, tile_i,
             write_1d_vertical(root, ds, da, time_idx)
         else:
             raise ValueError(f"Unhandled layout kind '{kind}' for variable {var}")
+
+
+def write_store(ds, variables, *, s3_url, s3_endpoint, tile_j, tile_i,
+                init_store=False, time_idx=None, attrs=None,
+                skip_existing=False, label="transfer", detail=""):
+    """Write one group of variables to a single S3 zarr store.
+
+    This bundles the open-store -> stamp-attrs -> write-variables -> log
+    sequence that every transfer performs.  Both modes call it: the all-data
+    mode for its static grid store and each per-date store, the chunks mode for
+    its grid store and each per-timestamp store.  Mode-specific concerns
+    (which dataset, destination URL, tile size, attrs, label) are passed in.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Source to read variables from (full dataset, or a chunk-sliced one).
+    variables : list of str
+        Variable names to write.
+    s3_url : str
+        Fully built ``s3://...`` destination for this store.
+    s3_endpoint : str
+        S3 endpoint URL.
+    tile_j, tile_i : int
+        Spatial tile sizes for zarr chunking.
+    init_store : bool
+        If ``True``, wipe/re-initialise the store before writing.
+    time_idx : int or None
+        Time index for time-varying variables; ``None`` for static variables.
+    attrs : dict, optional
+        Root attributes to stamp on the store.
+    skip_existing : bool
+        Skip variables already present in the target store.
+    label : str
+        Human-readable label for log messages (e.g. ``"Static grid transfer"``).
+    detail : str
+        Optional extra detail appended to the header log line (e.g. the date /
+        iteration / time index for a time-varying store).
+    """
+    header = f"--- {label}: {len(variables)} variables -> {s3_url} ---"
+    if detail:
+        header += f"\n    {detail}"
+    logging.info(header)
+
+    root = open_zarr_store(s3_url, s3_endpoint, init_store)
+    if attrs:
+        safe_set_attrs(root, attrs)
+    transfer_variables(ds, variables, root, tile_j, tile_i,
+                       time_idx=time_idx, skip_existing=skip_existing)
+    logging.info(f"{label} complete.")
 
 
 def validate_variables_present(ds, variables) -> None:
