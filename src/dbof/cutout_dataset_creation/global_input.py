@@ -98,7 +98,6 @@ def load_snapshot_features(input_cfg: config.InputConfig, date_prefix: str,
     missing = [c for c in feature_channels if c not in readers]
     if missing:
         raise ValueError(f"Requested feature_channels not found in {date_prefix}: {missing}")
-    # the global pipeline removes its redundant time axis.
     data_vars = {
         ch: (("j", "i"), readers[ch].get_channel_snapshot(ch))
         for ch in feature_channels
