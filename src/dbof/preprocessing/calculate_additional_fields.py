@@ -67,6 +67,66 @@ def compute_velocity_jacobian(ds_merge, grid):
     return VelocityJacobian(du_dx, du_dy, dv_dx, dv_dy)
 
 
+# ---------------------------------------------------------------------------
+# Native vector fields (geographic, tracer-collocated)
+# ---------------------------------------------------------------------------
+
+def geographic_velocity(ds_merge, grid):
+    """Horizontal velocity rotated to geographic (east/north) components.
+
+    The native ``U``/``V`` are stored on the staggered model grid and on
+    model-relative axes; this returns them interpolated to tracer points and
+    rotated to true east/north via the grid ``CS``/``SN`` coefficients.  Use
+    when saving / analysing raw velocity for a chunk or tile, where the global
+    face-stitching that would otherwise perform this rotation is not run.
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Dataset containing ``U``, ``V`` and rotation coefficients ``CS``/``SN``.
+    grid : xgcm.Grid
+        Grid used to interpolate the staggered components to tracer points.
+
+    Returns
+    -------
+    u_east, v_north : xarray.DataArray
+        Eastward / northward velocity [m s⁻¹] on tracer points.
+    """
+    u_east, v_north = ng.rotate_vector_to_geographic(
+        ds_merge.U, ds_merge.V, ds_merge, grid,
+    )
+    u_east.name = "u_east"
+    u_east.attrs.update({"long_name": "eastward velocity", "units": "m s-1"})
+    v_north.name = "v_north"
+    v_north.attrs.update({"long_name": "northward velocity", "units": "m s-1"})
+    return u_east, v_north
+
+
+def geographic_wind_stress(ds_merge, grid):
+    """Wind stress rotated to geographic (east/north) components on tracer points.
+
+    Parameters
+    ----------
+    ds_merge : xarray.Dataset
+        Dataset containing ``oceTAUX``, ``oceTAUY`` and ``CS``/``SN``.
+    grid : xgcm.Grid
+        Grid used to interpolate the staggered components to tracer points.
+
+    Returns
+    -------
+    tau_east, tau_north : xarray.DataArray
+        Eastward / northward wind stress [N m⁻²] on tracer points.
+    """
+    tau_east, tau_north = ng.rotate_vector_to_geographic(
+        ds_merge.oceTAUX, ds_merge.oceTAUY, ds_merge, grid,
+    )
+    tau_east.name = "tau_east"
+    tau_east.attrs.update({"long_name": "eastward wind stress", "units": "N m-2"})
+    tau_north.name = "tau_north"
+    tau_north.attrs.update({"long_name": "northward wind stress", "units": "N m-2"})
+    return tau_east, tau_north
+
+
 def compute_buoyancy_gradients(ds_merge, grid):
     """Compute zonal and meridional buoyancy gradients on the native LLC grid.
 

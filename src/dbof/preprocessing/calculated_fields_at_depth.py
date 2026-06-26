@@ -291,7 +291,77 @@ def buoyancy_field_3d(ds_merge):
 
 
 # ===========================================================================
-#  GROUP 2: SHEAR & DIMENSIONLESS NUMBERS
+#  NATIVE VECTOR FIELDS (geographic, tracer-collocated)
+# ===========================================================================
+
+def geographic_velocity_3d(ds_merge, grid):
+    """Lazy 3D horizontal velocity rotated to geographic (east/north) components.
+
+    The native ``U``/``V`` are stored on the staggered model grid and on
+    model-relative axes; this returns them interpolated to tracer points and
+    rotated to true east/north via the grid ``CS``/``SN`` coefficients.  Use
+    this when saving / analysing the raw velocity for a chunk or tile, where
+    the global face-stitching (which would otherwise perform this rotation) is
+    not run.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``U``, ``V`` and rotation coefficients
+        ``CS``/``SN``.
+    grid : xgcm.Grid
+        Grid used to interpolate the staggered components to tracer points.
+
+    Returns
+    -------
+    u_east : xr.DataArray
+        Eastward velocity [m s⁻¹] on tracer points.
+    v_north : xr.DataArray
+        Northward velocity [m s⁻¹] on tracer points.
+    """
+    u_east, v_north = ng.rotate_vector_to_geographic(
+        ds_merge.U, ds_merge.V, ds_merge, grid,
+    )
+    u_east.name = "u_east"
+    u_east.attrs.update({"long_name": "eastward velocity", "units": "m s-1"})
+    v_north.name = "v_north"
+    v_north.attrs.update({"long_name": "northward velocity", "units": "m s-1"})
+    return u_east, v_north
+
+
+def geographic_wind_stress(ds_merge, grid):
+    """Lazy geographic wind stress (eastward, northward) on tracer points.
+
+    Public field wrapper around the same interpolate-then-rotate step used by
+    the Ekman diagnostics; rotates the native ``oceTAUX``/``oceTAUY`` to true
+    east/north for a chunk or tile.
+
+    Parameters
+    ----------
+    ds_merge : xr.Dataset
+        Merged dataset containing ``oceTAUX``, ``oceTAUY`` and ``CS``/``SN``.
+    grid : xgcm.Grid
+        Grid used to interpolate the staggered components to tracer points.
+
+    Returns
+    -------
+    tau_east : xr.DataArray
+        Eastward wind stress [N m⁻²] on tracer points.
+    tau_north : xr.DataArray
+        Northward wind stress [N m⁻²] on tracer points.
+    """
+    tau_east, tau_north = ng.rotate_vector_to_geographic(
+        ds_merge.oceTAUX, ds_merge.oceTAUY, ds_merge, grid,
+    )
+    tau_east.name = "tau_east"
+    tau_east.attrs.update({"long_name": "eastward wind stress", "units": "N m-2"})
+    tau_north.name = "tau_north"
+    tau_north.attrs.update({"long_name": "northward wind stress", "units": "N m-2"})
+    return tau_east, tau_north
+
+
+# ===========================================================================
+#  GROUP 3: SHEAR & DIMENSIONLESS NUMBERS
 # ===========================================================================
 
 def vertical_shear_components_3d(ds_merge, grid):
@@ -315,11 +385,9 @@ def vertical_shear_components_3d(ds_merge, grid):
     dUdz = _vertical_derivative(ds_merge.U, ds_merge)
     dVdz = _vertical_derivative(ds_merge.V, ds_merge)
 
-    uz_model = grid.interp(dUdz, 'X', boundary='fill')
-    vz_model = grid.interp(dVdz, 'Y', boundary='fill')
-
-    uz = uz_model * ds_merge['CS'] - vz_model * ds_merge['SN']
-    vz = uz_model * ds_merge['SN'] + vz_model * ds_merge['CS']
+    # Interpolate the staggered shear components to tracer points and rotate
+    # into the geographic (east/north) basis.
+    uz, vz = ng.rotate_vector_to_geographic(dUdz, dVdz, ds_merge, grid)
     return uz, vz
 
 
@@ -526,11 +594,9 @@ def _wind_stress_geographic(ds_merge, grid):
         Meridional (northward) wind stress component [N m⁻²] on tracer
         points.
     """
-    taux_c = grid.interp(ds_merge.oceTAUX, 'X', boundary='fill')
-    tauy_c = grid.interp(ds_merge.oceTAUY, 'Y', boundary='fill')
-    tau_lambda = taux_c * ds_merge['CS'] - tauy_c * ds_merge['SN']
-    tau_phi = taux_c * ds_merge['SN'] + tauy_c * ds_merge['CS']
-    return tau_lambda, tau_phi
+    return ng.rotate_vector_to_geographic(
+        ds_merge.oceTAUX, ds_merge.oceTAUY, ds_merge, grid,
+    )
 
 
 def ekman_transport_velocity(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
