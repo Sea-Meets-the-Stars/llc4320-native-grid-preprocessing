@@ -1,0 +1,80 @@
+run_id: cutout_test_data_v1
+pipeline: SURF
+last_updated: '2026-06-26T20:02:25.399486+00:00'
+date_iterations:
+- '2012-02-09 12:00:00'
+- '2012-08-01 12:00:00'
+run:
+  run_id: cutout_test_data_v1
+  log_dir: logs/
+data:
+  endpoint_url: https://mghp.osn.xsede.org
+  date_iterations:
+  - '2012-02-09 12:00:00'
+  - '2012-08-01 12:00:00'
+  k_levels: null
+output:
+  s3_endpoint: https://s3-west.nrp-nautilus.io
+  bucket: dbof/
+  folder: test_data_for_cutouts/
+  dataset_name: global.zarr
+runtime:
+  zarr_async_concurrency: 8
+  dask_scheduler: distributed
+  dask_n_workers: 4
+  dask_threads_per_worker: 4
+  dask_memory_limit: null
+subsets:
+  icearea:
+    last_run: '2026-06-26T20:02:25.399555+00:00'
+    git_commit: 0e3d3e3
+    depth_suffixes: null
+    channels:
+    - SIarea
+    clobber: false
+  native_fields:
+    last_run: '2026-06-26T20:02:25.402642+00:00'
+    git_commit: 0e3d3e3
+    depth_suffixes: null
+    channels:
+    - Theta
+    - Salt
+    - Eta
+    - U
+    - V
+    - W
+    clobber: false
+  surface_wind:
+    last_run: '2026-06-26T20:02:25.405676+00:00'
+    git_commit: 0e3d3e3
+    depth_suffixes: null
+    channels:
+    - oceTAUX
+    - oceTAUY
+    clobber: false
+  frontal_structure:
+    last_run: '2026-06-26T20:02:25.408237+00:00'
+    git_commit: 0e3d3e3
+    depth_suffixes: null
+    channels:
+    - gradb2
+    - gradsalt2
+    - gradtheta2
+    - gradeta2
+    - gradrho2
+    - turner_angle
+    clobber: false
+  kinematic:
+    last_run: '2026-06-26T20:02:25.410715+00:00'
+    git_commit: 0e3d3e3
+    depth_suffixes: null
+    channels:
+    - relative_vorticity
+    - strain_n
+    - strain_s
+    - strain_mag
+    - divergence
+    - coriolis_f
+    - rossby_number
+    - okubo_weiss
+    clobber: false
