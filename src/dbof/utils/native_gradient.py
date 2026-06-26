@@ -1,3 +1,56 @@
+def rotate_vector_to_geographic(u_x, v_y, ds_merge, grid, *, interpolate=True):
+    """Rotate a model-grid vector into geographic (east/north) components.
+
+    The LLC grid stores horizontal vector components on the staggered C-grid
+    (``u`` on the west cell face / ``i_g``, ``v`` on the south face / ``j_g``)
+    and on model-relative axes that are rotated relative to true east/north.
+    This helper performs the two steps needed to make such a vector physically
+    interpretable on a single native face (chunk, tile, or global):
+
+    1. interpolate the components to the tracer (cell-centre) points, and
+    2. rotate from the model ``(x, y)`` basis to the geographic
+       ``(east, north)`` basis using the grid rotation coefficients
+       ``CS``/``SN``::
+
+           u_east  = u*CS - v*SN
+           v_north = u*SN + v*CS
+
+    This is the single source of the interpolate-then-rotate operation that the
+    Jacobian, the vertical-shear components, and the geographic wind-stress all
+    perform.  No face stitching is involved, so it is valid for an isolated
+    chunk/tile (subject to one-cell edge effects from ``boundary='fill'``).
+
+    Parameters
+    ----------
+    u_x : xarray.DataArray
+        Model x-direction component (e.g. ``U``, ``oceTAUX``).  On the staggered
+        point when ``interpolate=True``; already at tracer points otherwise.
+    v_y : xarray.DataArray
+        Model y-direction component (e.g. ``V``, ``oceTAUY``).
+    ds_merge : xarray.Dataset
+        Dataset providing the rotation coefficients ``CS`` and ``SN``.
+    grid : xgcm.Grid
+        Grid used to interpolate staggered components to tracer points.
+    interpolate : bool, default True
+        If ``True``, interpolate the components to tracer points before
+        rotating.  Set ``False`` when the inputs are already cell-centred.
+
+    Returns
+    -------
+    u_east : xarray.DataArray
+        Eastward (zonal) component on tracer points.
+    v_north : xarray.DataArray
+        Northward (meridional) component on tracer points.
+    """
+    if interpolate:
+        u_x = grid.interp(u_x, 'X', boundary='fill')
+        v_y = grid.interp(v_y, 'Y', boundary='fill')
+
+    u_east = u_x * ds_merge['CS'] - v_y * ds_merge['SN']
+    v_north = u_x * ds_merge['SN'] + v_y * ds_merge['CS']
+    return u_east, v_north
+
+
 def calculate_jacobian(u_x, v_y, ds_merge, grid):
     """
        Compute zonal and meridional spatial derivatives of horizontal velocity components on a curvilinear grid.
@@ -25,15 +78,9 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
        dv_phi_dphi : xarray.DataArray
            Meridional derivative of the meridional velocity component.
        """
-    # Move the values to tracer position
-    vec_u_to_ij = grid.interp(u_x, 'X', boundary='fill')
-    vec_v_to_ij = grid.interp(v_y, 'Y', boundary='fill')
-
-    # rotate the interpolated vectors to the zonal (lambda) and meridional (phi) basis (basically just from model direction to real)
-    # Add the zonal components of the 'X' and 'Y' vectors
-    u_lambda = vec_u_to_ij * ds_merge['CS'] - vec_v_to_ij * ds_merge['SN']
-    # Add the meridional components
-    v_phi = vec_u_to_ij * ds_merge['SN'] + vec_v_to_ij * ds_merge['CS']
+    # Move the values to tracer points and rotate the model (x, y) components
+    # into the geographic zonal (lambda) / meridional (phi) basis.
+    u_lambda, v_phi = rotate_vector_to_geographic(u_x, v_y, ds_merge, grid)
 
     # Calculate the zonal and meridional gradients of the zonal field ----------------
 
