@@ -1,5 +1,5 @@
 run:
-  run_id: "year_4x150"
+  run_id: "cutout_test_data_v1"
   log_dir: "../test_logs/"
 
 # Source: generate-global output consumed as cutout input.
@@ -9,9 +9,10 @@ run:
 input:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "surface_fields/global_SURF_test01"   # path to the dir holding the date_prefix snapshots
+  folder: "test_data_for_cutouts/cutout_test_data_v1"   # path to the dir holding the date_prefix snapshots
   date_prefixes:                                # explicit timestamps to process (YYYYMMDD_HHMMSS)
-    - "20121109_120000"
+    - "20120209_120000"
+    - "20120801_120000"
   grid_access:                                  # rectangular llc4320 grid store
     s3_endpoint: "https://s3-west.nrp-nautilus.io"
     bucket: "dbof"

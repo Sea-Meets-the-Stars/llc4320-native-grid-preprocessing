@@ -16,7 +16,7 @@ from dbof.cutout_dataset_creation.global_input import (
 )
 
 EXAMPLE_CONFIG = Path(__file__).resolve().parents[1] / "configs/cutouts/run/run_from_globals_example.yaml"
-DATE = "20121109_120000"
+DATE = "20120209_120000"
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "output"
 
 
@@ -50,8 +50,9 @@ def test_available_channels_contains_known_fields(example_input):
 def test_verify_present_and_absent(example_input):
     cfg, fs, fs_sync = example_input
     verify_feature_channels(cfg.input, DATE, ["Theta", "gradb2"], fs, fs_sync)  # present -> no raise
-    with pytest.raises(ValueError, match="relative_vorticity"):
-        verify_feature_channels(cfg.input, DATE, ["relative_vorticity"], fs, fs_sync)
+    # frontogenesis subset was not generated for this run, so its channels are absent.
+    with pytest.raises(ValueError, match="frontogenesis_tendency"):
+        verify_feature_channels(cfg.input, DATE, ["frontogenesis_tendency"], fs, fs_sync)
 
 
 def test_land_mask_renders(example_input):

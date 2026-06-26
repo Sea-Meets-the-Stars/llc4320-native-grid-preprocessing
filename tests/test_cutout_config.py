@@ -23,10 +23,10 @@ def test_example_config_loads():
     assert isinstance(cfg.input, InputConfig)
 
     # Source path + explicit timestamps as written in the example.
-    assert cfg.input.folder == "surface_fields/global_SURF_test01"
+    assert cfg.input.folder == "test_data_for_cutouts/cutout_test_data_v1"
     assert cfg.input.bucket == "dbof"
     assert cfg.input.s3_endpoint == "https://s3-west.nrp-nautilus.io"
-    assert cfg.input.date_prefixes == ["20121109_120000"]
+    assert cfg.input.date_prefixes == ["20120209_120000", "20120801_120000"]
 
     # grid_access parsed into the nested dataclass (example matches defaults).
     assert isinstance(cfg.input.grid_access, GridAccessConfig)
