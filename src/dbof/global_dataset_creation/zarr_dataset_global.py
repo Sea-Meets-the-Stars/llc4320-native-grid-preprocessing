@@ -4,26 +4,28 @@ zarr_dataset_global.py
 Zarr writer/reader for global LLC4320 snapshots in rectangular lat/lon format.
 
 This writer:
-  - Stores full global snapshots in rectangular lat/lon format
-  - Writes sequentially, one timestep at a time
-  - Uses the LLC4320 iteration number as the natural time coordinate
-  - Stores compact grid shape and channel names as Zarr attributes
+  - Stores one full global snapshot per store in rectangular lat/lon format
+  - The date/timestep is encoded in the store path (``…/{date_prefix}/…``),
+    so a store holds exactly one snapshot and carries no time dimension
+  - Records the LLC4320 iteration number as a root attribute
+  - Stores rectangular grid shape and channel names as Zarr attributes
 
 Storage layout
 --------------
-  data  : float32, shape (T, C, rectangular_h, rectangular_w)  — all channels, all timesteps
-  time  : int64,   shape (T,)                           — LLC4320 iteration numbers
+  data  : float32, shape (C, rectangular_h, rectangular_w)  — all channels, one snapshot
 
 Root group attributes
 ---------------------
-  channel_names : list[str]        — ordered channel labels, matching axis C
-  compact_shape : [rectangular_h, rectangular_w]  — 2D shape of each rectangular global field
+  channel_names     : list[str]       — ordered channel labels, matching axis C
+  rectangular_shape : [rectangular_h, rectangular_w]  — 2D shape of each global field
+  iteration         : int             — LLC4320 iteration number for this snapshot.
+                                        Written *last* by ``write_snapshot``, so its
+                                        presence marks a fully-written store.
 
 Chunk strategy
 --------------
-  data chunks are (1, 1, rectangular_h, rectangular_w): one channel-slice of one timestep
-  per chunk. This matches the expected access pattern (reading one full global
-  field at a time).
+  data chunks are (1, rectangular_h, rectangular_w): one channel field per chunk.
+  This matches the expected access pattern (reading one full global field at a time).
 
 Notes on Dask / .compute()
 ---------------------------
@@ -112,17 +114,17 @@ class GlobalZarrDataset:
         self.rectangular_h, self.rectangular_w = rectangular_shape
         self.rectangular_shape = (self.rectangular_h, self.rectangular_w)
 
-        # ---- create arrays once on first run; idempotent on resume ----
+        # ---- create the data array once; idempotent on resume/clobber ----
 
         if "data" in self.root:
-            # Resuming into an existing store: the channel axis (C) is fixed
-            # at creation, so the requested channel list MUST match what the
-            # store was built with.  Overwriting channel_names attrs against
-            # a mismatched data array would silently corrupt the store, so
-            # refuse loudly instead.  (Deletion is deliberately left to the
-            # user -- pipeline code never deletes S3 prefixes.)
+            # Re-opening an existing store: the channel axis (C) is fixed at
+            # creation, so the requested channel list MUST match what the store
+            # was built with.  Overwriting channel_names attrs against a
+            # mismatched data array would silently corrupt the store, so refuse
+            # loudly instead.  (Deletion is deliberately left to the user --
+            # pipeline code never deletes S3 prefixes.)
             existing_names = list(self.root.attrs.get("channel_names", []))
-            existing_c = int(self.root["data"].shape[1])
+            existing_c = int(self.root["data"].shape[0])
             if existing_names and existing_names != self.channel_names:
                 raise ValueError(
                     f"Channel mismatch for existing zarr store at {path}.\n"
@@ -142,47 +144,38 @@ class GlobalZarrDataset:
         else:
             self.root.create_array(
                 "data",
-                shape=(0, self.n_channels, self.rectangular_h, self.rectangular_w),
-                # (1, 1, h, w): one channel-slice per chunk — efficient for field-level reads
-                chunks=(1, 1, self.rectangular_h, self.rectangular_w),
+                shape=(self.n_channels, self.rectangular_h, self.rectangular_w),
+                # (1, h, w): one channel field per chunk — efficient for field-level reads
+                chunks=(1, self.rectangular_h, self.rectangular_w),
                 dtype="float32",
             )
 
-        if "time" not in self.root:
-            self.root.create_array(
-                "time",
-                shape=(0,),
-                chunks=(1,),
-                dtype="int64",
-            )
-
-        # Root-level metadata (safe to overwrite on resume).
+        # Root-level metadata (safe to overwrite on re-open).
         self.root.attrs["channel_names"] = self.channel_names
         self.root.attrs["rectangular_shape"] = list(self.rectangular_shape)
-
-        # Resume from wherever the last run finished.
-        self.t_index = int(self.root["data"].shape[0])
 
     # ------------------------------------------------------------------
 
     def write_snapshot(self, data: np.ndarray, iteration: int) -> None:
         """
-        Write one global snapshot to the store.
+        Write the single global snapshot for this store.
 
-        If *iteration* is already present in the ``time`` array (e.g. a
-        clobber/re-run), its existing slot is **overwritten in place** --
-        the store never grows with duplicate timesteps and nothing is
-        deleted.  Otherwise the snapshot is appended.
+        Each store holds exactly one timestep (the date is encoded in the store
+        path), so all channels are written at once into a ``(C, H, W)`` array.
+        The ``iteration`` attribute is written **last**, after the data chunks,
+        so its presence is a reliable "fully written" marker for the existence
+        planner -- a store from a crashed mid-write run will lack it.  Re-running
+        (clobber) simply overwrites the array in place.
 
         Parameters
         ----------
         data : np.ndarray, shape (C, rectangular_h, rectangular_w), dtype float32
-            All channels for this timestep, already converted to rectangular
+            All channels for this snapshot, already converted to rectangular
             lat/lon format via faces_dataset_to_latlon(). Channel order must
             match channel_names passed to __init__.
         iteration : int
-            LLC4320 model iteration number for this snapshot. Stored as
-            the time coordinate so snapshots can be looked up later.
+            LLC4320 model iteration number for this snapshot. Stored as the
+            ``iteration`` root attribute.
 
         Raises
         ------
@@ -195,29 +188,10 @@ class GlobalZarrDataset:
             f"Check that all channels were converted to rectangular lat/lon correctly."
         )
 
-        # Overwrite in place if this iteration was already written
-        # (idempotent clobber: same chunks rewritten, no store growth).
-        existing = np.nonzero(self.root["time"][:] == int(iteration))[0]
-        if existing.size:
-            t = int(existing[0])
-            self.root["data"][t] = data.astype(np.float32)
-            return
-
-        t = self.t_index
-
-        # Grow the time axis by one slot.
-        self.root["data"].resize((t + 1, self.n_channels, self.rectangular_h, self.rectangular_w))
-        self.root["time"].resize((t + 1,))
-
-        # Write. dtype cast here ensures float32 regardless of interpolation output.
-        self.root["data"][t] = data.astype(np.float32)
-        self.root["time"][t] = int(iteration)
-
-        self.t_index += 1
-
-    @property
-    def n_timesteps(self) -> int:
-        return int(self.root["data"].shape[0])
+        # Write all channels; dtype cast ensures float32 regardless of input.
+        self.root["data"][:] = data.astype(np.float32)
+        # Completion marker -- written last (see method docstring).
+        self.root.attrs["iteration"] = int(iteration)
 
 
 # ---------------------------------------------------------------------------
@@ -226,16 +200,17 @@ class GlobalZarrDataset:
 
 class GlobalZarrDatasetReader:
     """
-    Read-only accessor for datasets written by GlobalZarrDataset.
+    Read-only accessor for a single global snapshot written by GlobalZarrDataset.
+
+    Each store holds exactly one timestep (the date is encoded in the store
+    path), so the accessors take no time index.
 
     Access patterns
     ---------------
-    reader.get_snapshot(t)          -> np.ndarray (C, rectangular_h, rectangular_w)
-    reader.get_channel(c)           -> np.ndarray (T, rectangular_h, rectangular_w)
-    reader.get_channel("Theta")     -> np.ndarray (T, rectangular_h, rectangular_w)  # by name
-    reader.iteration_to_index(it)   -> int t
-    reader[t]                       -> np.ndarray (C, rectangular_h, rectangular_w)
-    len(reader)                     -> int T
+    reader.get_snapshot()           -> np.ndarray (C, rectangular_h, rectangular_w)
+    reader.get_channel_snapshot(c)  -> np.ndarray (rectangular_h, rectangular_w)
+    reader.get_channel_snapshot("Theta")  -> np.ndarray (...)  # by name
+    reader.iteration                -> int   # LLC4320 iteration for this snapshot
     """
 
     def __init__(self, bucket: str, folder: str, run_id: str, dataset_name: str, fs,
@@ -245,24 +220,17 @@ class GlobalZarrDatasetReader:
         store = zarr.storage.FsspecStore(path=path, fs=fs)
         self.root = zarr.open_group(store=store, mode="r", use_consolidated=False)
 
-        self.data = self.root["data"]           # (T, C, rectangular_h, rectangular_w)
-        self.time = self.root["time"]           # (T,)
+        self.data = self.root["data"]           # (C, rectangular_h, rectangular_w)
         self.rectangular_shape = tuple(self.root.attrs["rectangular_shape"])
         self.channel_names = list(self.root.attrs["channel_names"])
-
-        # Built lazily by iteration_to_index().
-        self._iter_to_t = None
+        self.iteration = self.root.attrs.get("iteration")
 
     # ------------------------------------------------------------------
     # Properties
 
     @property
-    def n_timesteps(self) -> int:
-        return int(self.data.shape[0])
-
-    @property
     def n_channels(self) -> int:
-        return int(self.data.shape[1])
+        return int(self.data.shape[0])
 
     @property
     def shape(self) -> tuple:
@@ -271,49 +239,22 @@ class GlobalZarrDatasetReader:
     # ------------------------------------------------------------------
     # Core accessors
 
-    def get_snapshot(self, t: int) -> np.ndarray:
-        """Return all channels for timestep index t. Shape: (C, lat, lon)."""
-        return self.data[t]
+    def get_snapshot(self) -> np.ndarray:
+        """Return all channels for this snapshot. Shape: (C, lat, lon)."""
+        return self.data[:]
 
-    def get_channel_snapshot(self, t: int, channel) -> np.ndarray:
+    def get_channel_snapshot(self, channel) -> np.ndarray:
         """
-        Return a single channel for one timestep. Shape: (H, W).
+        Return a single channel. Shape: (H, W).
 
         Loads only 1 out of C chunks — much cheaper than get_snapshot()
         when you only need one channel.
 
         Parameters
         ----------
-        t : int
-            Timestep index.
         channel : int or str
             Channel index, or name as found in channel_names.
         """
         if isinstance(channel, str):
             channel = self.channel_names.index(channel)
-        return self.data[t, channel]
-
-    def get_channel(self, channel) -> np.ndarray:
-        """
-        Return all timesteps for a single channel. Shape: (T, lat, lon).
-
-        Parameters
-        ----------
-        channel : int or str
-            Channel index, or name as found in channel_names.
-        """
-        if isinstance(channel, str):
-            channel = self.channel_names.index(channel)
-        return self.data[:, channel, :, :]
-
-    def iteration_to_index(self, iteration: int) -> int:
-        """Map an LLC4320 iteration number to its time axis index t."""
-        if self._iter_to_t is None:
-            self._iter_to_t = {int(v): i for i, v in enumerate(self.time[:])}
-        return self._iter_to_t[iteration]
-
-    def __getitem__(self, t: int) -> np.ndarray:
-        return self.get_snapshot(t)
-
-    def __len__(self) -> int:
-        return self.n_timesteps
+        return self.data[channel]

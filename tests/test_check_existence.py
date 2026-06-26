@@ -86,23 +86,28 @@ def mem_fs():
     fs.pseudo_dirs.clear()
 
 
-def seed_store(fs, store_path, channels=None, n_timesteps=None):
+def seed_store(fs, store_path, channels=None, written=None):
     """Fabricate a zarr store's metadata on *fs*.
 
     - ``channels`` writes ``{store}/zarr.json`` with that ``channel_names``
-      attribute.  Pass ``None`` to omit the root metadata (and pass nothing
-      else) for a MISSING store, or write it with no ``channel_names`` to make
-      an INCOMPLETE store that exists but has no channel attribute.
-    - ``n_timesteps`` writes ``{store}/data/zarr.json`` with that leading
-      ``shape`` dim.
+      attribute.  Pass ``None`` to omit the root metadata entirely (a MISSING
+      store), or write it with no ``channel_names`` to make an INCOMPLETE store
+      that exists but has no channel attribute.
+    - ``written=True`` adds the ``iteration`` completion marker to the root
+      attributes (the writer sets it last, so its presence == fully written);
+      ``written`` falsy omits it (a created-but-never-finished store).
+    - When ``channels`` is given, also writes ``{store}/data/zarr.json`` with a
+      ``(C, 3, 3)`` shape (3-D: one snapshot, no time axis).
     """
     key = ce._store_key(store_path)
     if channels is not None:
+        attrs = {"channel_names": channels}
+        if written:
+            attrs["iteration"] = 0
         with fs.open(f"{key}/zarr.json", "w") as f:
-            json.dump({"attributes": {"channel_names": channels}}, f)
-    if n_timesteps is not None:
+            json.dump({"attributes": attrs}, f)
         with fs.open(f"{key}/data/zarr.json", "w") as f:
-            json.dump({"shape": [n_timesteps, len(channels or CHANNELS), 3, 3]}, f)
+            json.dump({"shape": [len(channels), 3, 3]}, f)
 
 
 def write_netcdfs(output_dir, channels, date_prefix=DATE_PREFIX, run_id=RUN_ID):
@@ -116,8 +121,8 @@ def write_netcdfs(output_dir, channels, date_prefix=DATE_PREFIX, run_id=RUN_ID):
 # ---------------------------------------------------------------------------
 
 def test_plan_zarr_full(mem_fs):
-    """All expected channels + >=1 timestep -> FULL (generate_global SKIPs)."""
-    seed_store(mem_fs, "memory://b/full.zarr", channels=CHANNELS, n_timesteps=1)
+    """All expected channels + completion marker -> FULL (generate_global SKIPs)."""
+    seed_store(mem_fs, "memory://b/full.zarr", channels=CHANNELS, written=True)
     assert ce.plan_zarr(mem_fs, "memory://b/full.zarr", CHANNELS) == ce.ZARR_FULL
 
 
@@ -128,13 +133,13 @@ def test_plan_zarr_incomplete_missing_channel(mem_fs):
     channels the run expects.
     """
     seed_store(mem_fs, "memory://b/inc.zarr",
-               channels=["Theta_sfc", "N2_sfc"], n_timesteps=1)
+               channels=["Theta_sfc", "N2_sfc"], written=True)
     assert ce.plan_zarr(mem_fs, "memory://b/inc.zarr", CHANNELS) == ce.ZARR_INCOMPLETE
 
 
-def test_plan_zarr_incomplete_zero_timesteps(mem_fs):
-    """All channels present but 0 timesteps (crashed run) -> INCOMPLETE."""
-    seed_store(mem_fs, "memory://b/empty.zarr", channels=CHANNELS, n_timesteps=0)
+def test_plan_zarr_incomplete_not_written(mem_fs):
+    """All channels present but no 'iteration' marker (crashed run) -> INCOMPLETE."""
+    seed_store(mem_fs, "memory://b/empty.zarr", channels=CHANNELS, written=False)
     assert ce.plan_zarr(mem_fs, "memory://b/empty.zarr", CHANNELS) == ce.ZARR_INCOMPLETE
 
 
@@ -172,7 +177,7 @@ def test_plan_subset_date_skip_when_all_netcdfs_exist(mem_fs, tmp_path):
 def test_plan_subset_date_export_all_when_partial_nc_and_full_store(mem_fs, tmp_path):
     """Some .nc missing + FULL store -> EXPORT *all* channels (overwrite)."""
     write_netcdfs(tmp_path, ["Theta_sfc"])  # only one .nc present
-    seed_store(mem_fs, "memory://b/strat.zarr", channels=CHANNELS, n_timesteps=1)
+    seed_store(mem_fs, "memory://b/strat.zarr", channels=CHANNELS, written=True)
     action, export = _plan(mem_fs, "memory://b/strat.zarr", tmp_path)
     assert action == ce.EXPORT
     assert set(export) == set(CHANNELS)  # all, not just the missing ones
@@ -186,7 +191,7 @@ def test_plan_subset_date_partial_suffix_exports_all(mem_fs, tmp_path):
     flag the date, and a full store re-exports every channel.
     """
     write_netcdfs(tmp_path, ["Theta_sfc", "N2_sfc"])  # both sfc, no 25m
-    seed_store(mem_fs, "memory://b/strat.zarr", channels=CHANNELS, n_timesteps=1)
+    seed_store(mem_fs, "memory://b/strat.zarr", channels=CHANNELS, written=True)
     action, export = _plan(mem_fs, "memory://b/strat.zarr", tmp_path)
     assert action == ce.EXPORT
     assert set(export) == set(CHANNELS)
@@ -199,7 +204,7 @@ def test_plan_subset_date_generate_when_store_incomplete(mem_fs, tmp_path):
     """
     write_netcdfs(tmp_path, ["Theta_sfc"])
     seed_store(mem_fs, "memory://b/strat.zarr",
-               channels=["Theta_sfc"], n_timesteps=1)  # missing 25m + N2
+               channels=["Theta_sfc"], written=True)  # missing 25m + N2
     action, export = _plan(mem_fs, "memory://b/strat.zarr", tmp_path)
     assert action == ce.GENERATE
     assert set(export) == set(CHANNELS)

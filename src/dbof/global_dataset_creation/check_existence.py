@@ -9,8 +9,9 @@ Two kinds of products are checked:
 1. **Zarr stores** (one per subset x date on S3), written by
    ``GlobalZarrDataset``.  A store is *complete* when its root metadata
    exists, its ``channel_names`` attribute covers every expected channel,
-   and at least one timestep has been written.  All checks read only the
-   small ``zarr.json`` metadata objects -- no chunk data is downloaded.
+   and the snapshot was fully written (the ``iteration`` root attribute is
+   present -- the writer sets it last).  All checks read only the small
+   ``zarr.json`` metadata objects -- no chunk data is downloaded.
 
 2. **NetCDF exports** (one file per channel x date on local disk), written
    by ``zarr_to_netcdf``::
@@ -124,25 +125,26 @@ def store_channels(fs, store_path: str) -> list[str] | None:
     return list(channels) if channels is not None else None
 
 
-def store_n_timesteps(fs, store_path: str) -> int:
-    """Return the number of timesteps written to the store's ``data`` array.
+def store_is_written(fs, store_path: str) -> bool:
+    """Return whether the store's single snapshot was fully written.
 
-    Reads ``{store}/data/zarr.json`` and returns ``shape[0]``.  
-    Protects against zero timestep case (i.e. no data written). A freshly
-    created but never-written store (e.g. from a crashed run) has shape
-    ``(0, C, H, W)`` and therefore returns 0.
+    The writer sets the ``iteration`` root attribute **last**, after the data
+    chunks land, so its presence marks a complete store.  A store created but
+    never finished (e.g. a crashed run) has the ``data`` array but no
+    ``iteration`` attribute.  Reads only the root ``zarr.json`` (one small GET).
 
     Returns
     -------
-    int
-        Number of timesteps; 0 if the array metadata is missing.
+    bool
+        True if the ``iteration`` attribute is present; False otherwise
+        (including when the store / root metadata is missing).
     """
     key = _store_key(store_path)
-    meta = _read_json(fs, f"{key}/data/zarr.json")
+    fs.invalidate_cache(key)
+    meta = _read_json(fs, f"{key}/zarr.json")
     if meta is None:
-        return 0
-    shape = meta.get("shape") or [0]
-    return int(shape[0])
+        return False
+    return "iteration" in meta.get("attributes", {})
 
 
 # Single source of truth for a store's state.  Distinguishes
@@ -153,7 +155,6 @@ def plan_zarr(
     fs,
     store_path: str,
     expected_channels: list[str],
-    min_timesteps: int = 1,
 ) -> str:
     """Classify a single zarr store as MISSING / INCOMPLETE / FULL.
 
@@ -162,11 +163,11 @@ def plan_zarr(
     - :data:`ZARR_MISSING`    -- the store's root metadata object is absent.
     - :data:`ZARR_INCOMPLETE` -- the store exists but is unusable: either its
       ``channel_names`` attribute is missing / does not cover
-      *expected_channels* (e.g. built with a different depth-suffix set), or
-      its ``data`` array holds fewer than *min_timesteps* timesteps (e.g. a
-      store created but never written by a crashed run).
+      *expected_channels* (e.g. built with a different depth-suffix set), or it
+      was never fully written (no ``iteration`` completion marker -- e.g. a
+      crashed run).
     - :data:`ZARR_FULL`       -- the store exists, covers every expected
-      channel, and holds at least *min_timesteps* timesteps.
+      channel, and carries the ``iteration`` completion marker.
 
     Parameters
     ----------
@@ -176,9 +177,6 @@ def plan_zarr(
         Full store path (``s3://...``).
     expected_channels : list[str]
         Fully suffix-expanded channel names the store must contain.
-    min_timesteps : int
-        Minimum number of written timesteps.  Per-date stores hold exactly
-        one snapshot, so the default of 1 is correct for the global layout.
 
     Returns
     -------
@@ -201,10 +199,9 @@ def plan_zarr(
                  store_path, sorted(missing))
         return ZARR_INCOMPLETE
 
-    n_t = store_n_timesteps(fs, store_path)
-    if n_t < min_timesteps:
-        log.info("Store %s has %d timestep(s) (< %d) -- incomplete.",
-                 store_path, n_t, min_timesteps)
+    if not store_is_written(fs, store_path):
+        log.info("Store %s has no 'iteration' marker (not fully written) "
+                 "-- incomplete.", store_path)
         return ZARR_INCOMPLETE
 
     return ZARR_FULL

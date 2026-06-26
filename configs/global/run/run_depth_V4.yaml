@@ -11,10 +11,10 @@
 # ---------------------------------------------------------------------------
 
 # Pipeline: SURF | OSN | DEPTH
-pipeline: "SURF"
+pipeline: "DEPTH"
 
 run:
-  run_id: "vtest"
+  run_id: "V4"
   log_dir: "notebooks/notebooks_global/test_logs"
 
 data:
@@ -26,8 +26,7 @@ data:
   #   llc_surf (Theta, Salt, Eta, U, V, W):                2011-09-13 - 2012-11-15
   #   llc_wind (oceTAUX, oceTAUY, SIarea, KPPhbl, PhiBot): 2011-11-01 - 2012-07-15
   date_iterations:
-    - '2012-05-01 12:00:00'
-    - '2012-05-09 12:00:00'
+    - '2012-11-09 12:00:00'
 
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
@@ -66,6 +65,17 @@ runtime:
 #
 # Only list subsets valid for the pipeline set above.
 active_subsets:
+  - stratification
+  - vertical_shear
+  - mixing_parameters
+  - ertel_pv
+  - buoyancy_fluxes
+  - surface_wind
+  - energetics
+  - frontal_structure
+  - kinematic
+  - frontogenesis
+  - native_fields
   - icearea
 
 # ---------------------------------------------------------------------------
@@ -74,4 +84,4 @@ active_subsets:
 # Override the default depth suffixes for depth subsets.
 # Default: [sfc, z25m, mld, mld_mean]
 # Uncomment to customise:
-depth_suffixes: [sfc, mld]
+depth_suffixes: [sfc, z25m, mld, mld_mean]
