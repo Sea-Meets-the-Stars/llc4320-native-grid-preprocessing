@@ -229,43 +229,31 @@ def test_weighted_sampling_renders(example_input):
     import matplotlib.pyplot as plt
     import cartopy.crs as ccrs
     import numpy as np
-    import xarray as xr
 
-    from dbof.cutout_dataset_creation.global_input import load_snapshot_features
-    from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
-    from dbof.preprocessing import static_masks
-    from dbof.preprocessing.ice_mask import generate_siarea_mask, generate_halo_ice_mask
-    from dbof.preprocessing.weighted_coordinate_sampling import weighted_sample_on_grid
+    from dbof.cutout_dataset_creation import processing
 
     cfg, fs, fs_sync = example_input
 
-    ds = load_snapshot_features(cfg.input, DATE, ["gradb2", "SIarea"], fs, fs_sync)
-
-    grid = cfg.input.grid_access
-    ds_grid = GlobalGridZarrReader(
-        bucket=grid.bucket, folder=grid.folder, dataset_name=grid.dataset_name, fs=fs,
-    ).to_dataset_lazy()
-    ds_merge = xr.merge([ds, ds_grid])
-
-    # Sampling mask: open water away from land and ice (as in process_time_snapshot).
-    land_halo = static_masks.generate_halo_land_mask(ds_grid, cfg.output.target_km_res, stitched=True)
-    ice_mask = generate_siarea_mask(ds_merge["SIarea"].values)
-    halo_ice = generate_halo_ice_mask(ds_merge, ice_mask, cfg.output.target_km_res, stitched=True)
-    merged_mask = halo_ice & land_halo
-
-    log_gradb = np.log10(ds_merge["gradb2"])
-    indices = weighted_sample_on_grid(
+    # Exercise the same pipeline functions the CLI uses (no logic re-implemented here).
+    ds_grid, land_halo = processing.set_up_grid_data_and_land_masks(cfg, fs)
+    ds_merge = processing.load_snapshot(cfg, DATE, ["gradb2", "SIarea"], ds_grid, fs, fs_sync)
+    merged_mask = processing.build_sampling_mask(ds_merge, land_halo, cfg.output.target_km_res)
+    indices, _ = processing.sample_cutout_centers_with_loggradb(
+        ds_merge, merged_mask,
         cfg.sampling.sample_points_per_snapshot, cfg.sampling.bias_to_high_gradients,
-        log_gradb, merged_mask,
     )
+
     assert len(indices) == cfg.sampling.sample_points_per_snapshot
     for j, i in indices:
         assert merged_mask[j, i]  # every sample is a retained ocean point
 
-    lats, lons = [], []
-    for index in indices:
-        lats.append(ds_merge.YC[index].values.item())
-        lons.append(ds_merge.XC[index].values.item())
+    print("sampling done, generating visual")
+    # Grid vars are single-chunk dask arrays over S3, so per-point indexing would
+    # re-read the full ~900 MB chunk every iteration. Materialize XC/YC once.
+    XC = np.asarray(ds_grid["XC"].values)
+    YC = np.asarray(ds_grid["YC"].values)
+    lats = [float(YC[j, i]) for (j, i) in indices]
+    lons = [float(XC[j, i]) for (j, i) in indices]
 
     fig = plt.figure(figsize=(8, 4))
     ax = plt.axes(projection=ccrs.PlateCarree())

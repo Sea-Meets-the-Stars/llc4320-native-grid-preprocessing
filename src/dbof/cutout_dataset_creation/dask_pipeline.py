@@ -128,7 +128,7 @@ def extract_patch_extents_and_metadata_in_series(index, ds_merge, log_gradb_np, 
     return patch, patch_meta_data
 
 def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
-                 indices, ds_merge, target_km_res,  metadata_cols, calculated_fields, model_channels, logger=None):
+                 indices, ds_merge, target_km_res,  metadata_cols, log_gradb_np, logger=None):
 
     logger = logger or logging.getLogger(__name__)
 
