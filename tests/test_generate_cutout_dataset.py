@@ -86,7 +86,7 @@ def test_load_snapshot_features_reads_requested(monkeypatch):
     import dbof.cutout_dataset_creation.global_input as gi
 
     class _FakeReader:
-        def get_channel_snapshot(self, t, ch):
+        def get_channel_snapshot(self, ch):
             return np.full((2, 3), float(len(ch)))
 
     r = _FakeReader()

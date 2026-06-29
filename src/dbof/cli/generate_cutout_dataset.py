@@ -18,7 +18,7 @@ import tqdm
 # internal
 from dbof.io.filesystems import create_s3_filesystems
 
-import dbof.preprocessing.native_grid_masks as native_grid_masks
+import dbof.preprocessing.static_masks as static_masks
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
 import dbof.preprocessing.weighted_coordinate_sampling as weighted_coordinate_sampling
@@ -35,6 +35,7 @@ from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
 from dbof.utils.logging import generate_logging
 from dbof.preprocessing.calculate_additional_fields import relative_vorticity
 from dbof.cutout_dataset_creation.global_input import load_snapshot_features
+from dbof.preprocessing.ice_mask import generate_siarea_mask, generate_halo_ice_mask
 
 metadata_cols = [
     "id",
@@ -65,20 +66,19 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig, fs):
     ds_grid = grid_reader.to_dataset_lazy()
 
     logging.info("Calculating land and face masks")
-    land_halo_mask = native_grid_masks.generate_halo_land_mask(ds_grid, cfg.output.target_km_res, stitched=True)
+    land_halo_mask = static_masks.generate_halo_land_mask(ds_grid, cfg.output.target_km_res, stitched=True)
 
     return ds_grid, land_halo_mask
 
 
 def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels):
-    # NOTE The ordering of the following steps matters
-    # TODO leaving off here util we can get a dataset with ice
 
-    # Calculate Ice Mask
     logging.info(f"Calculating ice mask")
-    ice_mask = ~(ds_merge.Theta <= 0.0)
-    ice_mask_np = ice_mask.values
-    merged_mask = ice_mask_np & land_face_mask
+    # Ice mask from the already-loaded SIarea field, then buffered with a halo the same way we do for land.
+    ice_mask = generate_siarea_mask(ds_merge["SIarea"].values)
+    halo_ice_mask = generate_halo_ice_mask(
+        ds_merge, ice_mask, cfg.output.target_km_res, stitched=True)
+    merged_mask = halo_ice_mask & land_face_mask
 
     # Calculated Fields
     calculated_fields = {}
@@ -92,6 +92,9 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
     #     calculated_fields["relative_vorticity"] = relative_vorticity
 
     logging.info(f"Sampling patch center points")
+    # Sample patch centers weighted by log10 of the buoyancy gradient (gradb2),
+    # one of the already-loaded frontal_structure feature channels.
+    log_gradb = np.log10(ds_merge["gradb2"])
     # todo this should be updated to take in a numpy array since we compute loggradb later anyway
     indices = weighted_coordinate_sampling.weighted_sample_on_grid(cfg.sampling.sample_points_per_snapshot, cfg.sampling.bias_to_high_gradients,
                                                                    log_gradb, merged_mask)
@@ -214,8 +217,6 @@ def main():
 
         ds = load_snapshot_features(cfg.input, snapshot, feature_channels, fs_in, fs_in_sync)
         ds_merge = xr.merge([ds, ds_grid])
-
-        print(ds_merge.dims)
 
         process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels)
 

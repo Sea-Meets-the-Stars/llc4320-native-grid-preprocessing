@@ -19,7 +19,7 @@ import tqdm
 # internal
 from dbof.io.filesystems import create_s3_filesystems
 
-import dbof.preprocessing.native_grid_masks as native_grid_masks
+import dbof.preprocessing.static_masks as static_masks
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
 import dbof.preprocessing.weighted_coordinate_sampling as weighted_coordinate_sampling
@@ -99,7 +99,7 @@ def set_up_grid_data_and_masks(cfg: config.JobConfig):
     ds_grid = preproc_llc_core_data.process_llc4320_grid(co)
 
     logging.info("Calculating land and face masks")
-    land_face_mask = native_grid_masks.generate_static_land_face_masks_for_sampling(ds_grid, cfg.output.target_km_res)
+    land_face_mask = static_masks.generate_static_land_face_masks_for_sampling(ds_grid, cfg.output.target_km_res)
 
     return ds_grid, land_face_mask
 

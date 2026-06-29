@@ -68,7 +68,7 @@ def test_land_mask_renders(example_input):
     import numpy as np
 
     from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
-    from dbof.preprocessing import native_grid_masks
+    from dbof.preprocessing import static_masks
     from dbof.plotting.field_cmaps import load_field_cmaps
     from dbof.plotting.global_maps import plot_global_field
 
@@ -79,7 +79,7 @@ def test_land_mask_renders(example_input):
         bucket=grid.bucket, folder=grid.folder, dataset_name=grid.dataset_name, fs=fs,
     ).to_dataset_lazy()
 
-    land_mask = native_grid_masks.generate_halo_land_mask(
+    land_mask = static_masks.generate_halo_land_mask(
         ds_grid, cfg.output.target_km_res, stitched=True,
     )
     assert land_mask.shape == ds_grid["XC"].shape
@@ -164,3 +164,119 @@ def test_feature_field_renders(example_input, channel):
     """Render each additional generated feature channel to its own PNG."""
     cfg, fs, fs_sync = example_input
     _render_global_field(cfg, fs, fs_sync, channel)
+
+
+def test_ice_halo_mask_renders(example_input):
+    """Build the halo ice mask from real SIarea + grid and render it.
+
+    Mirrors process_time_snapshot's ice masking (generate_siarea_mask +
+    generate_halo_ice_mask).  Heavy: full-grid fast-marching.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import numpy as np
+
+    from dbof.cutout_dataset_creation.global_input import load_snapshot_features
+    from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
+    from dbof.preprocessing.ice_mask import generate_siarea_mask, generate_halo_ice_mask
+    from dbof.plotting.field_cmaps import load_field_cmaps
+    from dbof.plotting.global_maps import plot_global_field
+
+    cfg, fs, fs_sync = example_input
+
+    ds = load_snapshot_features(cfg.input, DATE, ["SIarea"], fs, fs_sync)
+    ice_mask = generate_siarea_mask(ds["SIarea"].values)
+
+    grid = cfg.input.grid_access
+    ds_grid = GlobalGridZarrReader(
+        bucket=grid.bucket, folder=grid.folder, dataset_name=grid.dataset_name, fs=fs,
+    ).to_dataset_lazy()
+
+    halo_ice_mask = generate_halo_ice_mask(
+        ds_grid, ice_mask, cfg.output.target_km_res, stitched=True,
+    )
+    assert halo_ice_mask.shape == ds_grid["XC"].shape
+    assert halo_ice_mask.any()  # some ocean retained
+
+    step = 20
+    XC = np.asarray(ds_grid["XC"][::step, ::step])
+    YC = np.asarray(ds_grid["YC"][::step, ::step])
+    arr = halo_ice_mask[::step, ::step].astype("float32")
+
+    cmap_cfg, diverging = load_field_cmaps()
+    fig = plt.figure(figsize=(16, 8))
+    ax = fig.add_subplot(1, 1, 1, projection=ccrs.Robinson())
+    im, _ = plot_global_field(ax, XC, YC, arr, "ice_halo_mask", cmap_cfg,
+                              diverging_cmaps=diverging, transform=ccrs.PlateCarree())
+    ax.set_title("Halo ice mask (retained = 1)")
+    ARTIFACTS_DIR.mkdir(exist_ok=True)
+    out = ARTIFACTS_DIR / "ice_halo_mask.png"
+    fig.savefig(out, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    assert out.exists() and out.stat().st_size > 0
+    print(f"\nice halo mask figure written: {out}")
+
+
+def test_weighted_sampling_renders(example_input):
+    """Sample patch centers on real data (log10 gradb2 weighting, land+ice halo
+    mask) and scatter them on a world map.  Heavy: full-grid fast-marching.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import cartopy.crs as ccrs
+    import numpy as np
+    import xarray as xr
+
+    from dbof.cutout_dataset_creation.global_input import load_snapshot_features
+    from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
+    from dbof.preprocessing import static_masks
+    from dbof.preprocessing.ice_mask import generate_siarea_mask, generate_halo_ice_mask
+    from dbof.preprocessing.weighted_coordinate_sampling import weighted_sample_on_grid
+
+    cfg, fs, fs_sync = example_input
+
+    ds = load_snapshot_features(cfg.input, DATE, ["gradb2", "SIarea"], fs, fs_sync)
+
+    grid = cfg.input.grid_access
+    ds_grid = GlobalGridZarrReader(
+        bucket=grid.bucket, folder=grid.folder, dataset_name=grid.dataset_name, fs=fs,
+    ).to_dataset_lazy()
+    ds_merge = xr.merge([ds, ds_grid])
+
+    # Sampling mask: open water away from land and ice (as in process_time_snapshot).
+    land_halo = static_masks.generate_halo_land_mask(ds_grid, cfg.output.target_km_res, stitched=True)
+    ice_mask = generate_siarea_mask(ds_merge["SIarea"].values)
+    halo_ice = generate_halo_ice_mask(ds_merge, ice_mask, cfg.output.target_km_res, stitched=True)
+    merged_mask = halo_ice & land_halo
+
+    log_gradb = np.log10(ds_merge["gradb2"])
+    indices = weighted_sample_on_grid(
+        cfg.sampling.sample_points_per_snapshot, cfg.sampling.bias_to_high_gradients,
+        log_gradb, merged_mask,
+    )
+    assert len(indices) == cfg.sampling.sample_points_per_snapshot
+    for j, i in indices:
+        assert merged_mask[j, i]  # every sample is a retained ocean point
+
+    lats, lons = [], []
+    for index in indices:
+        lats.append(ds_merge.YC[index].values.item())
+        lons.append(ds_merge.XC[index].values.item())
+
+    fig = plt.figure(figsize=(8, 4))
+    ax = plt.axes(projection=ccrs.PlateCarree())
+    ax.coastlines()
+    ax.set_global()
+    ax.scatter(lons, lats, s=10, color="red", transform=ccrs.PlateCarree())
+    ax.set_title(f"Weighted sample points (n={len(indices)})")
+    ARTIFACTS_DIR.mkdir(exist_ok=True)
+    out = ARTIFACTS_DIR / "weighted_sample_points.png"
+    fig.savefig(out, dpi=120, bbox_inches="tight")
+    plt.close(fig)
+
+    assert out.exists() and out.stat().st_size > 0
+    print(f"\nweighted sample points figure written: {out}")
