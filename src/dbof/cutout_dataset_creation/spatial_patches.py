@@ -81,21 +81,15 @@ def downsample_image(img, target_dim=64):
     return out
 
 
-def extent_in_i(ds, face, j0, i0, km_x):
+def extent_in_i(dxC, j0, i0, km_x):
     """
     Compute the index extent in the i-direction corresponding to a physical
-    distance in kilometers.
-
-    Starting from a central i-index, this function determines how many grid
-    cells are required to the left and right to span a specified physical
-    distance based on grid spacing ``dxC``.
+    distance in kilometers, on the stitched (j, i) grid.
 
     Parameters
     ----------
-    ds : xarray.Dataset
-        Dataset containing ``dxC`` on LLC faces.
-    face : int
-        LLC face index.
+    dxC : np.ndarray
+        Grid spacing (meters) in the i-direction, shape ``(j, i)``.
     j0 : int
         Central j-index.
     i0 : int
@@ -112,9 +106,8 @@ def extent_in_i(ds, face, j0, i0, km_x):
     real_km_w : float
         Actual physical width (km) spanned by the selected indices.
     """
-    
-    # dx_row = ds.dxC.sel(face=face).isel(j=j0).values
-    dx_row = ds.dxC.isel(face=face, j=j0).values
+
+    dx_row = dxC[j0]
 
     dx_row = 0.5 * (dx_row[:-1] + dx_row[1:])  # move from i_g to i, this is sort of interpolating. Average i_g value on left and right of cell center
     dx_row = dx_row.astype(np.float64) / 1000. # meters to km
@@ -122,35 +115,25 @@ def extent_in_i(ds, face, j0, i0, km_x):
     cum_left = np.cumsum(dx_row[i0::-1])
     cum_right = np.cumsum(dx_row[i0:])
 
-    #print(cum_left.shape, cum_right.shape)
-
     L = np.searchsorted(cum_left, km_x)
     R = np.searchsorted(cum_right, km_x)
 
-    if L == len(cum_left): # we hit the face boundary
-        print("HIT FACE")
+    if L == len(cum_left): # we hit the grid edge
         L = R # just use the right side instead. They will almost always be equal
     elif R == len(cum_right):
-        print("HIT FACE")
         R = L
 
     return L, R, np.sum(dx_row[i0-L:i0]) + np.sum(dx_row[i0:i0+R])
 
-def extent_in_j(ds, face, j0, i0, km_y):
+def extent_in_j(dyC, j0, i0, km_y):
     """
     Compute the index extent in the j-direction corresponding to a physical
-    distance in kilometers.
-
-    Starting from a central j-index, this function determines how many grid
-    cells are required downward and upward to span a specified physical
-    distance based on grid spacing ``dyC``.
+    distance in kilometers, on the stitched (j, i) grid.
 
     Parameters
     ----------
-    ds : xarray.Dataset
-        Dataset containing ``dyC`` on LLC faces.
-    face : int
-        LLC face index.
+    dyC : np.ndarray
+        Grid spacing (meters) in the j-direction, shape ``(j, i)``.
     j0 : int
         Central j-index.
     i0 : int
@@ -167,9 +150,8 @@ def extent_in_j(ds, face, j0, i0, km_y):
     real_km_h : float
         Actual physical height (km) spanned by the selected indices.
     """
-    
-    # dy_col = ds.dyC.sel(face=face).isel(i=i0).values  # shape (j_g)
-    dy_col = ds.dyC.isel(face=face, i=i0).compute().values
+
+    dy_col = dyC[:, i0]
 
     dy_col = 0.5 * (dy_col[:-1] + dy_col[1:])         # j_g → j
     dy_col = dy_col.astype(np.float64) / 1000.
@@ -180,31 +162,31 @@ def extent_in_j(ds, face, j0, i0, km_y):
     D = np.searchsorted(cum_dn, km_y)
     U = np.searchsorted(cum_up, km_y)
 
-    #print(cum_dn.shape, cum_up.shape)
-
-    if D == len(cum_dn): # we hit the face boundary
+    if D == len(cum_dn): # we hit the grid edge
         D = U
-        print(f"HIT FACE{len(cum_dn)}")
     elif U == len(cum_up):
         U = D
-        print("HIT FACE")
 
     return D, U, np.sum(dy_col[j0-D:j0])+np.sum(dy_col[j0:j0+U])
 
-def get_lat_lon_extents_of_patch(index, ds_merge, km_size):
+def get_lat_lon_extents_of_patch(index, dxC, dyC, grid_shape, km_size):
     """
-    Determine index bounds for a square spatial patch of a given physical size.
+    Determine index bounds for a square spatial patch of a given physical size
+    on the stitched (j, i) grid.
 
     Given a central grid index, this function computes the i- and j-index
     extents required to approximate a square patch of size ``km_size`` using
-    local grid spacing. Patches that would cross face boundaries are rejected.
+    local grid spacing. Patches that would run off the global grid edge are
+    rejected.
 
     Parameters
     ----------
     index : tuple of int
-        Central index ``(face, j, i)``.
-    ds_merge : xarray.Dataset
-        Dataset containing grid metrics ``dxC`` and ``dyC``.
+        Central index ``(j, i)``.
+    dxC, dyC : np.ndarray
+        Grid spacing (meters), shape ``(j, i)``.
+    grid_shape : tuple of int
+        ``(n_j, n_i)`` shape of the global grid.
     km_size : float
         Target physical size of the patch in kilometers.
 
@@ -212,37 +194,38 @@ def get_lat_lon_extents_of_patch(index, ds_merge, km_size):
     -------
     dict or None
         Dictionary with patch bounds and realized physical dimensions:
-        ``face``, ``i_start``, ``i_end``, ``j_start``, ``j_end``,
+        ``i_start``, ``i_end``, ``j_start``, ``j_end``,
         ``real_km_w``, ``real_km_h``.
-        Returns ``None`` if the patch would extend beyond a face boundary.
+        Returns ``None`` if the patch would extend beyond the grid edge.
     """
-    
+
     half_km = km_size / 2
 
-    f,j,i = index
+    j, i = index
+    n_j, n_i = grid_shape
 
-    L,R,real_km_w = extent_in_i(ds_merge, f, j, i, half_km)
+    L, R, real_km_w = extent_in_i(dxC, j, i, half_km)
 
-    D,U,real_km_h = extent_in_j(ds_merge, f, j, i, half_km)
+    D, U, real_km_h = extent_in_j(dyC, j, i, half_km)
 
-    if ((i - L) < 0):  # this would extend accross face lines
-        print("STARTING i INDICES IS LESS THAN ZERO AND THEREFORE OFF THE FACE OR DATA")
+    if ((i - L) < 0):  # runs off the global grid edge
+        print("i_start < 0 -- patch runs off the grid edge")
         return None
     i_start = i - L
 
-    if (ds_merge.sizes['i'] - 1) < (i + R):
-        print("ENDING j INDICES IS GREATER THAN END OF FACE AND THEREFORE OFF THE FACE OR DATA")
+    if (n_i - 1) < (i + R):
+        print("i_end past grid edge")
         return None
     i_end = i + R
 
-    if ((j - D) < 0):  # this would extend accross face lines
-        print("STARTING j INDEX IS LESS THAN ZERO AND THEREFORE OFF THE FACE OR DATA")
+    if ((j - D) < 0):  # runs off the global grid edge
+        print("j_start < 0 -- patch runs off the grid edge")
         return None
     j_start = j - D
 
-    if (ds_merge.sizes['j'] - 1) < (j + U):
-        print("ENDING j INDICES IS GREATER THAN END OF FACE AND THEREFORE OFF THE FACE OR DATA")
+    if (n_j - 1) < (j + U):
+        print("j_end past grid edge")
         return None
     j_end   = j + U
 
-    return dict(face=f, i_start=i_start, i_end=i_end, j_start=j_start, j_end=j_end, real_km_w = real_km_w, real_km_h = real_km_h)
+    return dict(i_start=i_start, i_end=i_end, j_start=j_start, j_end=j_end, real_km_w = real_km_w, real_km_h = real_km_h)

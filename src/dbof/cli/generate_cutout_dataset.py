@@ -40,7 +40,7 @@ metadata_cols = [
     "time_snapshot"
 ]
 
-def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels):
+def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels, date_prefix):
 
     logging.info("Calculating sampling mask (ice)")
     merged_mask = processing.build_sampling_mask(ds_merge, land_face_mask, cfg.output.target_km_res)
@@ -63,7 +63,9 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
                                               ds_merge,
                                               cfg.output.target_km_res,
                                               metadata_cols,
-                                              log_gradb_np
+                                              log_gradb_np,
+                                              date_prefix,
+                                              feature_channels,
                                               )
 
     # flush metada
@@ -157,7 +159,7 @@ def main():
 
         ds_merge = processing.load_snapshot(cfg, snapshot, feature_channels, ds_grid, fs_in, fs_in_sync)
 
-        process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels)
+        process_time_snapshot(cfg, metadata_writer, zarr_ds, ds_merge, land_face_mask, feature_channels, snapshot)
 
         ds_merge = None
         del ds_merge

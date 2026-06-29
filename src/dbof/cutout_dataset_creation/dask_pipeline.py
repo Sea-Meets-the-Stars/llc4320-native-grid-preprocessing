@@ -5,6 +5,7 @@ import uuid
 import numpy as np
 import dask.array as da
 import logging
+from datetime import datetime
 
 import dbof.cutout_dataset_creation.spatial_patches as spatial_patches
 
@@ -41,86 +42,56 @@ def downsample_image_and_write_image_and_metadata_lazy(zarr_ds, metadata_writer,
 
     return data_sample, patch_metadata
 
-def create_image_patch_lazy(ds, model_channels, calculated_fields, patch):
+def create_image_cutout_lazy(ds_merge, feature_channels, cutout):
     '''
-    This is a lazy function meant to be called by dask.
-    dask.compute()
+    Lazy (dask) extraction of one cutout's image stack.
+
+    Slices every requested feature channel from ds_merge over the cutout's
+    (j, i) extent and stacks them into a (C, H, W) array.  ds_merge holds
+    exactly the user-requested feature channels (plus grid vars), so we iterate
+    feature_channels directly -- no per-feature special-casing or faces.
     '''
     channels_array = []
 
-    for channel in model_channels:
-        feature = ds[channel].isel(
-            face=patch["face"],
-            j=slice(patch["j_start"], patch["j_end"] + 1),
-            i=slice(patch["i_start"], patch["i_end"] + 1),
+    for channel in feature_channels:
+        feature = ds_merge[channel].isel(
+            j=slice(cutout["j_start"], cutout["j_end"] + 1),
+            i=slice(cutout["i_start"], cutout["i_end"] + 1),
         )
         channels_array.append(feature.data)
-
-    # these if statements are to maintain ordering of optional features. User could pass them in, in whatever order.
-    if "relative_vorticity" in calculated_fields:
-        vort_feature = calculated_fields["relative_vorticity"].isel(
-                face=patch["face"],
-                j=slice(patch["j_start"], patch["j_end"] + 1),
-                i=slice(patch["i_start"], patch["i_end"] + 1),
-            )
-        channels_array.append(vort_feature.data)
 
     # Stack lazily (Dask only)
     img = da.stack(channels_array, axis=0).astype("float32")  # (C, H, W)
 
     return img
 
-def create_image_patch_numpy(array, patch):
-    '''
-    For use on already computed data that is in memory as a numpy array.
-    '''
-    log_slice = array[
-            patch["face"],
-            patch["j_start"] : patch["j_end"] + 1,
-            patch["i_start"] : patch["i_end"] + 1,
-        ].astype("float32")
-
-    return log_slice
-
-def create_image_patches_batch_as_tensors_dask(ds, calculated_fields, model_channels, patches, scheduler='threads'):
-    # 1. Build lazy dask arrays.
-    patch_arrays = [
-        create_image_patch_lazy(ds, model_channels, calculated_fields, patch)
-        for patch in patches
+def create_image_cutouts_batch_as_tensors_dask(ds_merge, feature_channels, cutouts, scheduler='threads'):
+    """Extract each cutout's requested feature channels and return them as
+    a list of (C, H, W) torch tensors."""
+    cutout_arrays = [
+        create_image_cutout_lazy(ds_merge, feature_channels, cutout)
+        for cutout in cutouts
     ]
+    computed_arrays = dask.compute(*cutout_arrays, scheduler=scheduler) # todo does this create problems materializing log_grad_np? If not we don't need to materialize it or pass it around
+    return [torch.from_numpy(np.asarray(arr)) for arr in computed_arrays]
 
-    # 2. Compute all images in parallel
-    computed_arrays = dask.compute(*patch_arrays, scheduler=scheduler)
-
-    tensors = []
-    # 3. Append log_gradb (NumPy) per patch, these are from already computed data.
-    # This is because we precompute log_gradb for sampling. No reason to recompute
-    for arr, patch in zip(computed_arrays, patches):
-        log_slice = create_image_patch_numpy(calculated_fields["log_gradb_np"], patch)
-        log_slice = np.expand_dims(log_slice, axis=0)
-        img = np.concatenate((arr, log_slice), axis=0)
-        tensors.append(torch.from_numpy(img))
-
-    return tensors
-
-def extract_patch_extents_and_metadata_in_series(index, ds_merge, log_gradb_np, target_km_res):
+def extract_patch_extents_and_metadata_in_series(index, XC, YC, log_gradb_np,
+                                                 dxC, dyC, target_km_res, time_snapshot):
     """
-    This function extracts metadata for the patch from ds_merge
-    it then gets the spatial extents for the patch
+    Build patch metadata + spatial extents for one ``(j, i)`` center.
 
-    todo in the future we could probably figure out how to parallelize this.
-    Currently there are issues with computing ds_merge down stream that break parallel code
-    the ds_merge.YC[index].values.item() particularly
+    All grid inputs are numpy (materialized once by the caller) so this stays a
+    cheap in-memory operation.
     """
 
     patch_meta_data = {}
     patch_meta_data["index"] = index
-    patch_meta_data["center_lat"] = ds_merge.YC[index].values.item()
-    patch_meta_data["center_lon"] = ds_merge.XC[index].values.item()
+    patch_meta_data["center_lat"] = float(YC[index])
+    patch_meta_data["center_lon"] = float(XC[index])
     patch_meta_data["log_grad_b_2_center"] = log_gradb_np[index]
-    patch_meta_data["time_snapshot"] = np.datetime64(ds_merge.time.item(), 'ns')
+    patch_meta_data["time_snapshot"] = time_snapshot
 
-    patch = spatial_patches.get_lat_lon_extents_of_patch(index, ds_merge, target_km_res)
+    patch = spatial_patches.get_lat_lon_extents_of_patch(index, dxC, dyC, XC.shape, target_km_res)
 
     if patch is None:
         return None, None
@@ -128,23 +99,37 @@ def extract_patch_extents_and_metadata_in_series(index, ds_merge, log_gradb_np, 
     return patch, patch_meta_data
 
 def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
-                 indices, ds_merge, target_km_res,  metadata_cols, log_gradb_np, logger=None):
+                 indices, ds_merge, target_km_res, metadata_cols, log_gradb_np,
+                 date_prefix, feature_channels, logger=None):
 
     logger = logger or logging.getLogger(__name__)
+
+    # Materialize grid arrays once (they are single-chunk dask arrays over S3);
+    # per-cutout indexing would otherwise re-read the full field every iteration.
+    XC = np.asarray(ds_merge["XC"].values)
+    YC = np.asarray(ds_merge["YC"].values)
+    dxC = np.asarray(ds_merge["dxC"].values)
+    dyC = np.asarray(ds_merge["dyC"].values)
+    time_snapshot = np.datetime64(datetime.strptime(date_prefix, "%Y%m%d_%H%M%S"), "ns")
 
     patch_meta_data_list = []
     patches = []
 
     logger.info(f"Starting patch extents cutout_dataset_creation")
     for index in indices:
-        patch, patch_meta_data = extract_patch_extents_and_metadata_in_series(index, ds_merge, calculated_fields["log_gradb_np"], target_km_res)
+        # Calculate the extents of each patch
+        patch, patch_meta_data = extract_patch_extents_and_metadata_in_series(
+            index, XC, YC, log_gradb_np, dxC, dyC, target_km_res, time_snapshot)
 
+        # Occurs from some error in the patch, likely extends past the grid boundaries (off the face of the world)
         if patch_meta_data is not None:
             patch_meta_data_list.append(patch_meta_data)
             patches.append(patch)
 
     logger.info("Starting batched image cutout_dataset_creation")
-    images = create_image_patches_batch_as_tensors_dask(ds_merge, calculated_fields, model_channels, patches, scheduler='threads')
+    images = create_image_cutouts_batch_as_tensors_dask(ds_merge, feature_channels, patches, scheduler='threads')
+
+    # todo left off here
 
     # Downsample images and get metadata ----------------------------------------------------
     logger.info("Downsampling Images")
