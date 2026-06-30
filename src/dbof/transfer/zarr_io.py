@@ -294,13 +294,23 @@ def write_2d_horizontal(root, ds, da, time_idx, tile_j, tile_i):
             )
 
 
-def write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i):
+def write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i, level_chunked=False):
     """Write a 3D (vdim, face, j, i) variable into the zarr store tile-by-tile.
 
-    Chunk layout: ``(nk, 1, tile_j, tile_i)`` -- all depth levels in one chunk,
-    one face per chunk, spatial tiles of (tile_j x tile_i).  This matches the
-    MIT LLC4320 on-disk layout and is optimal for depth-diagnostic pipelines
-    that need the full water column per face.
+    Two chunk layouts are supported:
+
+    * ``level_chunked=False`` (default) -- ``(nk, 1, tile_j, tile_i)``: all depth
+      levels in one chunk, one face per chunk.  This matches the MIT LLC4320
+      on-disk layout and is optimal for time-varying depth fields, where a
+      single S3 GET returns the full water column for one face tile.
+    * ``level_chunked=True`` -- ``(1, nface, tile_j, tile_i)``: one depth level,
+      all faces, per chunk.  This is the layout used by the static grid store
+      (``hFacC``/``hFacS``/``hFacW`` etc.) that the global grid reader expects
+      (``get_llc_depth_gridfile``), so that ``isel(k=0)`` reads exactly one
+      stored object per spatial tile instead of the whole column.
+
+    The on-disk *shape* and ``dimension_names`` are identical in both cases;
+    only the chunk grid and the write order differ.
     """
     info = infer_layout(da)
     vdim = info["vdim"]
@@ -318,14 +328,15 @@ def write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i):
     nj = ds.sizes[jdim]
     ni = ds.sizes[idim]
 
+    chunks = (1, nface, tile_j, tile_i) if level_chunked else (nk, 1, tile_j, tile_i)
     logging.info(
         f"Creating target array for {da.name} with dims ({vdim}, face, {jdim}, {idim}), "
-        f"chunks=({nk}, 1, {tile_j}, {tile_i})"
+        f"chunks={chunks}"
     )
     z_var = root.create_array(
         da.name,
         shape=(nk, nface, nj, ni),
-        chunks=(nk, 1, tile_j, tile_i),
+        chunks=chunks,
         dtype=da.dtype,
         overwrite=True,
         fill_value=np.nan if np.issubdtype(da.dtype, np.floating) else 0,
@@ -335,9 +346,43 @@ def write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i):
 
     j_starts = starts(nj, tile_j)
     i_starts = starts(ni, tile_i)
+
+    if level_chunked:
+        # One stored object per (level, spatial tile), spanning all faces.
+        total_tiles = nk * len(j_starts) * len(i_starts)
+        tile_count = 0
+        for kk in range(nk):
+            for j0 in j_starts:
+                j1 = min(j0 + tile_j, nj)
+                for i0 in i_starts:
+                    i1 = min(i0 + tile_i, ni)
+                    tile_count += 1
+
+                    logging.info(
+                        f"[{da.name} {tile_count}/{total_tiles}] "
+                        f"reading {vdim}={kk}, face=:, {jdim}={j0}:{j1}, {idim}={i0}:{i1}"
+                    )
+                    indexer = {vdim: kk, "face": slice(None),
+                               jdim: slice(j0, j1), idim: slice(i0, i1)}
+                    if has_time:
+                        indexer["time"] = time_idx
+                    tile = da.isel(**indexer).values
+
+                    logging.info(
+                        f"[{da.name} {tile_count}/{total_tiles}] "
+                        f"writing {vdim}={kk}, face=:, {jdim}={j0}:{j1}, {idim}={i0}:{i1}"
+                    )
+                    z_var[kk, :, j0:j1, i0:i1] = tile
+
+                    _verify_tile(
+                        z_var, (kk, slice(None), slice(j0, j1), slice(i0, i1)),
+                        tile, f"{da.name} tile {tile_count}/{total_tiles}",
+                    )
+        return
+
+    # Default: one stored object per (face, spatial tile), full water column.
     total_tiles = nface * len(j_starts) * len(i_starts)
     tile_count = 0
-
     for ff in range(nface):
         for j0 in j_starts:
             j1 = min(j0 + tile_j, nj)
@@ -423,8 +468,13 @@ def write_1d_time(root, ds, da, time_idx):
 # ---------------------------------------------------------------------------
 
 def transfer_variables(ds, variables, root, tile_j, tile_i,
-                       time_idx=None, skip_existing=False):
-    """Dispatch each variable to the appropriate per-layout writer."""
+                       time_idx=None, skip_existing=False, level_chunked_3d=False):
+    """Dispatch each variable to the appropriate per-layout writer.
+
+    ``level_chunked_3d`` controls the chunk layout of 3D variables -- see
+    :func:`write_3d_horizontal`.  Use ``True`` for the static grid store so its
+    3D fields (hFacC/S/W, masks) are stored one level / all faces per chunk.
+    """
     for var in variables:
         if skip_existing and var in root:
             logging.info(f"Skipping {var} (already exists in store)")
@@ -440,7 +490,8 @@ def transfer_variables(ds, variables, root, tile_j, tile_i,
         elif kind == "2d_horizontal":
             write_2d_horizontal(root, ds, da, time_idx, tile_j, tile_i)
         elif kind == "3d_horizontal":
-            write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i)
+            write_3d_horizontal(root, ds, da, time_idx, tile_j, tile_i,
+                                level_chunked=level_chunked_3d)
         elif kind == "1d_vertical":
             write_1d_vertical(root, ds, da, time_idx)
         else:
@@ -449,7 +500,8 @@ def transfer_variables(ds, variables, root, tile_j, tile_i,
 
 def write_store(ds, variables, *, s3_url, s3_endpoint, tile_j, tile_i,
                 init_store=False, time_idx=None, attrs=None,
-                skip_existing=False, label="transfer", detail=""):
+                skip_existing=False, label="transfer", detail="",
+                level_chunked_3d=False):
     """Write one group of variables to a single S3 zarr store.
 
     This bundles the open-store -> stamp-attrs -> write-variables -> log
@@ -483,6 +535,9 @@ def write_store(ds, variables, *, s3_url, s3_endpoint, tile_j, tile_i,
     detail : str
         Optional extra detail appended to the header log line (e.g. the date /
         iteration / time index for a time-varying store).
+    level_chunked_3d : bool
+        Chunk 3D variables one level / all faces per chunk (see
+        :func:`write_3d_horizontal`).  Set ``True`` for the static grid store.
     """
     header = f"--- {label}: {len(variables)} variables -> {s3_url} ---"
     if detail:
@@ -493,7 +548,8 @@ def write_store(ds, variables, *, s3_url, s3_endpoint, tile_j, tile_i,
     if attrs:
         safe_set_attrs(root, attrs)
     transfer_variables(ds, variables, root, tile_j, tile_i,
-                       time_idx=time_idx, skip_existing=skip_existing)
+                       time_idx=time_idx, skip_existing=skip_existing,
+                       level_chunked_3d=level_chunked_3d)
     logging.info(f"{label} complete.")
 
 
