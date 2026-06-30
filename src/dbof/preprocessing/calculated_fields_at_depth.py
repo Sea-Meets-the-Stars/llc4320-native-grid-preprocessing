@@ -286,7 +286,7 @@ def buoyancy_field_3d(ds_merge):
 
     b = (G_KM * rho / RHO0_SEAWATER) * 1e3
     b.name = "buoyancy"
-    b.attrs["units"] = "m^2 s^-2"
+    b.attrs["units"] = "m s^-2"
     return b
 
 
@@ -599,8 +599,11 @@ def _wind_stress_geographic(ds_merge, grid):
     )
 
 
-def ekman_transport_velocity(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
+def ekman_transport(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
     """Lazy Ekman transport (u_E, v_E).
+
+    These are depth-integrated velocities (τ / (ρ₀ f)).
+    https://sam.ucsd.edu/ltalley/sio210/dynamics_ekman/index.html
 
     Parameters
     ----------
@@ -618,9 +621,9 @@ def ekman_transport_velocity(ds_merge, grid, rho0=RHO0_BOUSSINESQ):
         Dictionary with keys:
 
         ``"u_ekman"`` : xr.DataArray
-            Zonal Ekman transport velocity [m s⁻¹] on tracer points.
+            Zonal Ekman transport [m² s⁻¹] on tracer points.
         ``"v_ekman"`` : xr.DataArray
-            Meridional Ekman transport velocity [m s⁻¹] on tracer points.
+            Meridional Ekman transport [m² s⁻¹] on tracer points.
     """
     f = coriolis_parameter(ds_merge, grid)
     denom = rho0 * f
@@ -656,14 +659,11 @@ def advective_buoyancy_fluxes_3d(ds_merge, grid):
     """
     b = buoyancy_field_3d(ds_merge)
 
-    U_c = grid.interp(ds_merge.U, 'X', boundary='fill')
-    V_c = grid.interp(ds_merge.V, 'Y', boundary='fill')
-    u_geo = U_c * ds_merge['CS'] - V_c * ds_merge['SN']
-    v_geo = U_c * ds_merge['SN'] + V_c * ds_merge['CS']
+    u_geog, v_geog = geographic_velocity_3d(ds_merge, grid)
 
     W_c = _interp_w_to_tracer_levels(ds_merge)
 
-    return u_geo * b, v_geo * b, W_c * b
+    return u_geog * b, v_geog * b, W_c * b
 
 
 # ===========================================================================
@@ -691,11 +691,11 @@ def ertel_pv_terms_3d(ds_merge, grid):
         Dictionary with keys:
 
         ``"ertel_pv"`` : xr.DataArray
-            Total Ertel PV q [m⁻¹ s⁻¹] on tracer levels.
+            Total Ertel PV q [s⁻³] on tracer levels.
         ``"ertel_pv_vertical"`` : xr.DataArray
-            Vertical component q_vert = (ζ + f) b_z [m⁻¹ s⁻¹].
+            Vertical component q_vert = (ζ + f) b_z [s⁻³].
         ``"ertel_pv_tilt"`` : xr.DataArray
-            Tilting component q_tilt [m⁻¹ s⁻¹].
+            Tilting component q_tilt [s⁻³].
     """
     U = ds_merge.U
     V = ds_merge.V
@@ -1078,9 +1078,9 @@ def _frontogenesis_formula_3d(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
     dv_dy : xr.DataArray
         Meridional velocity gradient ∂v/∂y [s⁻¹] on tracer levels.
     grad_bx : xr.DataArray
-        Zonal buoyancy gradient ∂b/∂x [s⁻² m⁻¹] on tracer levels.
+        Zonal buoyancy gradient ∂b/∂x [s⁻²] on tracer levels.
     grad_by : xr.DataArray
-        Meridional buoyancy gradient ∂b/∂y [s⁻² m⁻¹] on tracer levels.
+        Meridional buoyancy gradient ∂b/∂y [s⁻²] on tracer levels.
 
     Returns
     -------

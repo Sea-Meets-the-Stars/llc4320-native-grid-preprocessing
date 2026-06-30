@@ -33,7 +33,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     # -- wind --
     wind_stress_curl,
     ekman_pumping,
-    ekman_transport_velocity,
+    ekman_transport,
     # -- fluxes --
     advective_buoyancy_fluxes_3d,
     # -- PV --
@@ -632,7 +632,7 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
 
     ekman_channels = {"u_ekman", "v_ekman"}
     if ekman_channels.intersection(computed_feature_channels):
-        ek = ekman_transport_velocity(ds_merge, grid)
+        ek = ekman_transport(ds_merge, grid)
         for ch in ekman_channels:
             if ch in computed_feature_channels:
                 results[ch] = ek[ch]
