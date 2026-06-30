@@ -56,7 +56,7 @@ def compute_velocity_jacobian(ds_merge, grid):
     -------
     VelocityJacobian
         Named tuple ``(du_dx, du_dy, dv_dx, dv_dy)`` with each component
-        as a dask-backed DataArray on tracer points.
+        as a dask-backed DataArray on tracer points [s^-1].
     """
     u_x = ds_merge.U.copy(deep=True)
     v_y = ds_merge.V.copy(deep=True)
@@ -142,7 +142,7 @@ def compute_buoyancy_gradients(ds_merge, grid):
     -------
     BuoyancyGradients
         Named tuple ``(zonal, merid)`` with each component as a
-        dask-backed DataArray on tracer points.
+        dask-backed DataArray on tracer points [s -2].
     """
     buoyancy = physical_calculations.buoyancy_of_field(ds_merge) * 1e3
     zonal, merid = ng.calculate_native_gradient_tracer(
@@ -173,7 +173,7 @@ def grad_b2(ds_merge, grid):
     -------
     dask.array.Array
         squared buoyancy gradient magnitude.
-        Units are s^4
+        Units are s^-4
     """
     buoyancy = physical_calculations.buoyancy_of_field(ds_merge)*1e3
 
@@ -202,7 +202,7 @@ def log_grad_b(ds_merge, grid):
     -------
     dask.array.Array
         log10 of the squared buoyancy gradient magnitude.
-        Units are log10((s^4)
+        Units are log10((s^-4)
     """
     # Gradient of buoyancy^2
     gradb2 = grad_b2(ds_merge, grid)
@@ -226,7 +226,7 @@ def grad_rho2(ds_merge, grid):
     Returns
     -------
     xarray.DataArray
-        Surface density field [km/s^2] with dask
+        Spatial gradient of surface density field [(kg m-4)^2] with dask
         backing, persisted into memory.
     """
 
@@ -256,8 +256,8 @@ def grad_theta2(ds_merge, grid):
     Returns
     -------
     dask.array.Array
-        squared temperature gradient magnitude.
-        Units are (K/m)^2
+        Spatial gradient of squared temperature magnitude.
+        Units are (degrees C/m)^2
     """
     theta = ds_merge.Theta.copy(deep=True)
 
@@ -390,7 +390,7 @@ def relative_vorticity(ds_merge, grid, *, jacobian=None):
     Returns
     -------
     omega : xarray.DataArray
-        Relative vorticity field computed as dv/dλ minus du/dφ.
+        Relative vorticity field computed as dv/dλ minus du/dφ [1/s].
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
@@ -414,7 +414,7 @@ def coriolis_parameter(ds_merge, grid):
     Returns
     -------
     coriolis : xarray.DataArray
-        Coriolis parameter field.
+        Coriolis parameter field [s-1].
     """
 
     coriolis_f = 2.0 * OMEGA_EARTH * np.sin(np.deg2rad(ds_merge['YC']))
@@ -440,7 +440,7 @@ def rossby_number(ds_merge, grid, *, jacobian=None):
     Returns
     -------
     rossby_no : xarray.DataArray
-        Rossby number field.
+        Rossby number field [dimensionless].
     """
     omega = relative_vorticity(ds_merge, grid, jacobian=jacobian)
     f = coriolis_parameter(ds_merge, grid)
@@ -465,11 +465,11 @@ def strain(ds_merge, grid, *, jacobian=None):
     Returns
     -------
     strain_mag : xarray.DataArray
-        Strain magnitude field.
+        Strain magnitude field [s^-1].
     strain_n: xarray.DataArray
-        Normal strain field.
+        Normal strain field [s^-1].
     strain_s: xarray.DataArray
-        Shear strain field.
+        Shear strain field [s^-1].
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
@@ -498,7 +498,7 @@ def divergence(ds_merge, grid, *, jacobian=None):
     Returns
     -------
     div : xarray.DataArray
-        Horizontal divergence field.
+        Horizontal divergence field [s^-1].
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
@@ -526,7 +526,7 @@ def okubo_weiss_parameter(ds_merge, grid, *, jacobian=None):
     Returns
     -------
     OW : xarray.DataArray
-        Okubo-Weiss parameter field.
+        Okubo-Weiss parameter field [s^-2].
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
@@ -562,7 +562,7 @@ def _frontogenesis_formula(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
     Returns
     -------
     xr.DataArray
-        Frontogenesis tendency F (m s⁻² m⁻¹ s⁻¹), dask-backed.
+        Frontogenesis tendency F [s^-5], dask-backed.
     """
     return -(du_dx * grad_bx**2 +
              (du_dy + dv_dx) * grad_bx * grad_by +
@@ -591,7 +591,7 @@ def frontogenesis_tendency(ds_merge, grid, *, jacobian=None,
     Returns
     -------
     xarray.DataArray
-        Frontogenesis tendency (dask-backed, lazy).
+        Frontogenesis tendency [s^-5] (dask-backed, lazy).
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
@@ -626,7 +626,7 @@ def geostrophic_velocity(ds_merge, grid):
     Returns
     -------
     ug, vg : xarray.DataArray
-        Zonal and meridional geostrophic velocity (dask-backed, lazy).
+        Zonal and meridional geostrophic velocity [m s^-1] (dask-backed, lazy).
     """
     f = coriolis_parameter(ds_merge, grid)
 
