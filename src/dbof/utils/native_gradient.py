@@ -70,13 +70,13 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
        Returns
        -------
        du_lambda_dlambda : xarray.DataArray
-           Zonal derivative of the zonal velocity component.
+           Zonal derivative of the zonal velocity component [field_units m^-1].
        du_lambda_dphi : xarray.DataArray
-           Meridional derivative of the zonal velocity component.
+           Meridional derivative of the zonal velocity component [field_units m^-1].
        dv_phi_dlambda : xarray.DataArray
-           Zonal derivative of the meridional velocity component.
+           Zonal derivative of the meridional velocity component [field_units m^-1].
        dv_phi_dphi : xarray.DataArray
-           Meridional derivative of the meridional velocity component.
+           Meridional derivative of the meridional velocity component [field_units m^-1].
        """
     # Move the values to tracer points and rotate the model (x, y) components
     # into the geographic zonal (lambda) / meridional (phi) basis.

@@ -43,7 +43,7 @@ Boussinesq simplification.
 # ---------------------------------------------------------------------------
 
 CP = 3994.0
-"""float: Specific heat capacity of seawater [J kg⁻¹ K⁻¹]."""
+"""float: Specific heat capacity of seawater [J kg⁻¹ °C⁻¹]."""
 
 ALPHA = 2.0e-4
 """float: Thermal expansion coefficient [°C⁻¹].

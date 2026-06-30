@@ -268,7 +268,7 @@ def buoyancy_field_3d(ds_merge):
     Returns
     -------
     xr.DataArray
-        3D buoyancy field [m² s⁻²] on tracer levels (dims ``k``, ``face``,
+        3D buoyancy field [m s⁻²] on tracer levels (dims ``k``, ``face``,
         ``j``, ``i``), with ``name="buoyancy"``.
     """
     import dbof.utils.jmd95_xgcm_implementation as jmd95
@@ -648,11 +648,11 @@ def advective_buoyancy_fluxes_3d(ds_merge, grid):
     Returns
     -------
     uB : xr.DataArray
-        Zonal advective buoyancy flux u·b [m³ s⁻³] on tracer levels.
+        Zonal advective buoyancy flux u·b [m^2 s^-3] on tracer levels.
     vB : xr.DataArray
-        Meridional advective buoyancy flux v·b [m³ s⁻³] on tracer levels.
+        Meridional advective buoyancy flux v·b [m^2 s^-3] on tracer levels.
     wB : xr.DataArray
-        Vertical advective buoyancy flux w·b [m³ s⁻³] on tracer levels.
+        Vertical advective buoyancy flux w·b [m^2 s^-3] on tracer levels.
     """
     b = buoyancy_field_3d(ds_merge)
 
@@ -767,7 +767,7 @@ def grad_theta2_3d(ds_merge, grid):
     Returns
     -------
     xr.DataArray
-        3D horizontal temperature gradient squared |∇θ|² [(K m⁻¹)²] on
+        3D horizontal temperature gradient squared |∇θ|² [(degrees C m⁻¹)²] on
         tracer levels.
     """
     return _grad_squared_3d(ds_merge.Theta, ds_merge, grid)
