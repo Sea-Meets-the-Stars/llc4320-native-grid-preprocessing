@@ -190,6 +190,9 @@ def run(
             tile_j=target.tile_j, tile_i=target.tile_i, init_store=init_store,
             time_idx=None, attrs=target.base_attrs,
             skip_existing=skip_existing, label="Static grid transfer",
+            # Grid 3D vars (hFacC/S/W, masks) chunked one level / all faces, the
+            # layout the global grid reader expects (get_llc_depth_gridfile).
+            level_chunked_3d=True,
         )
 
     # --- Time-varying fields: one store per date ---------------------------
