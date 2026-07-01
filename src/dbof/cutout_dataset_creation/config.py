@@ -128,3 +128,32 @@ def parse_args():
     p.add_argument("--config", required=True, help="Path to YAML config.")
     p.add_argument("--run_id", default=None, help="Optional override for run.run_id")
     return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Data-access config (reading a generated cutout dataset)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class DataAccessConfig:
+    """Locates a generated cutout dataset (zarr + metadata) for reading.
+
+    All fields are required -- the full path to the data must be specified.
+    """
+    run_id: str
+    folder: str
+    bucket: str
+    s3_endpoint: str
+    dataset_name: str
+
+
+def load_data_access_config(path: str) -> DataAccessConfig:
+    with open(path, "r") as f:
+        raw = yaml.safe_load(f) or {}
+    da = dict(raw.get("data_access") or {})
+    da.pop("feature_channels", None)  # channel order comes from the store
+    required = ("run_id", "folder", "bucket", "s3_endpoint", "dataset_name")
+    missing = [k for k in required if not da.get(k)]
+    if missing:
+        raise ValueError(f"data_access is missing required keys: {missing}")
+    return DataAccessConfig(**da)

@@ -42,7 +42,7 @@ def weighted_sample_on_grid(points_to_sample, bias, field, mask=None):
     return [tuple(int(c) for c in idx) for idx in zip(*coords)]
 
 # The following is for sampling on a pdf and is not being used currently. Can probably be deleted. ---------------------------------
-# todo we can probably remove all of this stuff. Keeping for now in case we decide to change our sampling pattern.
+# NOTE keping this functionality for now in case we decide to change our sampling pattern.
 # # x must = da.values
 # def sample_linearly_on_pdf(x, points_to_sample, display):
 #     # Calculate pdf

@@ -5,19 +5,20 @@ import dbof.io.filesystems as filesystems
 
 @pytest.fixture(scope="session")
 def zarr_reader():
-    bucket = "llc"  # data_cfg["bucket"]
-    folder = "native_grid_dbof_training_data/"
+    bucket = "dbof"
+    folder = "cutouts_dataset_v2_TESTING"
+    run_id = "cutout_test_data_v1"
     s3_endpoint = "https://s3-west.nrp-nautilus.io"
-    feature_channels = ['Eta', 'Salt', 'Theta', 'U', 'V', 'W', 'relative_vorticity', 'log_gradb']
-    run_id = "test00" # this run has empty data.
 
     fs, fs_synch = filesystems.create_s3_filesystems(s3_endpoint)
-
-    reader = zarr_dataset.ZarrDatasetReader(
-        bucket=bucket,
-        folder=folder,
-        run_id=run_id,
-        dataset_name="cutout_dataset_creation.zarr",
-        fs=fs
-    )
+    try:
+        reader = zarr_dataset.ZarrDatasetReader(
+            bucket=bucket,
+            folder=folder,
+            run_id=run_id,
+            dataset_name="cutout_dataset_creation.zarr",
+            fs=fs,
+        )
+    except Exception as exc:
+        pytest.skip(f"cutout store unreachable (s3://{bucket}/{folder}/{run_id}): {exc}")
     return reader

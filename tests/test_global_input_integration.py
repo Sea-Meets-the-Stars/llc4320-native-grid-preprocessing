@@ -16,6 +16,7 @@ from dbof.cutout_dataset_creation.global_input import (
 )
 
 EXAMPLE_CONFIG = Path(__file__).resolve().parents[1] / "configs/cutouts/run/run_from_globals_example.yaml"
+ACCESS_CONFIG = Path(__file__).resolve().parents[1] / "configs/cutouts/data_access/cutout_test_data_v1.yaml"
 DATE = "20120209_120000"
 ARTIFACTS_DIR = Path(__file__).resolve().parent / "output"
 
@@ -268,3 +269,54 @@ def test_weighted_sampling_renders(example_input):
 
     assert out.exists() and out.stat().st_size > 0
     print(f"\nweighted sample points figure written: {out}")
+
+
+def test_cutout_pipeline_end_to_end(example_input):
+    """Generate cutouts to S3 under a random run_id, read them back via
+    load_cutout_dataset, and render 100 random cutouts to a PNG.
+
+    Heavy: runs the real pipeline (dask, fast-marching, S3 read + write).
+    """
+    import uuid
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import dbof.cutout_dataset_creation.config as cutout_config
+    import dbof.cutout_dataset_creation.processing as processing
+    from dbof.cutout_dataset_access.access import load_cutout_dataset, plot_random_cutouts
+
+    cfg, fs, fs_sync = example_input  # cfg = run config; S3 confirmed reachable
+
+    run_id = f"itest_{uuid.uuid4().hex[:8]}"
+    cfg = cutout_config.JobConfig(
+        run=cutout_config.RunConfig(run_id=run_id, log_dir=cfg.run.log_dir),
+        input=cfg.input, sampling=cfg.sampling, output=cfg.output,
+        features=cfg.features, runtime=cfg.runtime,
+    )
+
+    processing.run(cfg)  # generate the cutout dataset
+
+    ds = load_cutout_dataset(str(ACCESS_CONFIG), run_id=run_id)
+    assert ds.images.shape[0] > 0
+    assert ds.channel_names
+    assert ds.images.shape[0] == len(ds.metadata)
+    assert ds.channel_names[-2:] == ["XC", "YC"]  # lon/lat coords appended at the end
+    assert ds.images.shape[1] == len(ds.channel_names)
+
+    fig, meta = plot_random_cutouts(ds, n=10, seed=0)
+    ARTIFACTS_DIR.mkdir(exist_ok=True)
+    out = ARTIFACTS_DIR / "cutout_grid_random10.png"
+    fig.savefig(out, dpi=80, bbox_inches="tight")
+    plt.close(fig)
+    assert out.exists() and out.stat().st_size > 0
+    assert len(meta) == min(10, ds.images.shape[0])
+
+    # No S3 deletes in code -- print the cleanup command instead.
+    out_bucket = cfg.output.bucket.strip("/")
+    out_folder = cfg.output.folder.strip("/")
+    print(f"\nTest data left at s3://{out_bucket}/{out_folder}/{run_id}/")
+    print("To remove it, run:")
+    print(f"  aws s3 rm s3://{out_bucket}/{out_folder}/{run_id}/ --recursive "
+          f"--endpoint-url {cfg.output.s3_endpoint}")
+    print(f"figure written: {out}")

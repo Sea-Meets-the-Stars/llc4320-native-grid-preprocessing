@@ -5,23 +5,28 @@ import threading
 from pathlib import PurePosixPath
 import dask.array as da
 
-# todo zarr and metadata can have empty spaces in the dataset. Shouldn't but can. We should account for this with our readers
 def make_run_prefix(bucket: str, folder: str, run_id: str, dataset_name: str) -> str:
     bucket = bucket.strip().strip("/")
     folder = folder.strip().strip("/")
     return f"s3://{str(PurePosixPath(bucket, folder, run_id, dataset_name))}"
 
-# Multi Thread Safe not Multi Process safe
+# Multi Thread Safe NOT Multi Process safe
 class ZarrDataset:
-    def __init__(self, bucket, folder, run_id, dataset_name, fs, num_channels, down_sample_res):
+    def __init__(self, bucket, folder, run_id, dataset_name, fs, channel_names, down_sample_res, target_km_res):
         path = make_run_prefix(bucket, folder, run_id, dataset_name)
         self.store = zarr.storage.FsspecStore(path=path, fs=fs)
         self.root = zarr.open_group(store=self.store, mode="a")
 
-        C, H, W = num_channels, down_sample_res, down_sample_res
+        C, H, W = len(channel_names), down_sample_res, down_sample_res
         self.C = C
         self.H = H
         self.W = W
+
+        # channel_names is the stacking order of the image channels (channel c is
+        # channel_names[c]); readers use it to map channels back to field names.
+        self.root.attrs["channel_names"] = list(channel_names)
+        self.root.attrs["target_km_res"] = target_km_res
+        self.root.attrs["down_sample_res"] = down_sample_res
 
         if "images" not in self.root:
             self.root.create_array(
@@ -41,6 +46,7 @@ class ZarrDataset:
             )
 
         # set starting index. Will be 0 if new array or len of array if appending to an existing array
+        # this style is required to link the metadata and zarr store
         self.zarr_global_index = self.root["images"].shape[0]
 
         self.lock = threading.Lock()
@@ -57,7 +63,7 @@ class ZarrDataset:
     # todo we should probably batch these before uploading
     def append_image(self, img):
 
-        with self.lock: # lock index management to ensure safety across threads or processes
+        with self.lock: # lock index management to ensure safety across threads
             i = self.zarr_global_index
             self.zarr_global_index += 1
 
@@ -65,7 +71,7 @@ class ZarrDataset:
                 raise RuntimeError("ZarrDataset capacity exceeded; call grow_array first")
 
         image_id = uuid.uuid4().hex.encode("ascii")
-        self.root["images"][i] = img.numpy() #np.expand_dims(img, axis=0) #todo I dont think we need to expand dims here, double check
+        self.root["images"][i] = img.numpy()
         self.root["image_ids"][i] = image_id
 
         return image_id
@@ -87,6 +93,11 @@ class ZarrDatasetReader:
 
         self.images = self.root["images"]
         self.image_ids = self.root["image_ids"]
+
+        self.channel_names = (list(self.root.attrs["channel_names"])
+                              if "channel_names" in self.root.attrs else None)
+        self.target_km_res = self.root.attrs.get("target_km_res")
+        self.down_sample_res = self.root.attrs.get("down_sample_res")
 
         # cached reverse index (lazy)
         self._id_to_index = None

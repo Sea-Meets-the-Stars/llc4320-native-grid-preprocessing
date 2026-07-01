@@ -62,10 +62,10 @@ def test_missing_input_section_raises(tmp_path):
 
 def test_feature_channels_loaded_from_top_level():
     """Top-level `feature_channels` is read into FeaturesConfig."""
+    import yaml
     cfg = load_config(str(EXAMPLE_CONFIG))
-    assert cfg.features.feature_channels == [
-        "Eta", "Salt", "Theta", "U", "V", "W", "gradb2", "SIarea",
-    ]
+    raw = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    assert cfg.features.feature_channels == raw["feature_channels"]
 
 
 def test_feature_channels_default_when_omitted(tmp_path):

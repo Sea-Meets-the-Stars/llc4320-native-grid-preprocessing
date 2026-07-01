@@ -1,59 +1,55 @@
 from dask import delayed
 import torch
 import dask
-import uuid
 import numpy as np
 import dask.array as da
 import logging
 from datetime import datetime
 
-import dbof.cutout_dataset_creation.spatial_patches as spatial_patches
+import dbof.cutout_dataset_creation.spatial_cutouts as spatial_cutouts
 
 @delayed
-def downsample_image_and_write_image_and_metadata_lazy(zarr_ds, metadata_writer, patch_data, image, patch, down_sample_res, target_km_res, metadata_cols):
-    index = patch_data["index"]
+def downsample_and_write_cutout_lazy(zarr_ds, metadata_writer, cutout_data, cutout_img, cutout, down_sample_res, target_km_res, metadata_cols, channels):
+    index = cutout_data["index"]
 
-    patch_metadata = dict.fromkeys(metadata_cols)
-    patch_metadata["id"] = str(uuid.uuid4())
-    patch_metadata["native_grid"] = "LLC4320"
-    patch_metadata["center_grid_face"] = index[0]
-    patch_metadata["center_grid_j"] = index[1]
-    patch_metadata["center_grid_i"] = index[2]
-    patch_metadata["target_km_res"] = target_km_res
-    patch_metadata["center_lat"] = patch_data["center_lat"]
-    patch_metadata["center_lon"] = patch_data["center_lon"]
-    patch_metadata["log_grad_b_2_center"] = patch_data["log_grad_b_2_center"]
+    cutout_metadata = dict.fromkeys(metadata_cols)
+    cutout_metadata["native_grid"] = "LLC4320"
+    cutout_metadata["center_grid_j"] = index[0]
+    cutout_metadata["center_grid_i"] = index[1]
+    cutout_metadata["target_km_res"] = target_km_res
+    cutout_metadata["center_lat"] = cutout_data["center_lat"]
+    cutout_metadata["center_lon"] = cutout_data["center_lon"]
+    cutout_metadata["log_grad_b_2_center"] = cutout_data["log_grad_b_2_center"]
 
-    patch_metadata["time_snapshot"] = patch_data["time_snapshot"]
+    cutout_metadata["time_snapshot"] = cutout_data["time_snapshot"]
 
-    patch_metadata["real_km_w"] = patch["real_km_w"]
-    patch_metadata["real_km_h"] = patch["real_km_h"]
+    cutout_metadata["real_km_w"] = cutout["real_km_w"]
+    cutout_metadata["real_km_h"] = cutout["real_km_h"]
 
-    # img_patch = patch_data["img_patch"]
-    img_patch = image
+    cutout_metadata["pre_interp_res"] = cutout_img[0].shape
 
-    patch_metadata["pre_interp_res"] = img_patch[0].shape
-
-    data_sample = spatial_patches.downsample_image(img_patch, target_dim=down_sample_res)
+    data_sample = spatial_cutouts.downsample_image(cutout_img, channels, target_dim=down_sample_res)
     image_id = zarr_ds.append_image(data_sample)
 
-    patch_metadata["dataset_index"] = image_id
-    metadata_writer.add(patch_metadata)
+    cutout_metadata["image_id"] = image_id
+    metadata_writer.add(cutout_metadata)
 
-    return data_sample, patch_metadata
+    return data_sample, cutout_metadata
 
-def create_image_cutout_lazy(ds_merge, feature_channels, cutout):
+def create_image_cutout_lazy(ds_merge, channels, cutout):
     '''
     Lazy (dask) extraction of one cutout's image stack.
 
-    Slices every requested feature channel from ds_merge over the cutout's
-    (j, i) extent and stacks them into a (C, H, W) array.  ds_merge holds
-    exactly the user-requested feature channels (plus grid vars), so we iterate
-    feature_channels directly -- no per-feature special-casing or faces.
+    Slices every channel from ds_merge over the cutout's (j, i) extent and
+    stacks them into a (C, H, W) array.  ds_merge holds the requested feature
+    channels plus the grid vars, so we iterate channels directly -- no
+    per-channel special-casing or faces.
     '''
+    # Stack in channels order; this matches the channel_names attr stored with the
+    # dataset, so channel c of every cutout is channel_names[c].
     channels_array = []
 
-    for channel in feature_channels:
+    for channel in channels:
         feature = ds_merge[channel].isel(
             j=slice(cutout["j_start"], cutout["j_end"] + 1),
             i=slice(cutout["i_start"], cutout["i_end"] + 1),
@@ -65,42 +61,42 @@ def create_image_cutout_lazy(ds_merge, feature_channels, cutout):
 
     return img
 
-def create_image_cutouts_batch_as_tensors_dask(ds_merge, feature_channels, cutouts, scheduler='threads'):
-    """Extract each cutout's requested feature channels and return them as
-    a list of (C, H, W) torch tensors."""
+def create_image_cutouts_batch_as_tensors_dask(ds_merge, channels, cutouts, scheduler='threads'):
+    """Extract each cutout's channels and return them as a list of
+    (C, H, W) torch tensors."""
     cutout_arrays = [
-        create_image_cutout_lazy(ds_merge, feature_channels, cutout)
+        create_image_cutout_lazy(ds_merge, channels, cutout)
         for cutout in cutouts
     ]
-    computed_arrays = dask.compute(*cutout_arrays, scheduler=scheduler) # todo does this create problems materializing log_grad_np? If not we don't need to materialize it or pass it around
+    computed_arrays = dask.compute(*cutout_arrays, scheduler=scheduler)
     return [torch.from_numpy(np.asarray(arr)) for arr in computed_arrays]
 
-def extract_patch_extents_and_metadata_in_series(index, XC, YC, log_gradb_np,
-                                                 dxC, dyC, target_km_res, time_snapshot):
+def extract_cutout_extents_and_metadata_in_series(index, XC, YC, log_gradb_np,
+                                                  dxC, dyC, target_km_res, time_snapshot):
     """
-    Build patch metadata + spatial extents for one ``(j, i)`` center.
+    Build cutout metadata + spatial extents for one ``(j, i)`` center.
 
     All grid inputs are numpy (materialized once by the caller) so this stays a
     cheap in-memory operation.
     """
 
-    patch_meta_data = {}
-    patch_meta_data["index"] = index
-    patch_meta_data["center_lat"] = float(YC[index])
-    patch_meta_data["center_lon"] = float(XC[index])
-    patch_meta_data["log_grad_b_2_center"] = log_gradb_np[index]
-    patch_meta_data["time_snapshot"] = time_snapshot
+    cutout_meta_data = {}
+    cutout_meta_data["index"] = index
+    cutout_meta_data["center_lat"] = float(YC[index])
+    cutout_meta_data["center_lon"] = float(XC[index])
+    cutout_meta_data["log_grad_b_2_center"] = log_gradb_np[index]
+    cutout_meta_data["time_snapshot"] = time_snapshot
 
-    patch = spatial_patches.get_lat_lon_extents_of_patch(index, dxC, dyC, XC.shape, target_km_res)
+    cutout = spatial_cutouts.get_lat_lon_extents_of_cutout(index, dxC, dyC, XC.shape, target_km_res)
 
-    if patch is None:
+    if cutout is None:
         return None, None
 
-    return patch, patch_meta_data
+    return cutout, cutout_meta_data
 
-def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
+def run_cutout_creation(zarr_ds, metadata_writer, down_sample_res,
                  indices, ds_merge, target_km_res, metadata_cols, log_gradb_np,
-                 date_prefix, feature_channels, logger=None):
+                 date_prefix, channels, logger=None):
 
     logger = logger or logging.getLogger(__name__)
 
@@ -112,32 +108,29 @@ def run_patch_creation(zarr_ds, metadata_writer, down_sample_res,
     dyC = np.asarray(ds_merge["dyC"].values)
     time_snapshot = np.datetime64(datetime.strptime(date_prefix, "%Y%m%d_%H%M%S"), "ns")
 
-    patch_meta_data_list = []
-    patches = []
+    cutout_meta_data_list = []
+    cutouts = []
 
-    logger.info(f"Starting patch extents cutout_dataset_creation")
+    logger.info("Starting cutout extents + metadata")
     for index in indices:
-        # Calculate the extents of each patch
-        patch, patch_meta_data = extract_patch_extents_and_metadata_in_series(
+        cutout, cutout_meta_data = extract_cutout_extents_and_metadata_in_series(
             index, XC, YC, log_gradb_np, dxC, dyC, target_km_res, time_snapshot)
 
-        # Occurs from some error in the patch, likely extends past the grid boundaries (off the face of the world)
-        if patch_meta_data is not None:
-            patch_meta_data_list.append(patch_meta_data)
-            patches.append(patch)
+        # None when the cutout extends past the grid boundaries (off the edge)
+        if cutout_meta_data is not None:
+            cutout_meta_data_list.append(cutout_meta_data)
+            cutouts.append(cutout)
 
-    logger.info("Starting batched image cutout_dataset_creation")
-    images = create_image_cutouts_batch_as_tensors_dask(ds_merge, feature_channels, patches, scheduler='threads')
+    logger.info("Starting batched cutout image creation")
+    images = create_image_cutouts_batch_as_tensors_dask(ds_merge, channels, cutouts, scheduler='threads')
 
-    # todo left off here
+    logger.info(f"Generated {len(images)} cutouts")
 
-    # Downsample images and get metadata ----------------------------------------------------
-    logger.info("Downsampling Images")
+    # Downsample cutouts and write metadata --------------------------------------------------
+    logger.info("Downsampling cutouts and writing in parallel")
     tasks = []
-    for pd, image, patch in zip(patch_meta_data_list, images, patches):
-        tasks.append(downsample_image_and_write_image_and_metadata_lazy(zarr_ds, metadata_writer, pd, image, patch, down_sample_res, target_km_res, metadata_cols))
+    for meta, image, cutout in zip(cutout_meta_data_list, images, cutouts):
+        tasks.append(downsample_and_write_cutout_lazy(zarr_ds, metadata_writer, meta, image, cutout, down_sample_res, target_km_res, metadata_cols, channels))
 
     # Writing data is only thread safe for now. Not processes safe.
     dask.compute(*tasks, scheduler='threads')
-
-    return images

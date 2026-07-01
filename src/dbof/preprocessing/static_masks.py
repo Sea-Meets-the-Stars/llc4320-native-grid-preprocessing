@@ -82,8 +82,12 @@ def generate_static_face_mask_for_sampling(ds_grid, target_km_res, DXC=None, DYC
     """
     Construct a static *face-only* sampling mask for the LLC native grid.
 
-    Excludes grid-face perimeter cells and applies a halo buffer based on the 
+    Excludes grid-face perimeter cells and applies a halo buffer based on the
         target physical resolution to face perimeter cells.
+
+    .. note::
+       Currently unused by the stitched-grid cutout pipeline (which has no face
+       perimeters). Kept for potential future native-grid / per-face sampling.
 
     Notes
     ----------
