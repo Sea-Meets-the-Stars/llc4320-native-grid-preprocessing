@@ -1,24 +1,42 @@
-# Sampling with Log ΔB^2 
+# Sampling with Log ΔB²
 
-In this document we discuss our approach to sampling data patches based on the ΔB^2 value. 
+Cutout centers are sampled with probability weighted by the surface **buoyancy gradient
+magnitude squared** (ΔB²). This intends to concentrate cutouts on
+dynamically active regions. Sampling runs on `log10(ΔB²)` — see [Weighted Sampling](Weighted_Sampling.md).
 
-## Log ΔB^2 Calculation 
+## Log ΔB² calculation
+ΔB² is computed in **generate-global** (the `frontal_structure` subset) and stored as the
+`gradb2` channel; the cutout job reads it and takes `log10` at sample time
+(`processing.sample_cutout_centers_with_loggradb`). Reference impl:
+`calculate_additional_fields.grad_b2` / `log_grad_b`.
 
 ### Buoyancy
-is calculated at each tracer cell as 
+Surface buoyancy `b` is derived from `Theta` and `Salt` (`physical_calculations.buoyancy_of_field`).
 
-### ΔB^2 
+### ΔB²
+Horizontal gradient of `b` on the native grid, then squared magnitude:
+`ΔB² = (∂b/∂x)² + (∂b/∂y)²`  (units s⁻⁴).
 
-### Log Scale
+### Log scale
+ΔB² spans many orders of magnitude, so we sample on `log10(ΔB²)`. Combined with the
+exponential weight `exp(bias·(v − min))`, `bias` then acts as a power-law knob on ΔB².
 
-## ΔB^2 Probability Map
-The sampling is done using the weighted coordinate sampling module.
-See Weighted_Sampling.md for more information on this algorithm. 
+## ΔB² probability map
+Sampling uses the [weighted coordinate sampling](Weighted_Sampling.md) module on
+`log10(ΔB²)`, restricted to the ocean mask (land + ice halos). Higher `bias` → more
+concentrated on fronts.
 
-Below we visualize the probability mapping of ΔB^2 for various biases. 
+## Sampling points
+Controlled by `sampling.sample_points_per_snapshot` and `sampling.bias_to_high_gradients`
+in the run config.
 
-Bias : ![Alt text for image](images/theta_llcgrid.png)
+![weighted_sample_points.png](images/weighted_sample_points.png)
 
-## Sampling Points 
+## River outflow issue
+Freshwater river outflows produce very large ΔB², which can dominate the weighting and pull a
+disproportionate share of cutouts toward river mouths. This is controlled by the bias weight. If the weight is too high,
+all samples will be drawn from near freshwater or ice melt. The tuned value is 1.3. 
 
-## River Outflow Issue 
+## Related
+- [Weighted Sampling](Weighted_Sampling.md)
+- [Generating Cutout Data](generating_cutout_data_v1_2.md)

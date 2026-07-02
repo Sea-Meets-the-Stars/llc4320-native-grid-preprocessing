@@ -13,8 +13,8 @@ pipeline: "SURF"
 data_access:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "surface_fields"
-  run_id: "global_SURF_test01"
+  folder: "test_data_for_cutouts"
+  run_id: "cutout_test_data_v1"
 
 # Grid Zarr store written by generate_grid_global.py.
 # NOTE: The grid is stored WITHOUT a run_id prefix (shared across all runs):
