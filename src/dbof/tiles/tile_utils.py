@@ -45,12 +45,23 @@ from dask.diagnostics import ProgressBar
 # repo modules (installed as the ``dbof`` package).
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
-import dbof.utils.physical_calculations as physical_calculations
+import dbof.preprocessing.calculated_fields_at_depth as calculated_fields_at_depth
+import dbof.utils.faces_to_latlon as faces_to_latlon
 from dbof.global_dataset_creation.data_sources import get_data_source
 # Reuse the canonical date<->iteration converter + format and the git-commit
 # provenance helper instead of re-implementing them here (they were identical).
+# NOTE (PR #10): in a future PR ``iterations`` moves to
+# ``llc4320_ingestion.date_iterations`` (a backwards-compatible shim is kept at
+# the old location), so this import will keep working after the rebase.
 from dbof.global_dataset_creation.iterations import mit_date_to_iteration, DATE_FMT
-from dbof.global_dataset_creation.logging import _git_commit_hash
+# ``_git_commit_hash`` moved from ``global_dataset_creation.logging`` to
+# ``global_dataset_creation.metadata`` on main.  Prefer the new location and
+# fall back to the old one so the import survives both before and after the
+# branch is rebased onto main.
+try:
+    from dbof.global_dataset_creation.metadata import _git_commit_hash
+except ImportError:  # pragma: no cover - pre-rebase location
+    from dbof.global_dataset_creation.logging import _git_commit_hash
 
 # local -- tile_mapping lives next to this file in the dbof.tiles package.
 from dbof.tiles.tile_mapping import rect_ij_to_tile, TileInfo
@@ -167,6 +178,63 @@ def _build_output_path(
     if p.is_dir():
         return (p / default_name).resolve()
     return p.resolve()
+
+
+# ---------------------------------------------------------------------------
+# Geographic coordinate resolution
+# ---------------------------------------------------------------------------
+
+def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
+    """Resolve a geographic (lon, lat) to the nearest rect-grid pixel (i, j).
+
+    Loads ``XC``/``YC`` from ``grid.zarr``, stitches them to the rectangular
+    grid with the same routine the data pipeline uses, then returns the rect
+    pixel whose (lon, lat) is closest to the request.  This lets a user ask for
+    a tile by geographic location instead of having to know the rect index.
+
+    Parameters
+    ----------
+    lon : float
+        Target longitude in degrees east.  Any convention is accepted -- the
+        longitude difference is wrapped to [-180, 180) before comparison.
+    lat : float
+        Target latitude in degrees north.
+    s3_cfg : dict
+        S3 source config (see :func:`_resolve_s3_source`); ``grid.zarr`` is read
+        from ``grid_folder``.
+
+    Returns
+    -------
+    tuple of int
+        ``(i_rect, j_rect)`` -- the rect-grid pixel nearest to (lon, lat),
+        suitable to hand to :func:`dbof.tiles.tile_mapping.rect_ij_to_tile`.
+    """
+    logging.info(f"Resolving (lon={lon}, lat={lat}) to a rect-grid pixel")
+    co = get_raw_data.get_llc_depth_gridfile(
+        s3_cfg["s3_endpoint"],
+        s3_cfg["bucket"],
+        s3_cfg["grid_folder"],
+    )
+    ds_grid = preproc_llc_core_data.process_llc4320_3d_grid(co)
+    # Only XC/YC are needed to locate the pixel; compute just those to stay cheap.
+    coords_2d = ds_grid[["XC", "YC"]].compute()
+    rect = faces_to_latlon.faces_dataset_to_latlon(coords_2d, metric_vector_pairs=[])
+    xc = rect["XC"].values
+    yc = rect["YC"].values
+
+    # Wrap the longitude difference into [-180, 180) so the meridian seam does
+    # not create a spurious "far" distance; a plain squared distance in
+    # (dlon, dlat) is enough to pick the nearest cell at LLC4320 resolution.
+    dlon = (xc - lon + 180.0) % 360.0 - 180.0
+    dlat = yc - lat
+    dist2 = dlon * dlon + dlat * dlat
+    j_rect, i_rect = np.unravel_index(int(np.argmin(dist2)), dist2.shape)
+    logging.info(
+        f"Nearest rect pixel: (i={int(i_rect)}, j={int(j_rect)}) "
+        f"at (lon={float(xc[j_rect, i_rect]):.4f}, "
+        f"lat={float(yc[j_rect, i_rect]):.4f})"
+    )
+    return int(i_rect), int(j_rect)
 
 
 # ---------------------------------------------------------------------------
@@ -292,12 +360,22 @@ class TileProperty:
     compute:          Callable[[xr.Dataset], xr.DataArray]
 
 
+# Reference density subtracted from in-situ/potential density to form the
+# sigma anomaly (sigma0 = rho - 1000).  Named to avoid a bare magic number and
+# to match the same offset used in
+# ``calculated_fields_at_depth.mixed_layer_depth``.
+SIGMA0_REFERENCE_DENSITY = 1000.0  # kg m^-3
+
+
 def _compute_sigma0(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
     """Potential density anomaly referenced to the surface.
 
-    Uses ``dbof.utils.physical_calculations.density_of_field``, which calls
-    JMD95 with ``p=0`` and an ``apply_ufunc(..., dask='parallelized')`` path,
-    then subtracts 1000.
+    Reuses the canonical JMD95 density routine
+    ``calculated_fields_at_depth._density_lazy`` (the single density path the
+    global depth pipeline uses -- it calls JMD95 with ``p=0`` via an
+    ``apply_ufunc(..., dask='parallelized')`` graph), then subtracts the
+    reference density to form the sigma0 anomaly.  This keeps one computational
+    method for density across the global and tiled pipelines.
 
     Parameters
     ----------
@@ -310,8 +388,8 @@ def _compute_sigma0(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
         ``sigma0`` (kg m^-3) on the same dims as inputs (still dask-backed
         if the inputs were).
     """
-    rho = physical_calculations.density_of_field(ds_tracers_tile)
-    return rho - 1000.0
+    rho = calculated_fields_at_depth._density_lazy(ds_tracers_tile)
+    return rho - SIGMA0_REFERENCE_DENSITY
 
 
 def _compute_theta(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
@@ -500,7 +578,7 @@ def _build_output_dataset(
             "rect_i_user":   rect_i_user,
             "rect_j_user":   rect_j_user,
             "property":      prop.name,
-            "source_script": "src/dbof/tiles/generate_tile.py",
+            "source_script": "src/dbof/cli/generate_tile.py",
             "git_commit":    _git_commit_hash(),
         },
     )
@@ -552,21 +630,29 @@ def _qa_plot(
 # ---------------------------------------------------------------------------
 
 def run(
-    i_rect: int,
-    j_rect: int,
-    timestamp: str,
+    i_rect: int | None = None,
+    j_rect: int | None = None,
+    timestamp: str = None,
     property: str = "density",
     output: str | None = None,
     config_path: Path | None = DEFAULT_CONFIG,
     clobber: bool = False,
     gen_qa_plot: bool = False,
+    lon: float | None = None,
+    lat: float | None = None,
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
+    The target tile is selected either by rect-grid pixel (``i_rect``,
+    ``j_rect``) or by geographic coordinate (``lon``, ``lat``); supply exactly
+    one of the two pairs.  A geographic request is resolved to the nearest rect
+    pixel via :func:`latlon_to_rect_ij` before the usual tile lookup.
+
     Parameters
     ----------
-    i_rect, j_rect : int
+    i_rect, j_rect : int, optional
         Rect-grid pixel coordinates; any pixel inside the desired tile is OK.
+        Mutually exclusive with (``lon``, ``lat``).
     timestamp : str
         Snapshot timestamp in ``DATE_FMT``.
     property : str, default ``'density'``
@@ -581,17 +667,25 @@ def run(
         If True, overwrite an existing output file; otherwise skip and return.
     gen_qa_plot : bool, default False
         If True, also write a surface QA plot (PNG) next to the NetCDF.
+    lon, lat : float, optional
+        Geographic longitude/latitude of the desired tile.  Mutually exclusive
+        with (``i_rect``, ``j_rect``); resolved to the nearest rect pixel via
+        :func:`latlon_to_rect_ij`.
 
     Returns
     -------
-    Path or None
-        Absolute path of the written NetCDF, or ``None`` if the output file
-        already existed and ``clobber`` was False (the run was skipped).
+    Path
+        Absolute path of the written NetCDF.  If the output file already
+        existed and ``clobber`` was False the run is skipped, but the existing
+        path is still returned (the function always promises a ``Path``).
 
     Raises
     ------
     KeyError
         If ``property`` is not a registered key in :data:`TILE_PROPERTIES`.
+    ValueError
+        If neither or both of the (i_rect, j_rect) / (lon, lat) pairs are given,
+        or if ``timestamp`` is missing.
     """
     if property not in TILE_PROPERTIES:
         raise KeyError(
@@ -599,6 +693,27 @@ def run(
             f"Available: {sorted(TILE_PROPERTIES)}"
         )
     prop = TILE_PROPERTIES[property]
+
+    if timestamp is None:
+        raise ValueError("timestamp is required")
+
+    # Validate that exactly one location convention was supplied.
+    have_ij = i_rect is not None and j_rect is not None
+    have_lonlat = lon is not None and lat is not None
+    if have_ij == have_lonlat:
+        raise ValueError(
+            "Supply exactly one of (i_rect, j_rect) or (lon, lat) -- "
+            f"got i_rect={i_rect}, j_rect={j_rect}, lon={lon}, lat={lat}."
+        )
+
+    # Resolve the S3 source up front (needed now for a geographic lookup, and
+    # reused for the grid/tracer loads below).  Canonical DEPTH source unless a
+    # legacy YAML override is passed.
+    s3_cfg = _resolve_s3_source(config_path)
+
+    # A geographic request is turned into a rect pixel via the grid file.
+    if have_lonlat:
+        i_rect, j_rect = latlon_to_rect_ij(lon, lat, s3_cfg)
 
     # 1-2: resolve tile geometry and iteration number.
     tile = rect_ij_to_tile(i_rect, j_rect)
@@ -617,10 +732,7 @@ def run(
     )
     if out_path.exists() and not clobber:
         logging.info(f"Output file {out_path} already exists. Skipping.")
-        return
-
-    # Proceed -- resolve the S3 source (canonical DEPTH source by default).
-    s3_cfg = _resolve_s3_source(config_path)
+        return out_path
 
     # 3: load grid for the tile (used purely for output coords now -- no mask).
     ds_grid_tile = _load_grid_for_tile(s3_cfg, tile)
