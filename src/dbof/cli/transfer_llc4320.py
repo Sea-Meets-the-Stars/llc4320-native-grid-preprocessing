@@ -50,7 +50,7 @@ import fsspec
 import yaml
 
 # internal
-import dbof.dataset_creation.config as config
+import dbof.cutout_dataset_creation.config as config
 
 
 # ---------------------------------------------------------------------------

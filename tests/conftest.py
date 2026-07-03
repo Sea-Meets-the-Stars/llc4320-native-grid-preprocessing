@@ -1,5 +1,5 @@
 import pytest
-import dbof.dataset_creation.zarr_dataset as zarr_dataset
+import dbof.cutout_dataset_creation.zarr_dataset as zarr_dataset
 import dbof.io.filesystems as filesystems
 
 
@@ -17,7 +17,7 @@ def zarr_reader():
         bucket=bucket,
         folder=folder,
         run_id=run_id,
-        dataset_name="dataset_creation.zarr",
+        dataset_name="cutout_dataset_creation.zarr",
         fs=fs
     )
     return reader

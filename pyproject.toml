@@ -72,7 +72,7 @@ test = ["pytest"]
 where = ["src"]
 
 [project.scripts]
-generate-llc-dataset = "dbof.cli.generate_front_training_data:main"
+generate-llc-dataset = "dbof.cli.generate_cutout_dataset:main"
 generate-global = "dbof.cli.generate_global:main"
 generate-global-grid-zarr = "dbof.cli.generate_grid_global:main"
 zarr-to-netcdf = "dbof.cli.zarr_to_netcdf:main"
