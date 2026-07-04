@@ -38,6 +38,16 @@ diagnostics where the absolute magnitude matters more than the
 Boussinesq simplification.
 """
 
+SIGMA0_REFERENCE_DENSITY = 1000.0
+"""float: Reference density subtracted to form the σ₀ anomaly [kg m⁻³].
+
+    σ₀ = ρ(S, Θ, p=0) − SIGMA0_REFERENCE_DENSITY
+
+Used by :func:`calculated_fields_at_depth.potential_density_anomaly_3d`
+(and the mixed-layer-depth criterion) so the ``− 1000`` offset is named in
+exactly one place.
+"""
+
 # ---------------------------------------------------------------------------
 # Seawater thermodynamic properties
 # ---------------------------------------------------------------------------

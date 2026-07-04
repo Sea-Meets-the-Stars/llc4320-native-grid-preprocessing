@@ -237,6 +237,7 @@ It would be cool to organize our compute functions with a class for each field s
    perform the rebase itself — it is a shared-branch, potentially-conflicting,
    hard-to-reverse operation that I think a maintainer should drive. Confirm
    whether you'd like me to attempt it.
+>A. Done
 
 ## Prompts
 
@@ -253,6 +254,7 @@ It would be cool to organize our compute functions with a class for each field s
 11. Re-read this document.  Execute the 2nd item under Docs
 
 12. Please see the PR comments at `https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/10`.  Do your best to address them.  If you have any questions, put them under the Clarification section.  Log your work.
+13. See my answer to Prompt 12.  Continue on addressing the PR comments. Log your work.
 
 
 ## Logging
@@ -544,3 +546,75 @@ progress)" note under Known issues).
 **Not done (flagged in Clarifications):** the full compute-unification rewire and
 the branch rebase onto `main` — both need a maintainer decision (Slack detail /
 shared-branch rebase).
+
+### 2026-07-03 (Prompt 13: finish PR #10 compute unification + integrate main)
+
+Picked up the two items I'd deferred in Prompt 12, now that the answers are in.
+
+**State on resume.** The branch had been brought up to date with `main` (merge
+commit `41c1bab`, now 0 behind — this is the "Done" answer to the rebase
+question). `_git_commit_hash` now lives in `global_dataset_creation.metadata`;
+my Prompt-12 `try metadata → except → logging` import resolves to `metadata`
+automatically, and all Prompt-12 changes survived the merge (verified: the
+`cli/generate_tile.py` move, `latlon_to_rect_ij`, cache removal, tests — offline
+suite still 20/20). So the rebase item needed no further code from me.
+
+**Compute unification (the Slack answer to clarification #1).** The instruction:
+*every property has exactly one calculation function, and those live in
+`preprocessing/calculated_fields_at_depth`; `tile_utils` must not host field
+math (today it's just `ρ−1000`, but it sets up a bad precedent where tiles could
+grow a second copy of, e.g., relative vorticity). The existing compute functions
+take a plain xarray, so they should be reusable here.* What I did:
+
+1. Added the single canonical σ₀ routine
+   `calculated_fields_at_depth.potential_density_anomaly_3d(ds_merge, grid=None)`
+   = `_density_lazy(ds) − SIGMA0_REFERENCE_DENSITY`, named `sigma0` with units/
+   long_name. Signature matches the other field functions so it drops into the
+   same dispatch tables. Its `grid` arg is accepted-but-unused for uniformity.
+2. Added `SIGMA0_REFERENCE_DENSITY = 1000.0` to `physical_constants.py` so the
+   `−1000` offset is defined in exactly one place.
+3. Refactored `calculated_fields_at_depth.mixed_layer_depth` to call
+   `potential_density_anomaly_3d` instead of its own inline `rho = _density_lazy`
+   + `sigma0 = rho − 1000.0`. Numerics identical; removes the in-module
+   duplicate of the offset.
+4. **Removed all density math from `tile_utils`**: deleted `_compute_sigma0` and
+   the local `SIGMA0_REFERENCE_DENSITY`; the `density` registry entry's
+   `compute` now points directly at
+   `calculated_fields_at_depth.potential_density_anomaly_3d`. Added a module
+   comment stating property *calculations* do not live here — only trivial
+   native-variable selection (temperature/salinity passthroughs) remains, since
+   there's nothing to compute for a field the model already stores.
+
+I did **not** rewire onto `subset_definitions.get_compute_fn` / build an xgcm
+grid + `ds_merge` per tile, nor introduce a per-field class. The Slack note
+frames those ("organize compute functions with a class for each field") as the
+*nice-to-have* cleanup for the follow-up `tile_fields` PR; the required change
+here was removing the second computation path, which is done.
+
+**Tests.** Added `test_density_uses_canonical_compute_fn` (asserts the registry
+delegates to `potential_density_anomaly_3d` and that `_compute_sigma0` /
+`SIGMA0_REFERENCE_DENSITY` no longer exist on `tile_utils`) and
+`test_potential_density_anomaly_3d_value` (canonical routine returns
+`jmd95(35.5, 3, 0) − 1000`). Tile suite: **22 passed, 5 deselected** (~16s).
+The existing `test_run_round_trip[density]` still passes end-to-end through the
+new canonical path, so the delegation is exercised for real, not just by
+identity.
+
+**Full offline suite:** 55 passed, 1 skipped. The only failures
+(`test_zarr_to_netcdf`, `test_zarr_valid_reader` — `TypeError: Filesystem needs
+to support async operations`) are pre-existing and environment-related: I
+confirmed they fail identically on the committed HEAD with my `src/` changes
+stashed, and they touch none of the modules I edited.
+
+**What I learned.** `_density_lazy`'s docstring mentions "grid-metric variables"
+but its body only uses `Theta`/`Salt`, so the canonical σ₀ routine works
+unchanged on a bare tile tracer dataset — no grid needed, which is why the
+reviewer's "these functions only expect an xarray in" holds for density. Field
+functions that need differential operators (vorticity, strain, …) do take an
+xgcm `grid`; wiring those for tiles is the real content of the `tile_fields`
+follow-up.
+
+**Docs:** updated `docs/Tiles.md` — density now documented as delegating to
+`potential_density_anomaly_3d`; building-blocks list updated; the "Compute
+unification" note under Known issues rewritten from "in progress" to "done for
+calculations, per-field-class generalization deferred to `tile_fields`".

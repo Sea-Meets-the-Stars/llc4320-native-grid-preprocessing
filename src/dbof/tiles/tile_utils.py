@@ -360,36 +360,13 @@ class TileProperty:
     compute:          Callable[[xr.Dataset], xr.DataArray]
 
 
-# Reference density subtracted from in-situ/potential density to form the
-# sigma anomaly (sigma0 = rho - 1000).  Named to avoid a bare magic number and
-# to match the same offset used in
-# ``calculated_fields_at_depth.mixed_layer_depth``.
-SIGMA0_REFERENCE_DENSITY = 1000.0  # kg m^-3
-
-
-def _compute_sigma0(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
-    """Potential density anomaly referenced to the surface.
-
-    Reuses the canonical JMD95 density routine
-    ``calculated_fields_at_depth._density_lazy`` (the single density path the
-    global depth pipeline uses -- it calls JMD95 with ``p=0`` via an
-    ``apply_ufunc(..., dask='parallelized')`` graph), then subtracts the
-    reference density to form the sigma0 anomaly.  This keeps one computational
-    method for density across the global and tiled pipelines.
-
-    Parameters
-    ----------
-    ds_tracers_tile : xr.Dataset
-        Tile dataset with ``Theta`` (deg C) and ``Salt`` (PSU).
-
-    Returns
-    -------
-    xr.DataArray
-        ``sigma0`` (kg m^-3) on the same dims as inputs (still dask-backed
-        if the inputs were).
-    """
-    rho = calculated_fields_at_depth._density_lazy(ds_tracers_tile)
-    return rho - SIGMA0_REFERENCE_DENSITY
+# NOTE: property *calculations* deliberately do NOT live in this module.  Each
+# calculated field has exactly one implementation in
+# ``preprocessing.calculated_fields_at_depth`` (e.g. potential density is
+# ``potential_density_anomaly_3d``); the registry below points ``compute`` at
+# those canonical functions.  Only trivial native-variable *selection*
+# (temperature/salinity passthroughs) stays here, since there is nothing to
+# compute for a field the model already stores.
 
 
 def _compute_theta(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
@@ -436,7 +413,8 @@ TILE_PROPERTIES: dict[str, TileProperty] = {
         units="kg m-3",
         long_name="potential density anomaly referenced to surface (JMD95, p=0)",
         filename_prefix="density",
-        compute=_compute_sigma0,
+        # Single canonical σ₀ routine -- shared with the global depth pipeline.
+        compute=calculated_fields_at_depth.potential_density_anomaly_3d,
     ),
     "temperature": TileProperty(
         name="temperature",

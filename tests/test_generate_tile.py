@@ -314,6 +314,46 @@ def test_run_requires_exactly_one_location():
 
 
 # ---------------------------------------------------------------------------
+# Single canonical compute path (PR #10: no property math in tile_utils)
+# ---------------------------------------------------------------------------
+
+def test_density_uses_canonical_compute_fn():
+    """The density property must delegate to the one shared σ₀ routine.
+
+    The whole point of the PR-10 fix is that tile properties are *not* computed
+    by bespoke functions in ``tile_utils``; density must be the canonical
+    ``calculated_fields_at_depth.potential_density_anomaly_3d``.
+    """
+    import dbof.preprocessing.calculated_fields_at_depth as cfd
+
+    assert tu.TILE_PROPERTIES["density"].compute is cfd.potential_density_anomaly_3d
+    # And no property-calculation helper leaked back into tile_utils.
+    assert not hasattr(tu, "_compute_sigma0")
+    assert not hasattr(tu, "SIGMA0_REFERENCE_DENSITY")
+
+
+def test_potential_density_anomaly_3d_value():
+    """The canonical σ₀ routine returns jmd95(S, Θ, 0) − 1000 on a tiny tile."""
+    import dbof.preprocessing.calculated_fields_at_depth as cfd
+    import dbof.utils.jmd95_xgcm_implementation as jmd95
+    from dbof.preprocessing.physical_constants import SIGMA0_REFERENCE_DENSITY
+
+    theta = np.full((1, 2, 2, 2), 3.0, dtype=np.float32)
+    salt = np.full((1, 2, 2, 2), 35.5, dtype=np.float32)
+    ds = xr.Dataset(
+        {
+            "Theta": (("face", "k", "j", "i"), theta),
+            "Salt": (("face", "k", "j", "i"), salt),
+        },
+        coords={"face": [0], "k": np.arange(2)},
+    )
+    sigma0 = cfd.potential_density_anomaly_3d(ds).compute()
+    expected = float(jmd95.jmd95(35.5, 3.0, 0.0)) - SIGMA0_REFERENCE_DENSITY
+    assert sigma0.name == "sigma0"
+    np.testing.assert_allclose(sigma0.values, expected, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
 # Helpers (private to the tests)
 # ---------------------------------------------------------------------------
 
