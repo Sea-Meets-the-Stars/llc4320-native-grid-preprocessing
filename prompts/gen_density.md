@@ -255,6 +255,7 @@ It would be cool to organize our compute functions with a class for each field s
 
 12. Please see the PR comments at `https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/10`.  Do your best to address them.  If you have any questions, put them under the Clarification section.  Log your work.
 13. See my answer to Prompt 12.  Continue on addressing the PR comments. Log your work.
+14. Make comments and resolve conversations for any of the comments that you addressed in the PR. Log your work.
 
 
 ## Logging
@@ -614,3 +615,36 @@ follow-up.
 `potential_density_anomaly_3d`; building-blocks list updated; the "Compute
 unification" note under Known issues rewritten from "in progress" to "done for
 calculations, per-field-class generalization deferred to `tile_fields`".
+
+### 2026-07-04 (Prompt 14: reply to + resolve the addressed PR #10 threads)
+
+Closed the loop on the review conversations for every comment fixed in Prompts
+12–13. Authenticated as `profxj` (PR author, `repo` scope).
+
+**Mechanics.** Pulled the 11 inline review comments
+(`gh api .../pulls/10/comments`) and the matching review threads via GraphQL
+(`reviewThreads` → thread node id + first-comment `databaseId` + `isResolved`;
+all 11 were unresolved). For each thread: posted a reply describing the fix
+(`POST /repos/.../pulls/10/comments/{id}/replies`), then resolved it
+(GraphQL `resolveReviewThread` mutation).
+
+**Threads replied-to + resolved (11/11):**
+
+- lahoffman `tile_utils.py` ×3 — tiles_fields generalization note (ack);
+  `iterations`→`date_iterations` future move (ack, import unaffected);
+  `_git_commit_hash`→`metadata` (fixed via try/except import).
+- jaketall7 `generate_tile.py` ×2 — move to `cli/` + `.toml` (done);
+  coordinate→i,j (added `--lon`/`--lat` + `latlon_to_rect_ij`).
+- jaketall7 `tile_mapping.py` ×2 — straddle guard (clarified); lookup cache
+  (removed).
+- jaketall7 `tile_utils.py` ×4 — support global-maps fields (compute now
+  delegates to canonical `calculated_fields_at_depth`); return existing path
+  (fixed); multiple compute paths (single `potential_density_anomaly_3d`);
+  magic number (named `SIGMA0_REFERENCE_DENSITY`).
+
+Verified afterward via GraphQL: **0 unresolved threads** remain on PR #10.
+
+**Note for the maintainer:** the replies describe changes that are still in the
+local working tree — the branch has not been committed/pushed yet, so the fixes
+won't be visible in the PR diff until pushed. Resolving now was the explicit
+ask; the commit/push is the remaining step.
