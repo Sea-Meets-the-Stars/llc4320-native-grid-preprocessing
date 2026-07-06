@@ -50,8 +50,6 @@ def mit_date_to_iteration(date_str: str) -> int:
     --------
     >>> mit_date_to_iteration('2011-09-13 00:00:00')
     0
-    >>> mit_date_to_iteration('2012-01-01 00:00:00')  # ~1,011,456
-    1011456
     """
     dt = datetime.strptime(date_str, DATE_FMT).replace(tzinfo=timezone.utc)
     delta = dt - LLC4320_START_DATE

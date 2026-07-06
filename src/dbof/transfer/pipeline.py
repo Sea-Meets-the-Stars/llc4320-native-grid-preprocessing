@@ -49,12 +49,18 @@ def _dataset_name_from_date(date_str: str) -> str:
     return dt.strftime("%Y%m%dT%H") + ".zarr"
 
 
+# Variables exempt from the corrupt-date guard: 'time' is not a field, and
+# sea-ice is legitimately all zeros away from the poles (e.g. face 1).
+VALIDITY_CHECK_SKIP = {"time", "SIarea"}
+
+
 def date_has_valid_data(ds, var, time_idx, face=1, tile=720):
     """Cheap corrupt-date guard: a healthy *var* sample has >2 unique values
     (NaN over land + varying ocean); all-zeros/all-NaN dates have <=2.
-    Samples a single *tile* x *tile* chunk of *face* only."""
-    sample = ds[var].isel(time=time_idx, face=face,
-                          j=slice(0, tile), i=slice(0, tile)).values
+    Samples a single *tile* x *tile* chunk of *face* only.  Slices whatever
+    horizontal dims the variable has (handles staggered i_g/j_g grids)."""
+    da = ds[var].isel(time=time_idx, face=face)
+    sample = da.isel({d: slice(0, tile) for d in da.dims if d[0] in "ij"}).values
     return np.unique(sample).size > 2
 
 
@@ -213,7 +219,7 @@ def run(
         for date_str in _resolve_dates(cfg, date_override):
             iteration = mit_date_to_iteration(date_str)
             time_idx = mit_date_to_time_idx(date_str, ntime)
-            bad = [v for v in time_variables if v != "time"
+            bad = [v for v in time_variables if v not in VALIDITY_CHECK_SKIP
                    and not date_has_valid_data(ds, v, time_idx)]
             if bad:
                 logging.warning(f"SKIPPING {date_str}: {bad} sample(s) are "
