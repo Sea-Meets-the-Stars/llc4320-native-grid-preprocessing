@@ -7,7 +7,7 @@ the *assertions* here are numeric (all-NaN detection, exact equality,
 matching shapes) — that is what CI or a reviewer runs.  The images the
 notebooks produce are diagnostics, not tests, so they are opt-in artifacts:
 
-    DBOF_SAVE_PLOTS=1 python -m pytest -m s3_dbof tests/test_transfer_integrity.py
+    DBOF_SAVE_PLOTS=1 pytest --run-integration -m s3_dbof tests/test_transfer_integrity.py
 
 writes side-by-side PNGs for every compared chunk to ``tests/artifacts/``
 (using the headless Agg backend).  Look at them when a test fails; ignore
@@ -18,15 +18,16 @@ face (defaults: face 1, 720x720 — the same guard the transfer pipeline runs
 inline), for **every time-varying variable and every date** in
 ``configs/transfer/run_surface.yaml``.
 
-Selection (plain ``pytest`` skips all of these — see pyproject.toml):
+Running (integration tests are skipped unless ``--run-integration`` is
+passed — see conftest.py):
 
-    python -m pytest -m s3_dbof tests/test_transfer_integrity.py  # NEW vs OLD S3
-    python -m pytest -m mit     tests/test_transfer_integrity.py  # MIT-side tests
-                                                                  # (on MIT machine)
+    pytest --run-integration -m s3_dbof tests/test_transfer_integrity.py  # NEW vs OLD S3
+    pytest --run-integration -m mit     tests/test_transfer_integrity.py  # MIT-side
+                                                                          # (on MIT machine)
 
 If the dbof S3 bucket is down, only the MIT-source corruption check can run:
 
-    python -m pytest tests/test_transfer_integrity.py -m "mit and not s3_dbof"
+    pytest --run-integration -m "mit and not s3_dbof" tests/test_transfer_integrity.py
 
 Environment overrides: ``DBOF_TEST_VAR`` (single variable instead of all),
 ``DBOF_TEST_FACE`` (default 1), ``DBOF_TEST_TILE`` (default 720),
