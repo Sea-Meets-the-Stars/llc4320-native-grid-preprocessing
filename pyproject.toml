@@ -78,8 +78,8 @@ markers = [
     "s3_dbof: requires network + NRP S3 credentials for the dbof bucket (s3-west.nrp-nautilus.io)",
     "osn: requires network access to the public OSN kerchunk store (anonymous)",
 ]
-# Plain `pytest` stays fast/offline; select integration tests with -m.
-addopts = "-m 'not integration'"
+# Integration tests are skipped unless --run-integration is passed;
+# that gating lives in tests/conftest.py (pytest_collection_modifyitems).
 # Show each test's logging.info lines live (asked date -> confirmed store time).
 log_cli = true
 log_cli_level = "INFO"

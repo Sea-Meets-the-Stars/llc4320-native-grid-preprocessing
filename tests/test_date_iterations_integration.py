@@ -23,17 +23,18 @@ errors; the test version hard-asserts).
 
 Running
 -------
-Plain ``pytest`` runs only the offline unit tests — integration tests are
-deselected by ``addopts`` in ``pyproject.toml``.  Select them explicitly:
+Plain ``pytest`` runs only the offline unit tests; integration tests are
+skipped unless ``--run-integration`` is passed (see conftest.py):
 
-    pytest tests/test_date_iterations_integration.py -m mit      # on MIT machine
-    pytest tests/test_date_iterations_integration.py -m s3_dbof  # needs NRP creds
-    pytest tests/test_date_iterations_integration.py -m osn      # network only
-    pytest tests/test_date_iterations_integration.py -m integration  # all
+    pytest --run-integration -m mit      tests/test_date_iterations_integration.py
+    pytest --run-integration -m s3_dbof  tests/test_date_iterations_integration.py
+    pytest --run-integration -m osn      tests/test_date_iterations_integration.py
+    pytest --run-integration             tests/test_date_iterations_integration.py
 
 If the dbof S3 bucket is down, run only the MIT + OSN checks:
 
-    pytest tests/test_date_iterations_integration.py -m "(mit or osn) and not s3_dbof"
+    pytest --run-integration -m "(mit or osn) and not s3_dbof" \
+        tests/test_date_iterations_integration.py
 """
 from __future__ import annotations
 
