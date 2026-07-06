@@ -37,6 +37,7 @@ If the dbof S3 bucket is down, run only the MIT + OSN checks:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -169,6 +170,8 @@ def test_mit_store_time_matches_config_date(ds_mit, date_str):
     """time[mit_date_to_time_idx(date)] in the MIT store IS the config date."""
     tidx = mit_date_to_time_idx(date_str, ds_mit.sizes["time"])
     actual = np.datetime64(ds_mit["time"].isel(time=tidx).values, "ns")
+    logging.info(f"MIT   asked '{date_str}' -> time_idx {tidx} "
+                 f"-> store says {actual}")
     assert actual == _expected_time(date_str), (
         f"MIT store time at idx {tidx} is {actual}, expected {date_str}"
     )
@@ -190,6 +193,8 @@ def test_s3_surface_store_time_matches_config_date(date_str):
     try:
         assert "time" in ds, f"{store} has no 'time' variable"
         actual = _first_time_value(ds)
+        logging.info(f"S3    asked '{date_str}' -> {store} "
+                     f"-> store says {actual}")
         assert actual == _expected_time(date_str), (
             f"{store} carries time={actual}, expected {date_str}"
         )
@@ -213,6 +218,8 @@ def test_osn_kerchunk_time_matches_config_date(date_str):
     ds = get_raw_data.get_remote_llc_data(OSN_ENDPOINT, it, [0])  # 1 face is enough
     try:
         actual = _first_time_value(ds)
+        logging.info(f"OSN   asked '{date_str}' -> iteration {it} "
+                     f"-> store says {actual}")
         assert actual == _expected_time(date_str), (
             f"OSN iteration {it} decodes to time={actual}, expected {date_str}"
         )
@@ -246,6 +253,8 @@ def test_osn_and_s3_surface_resolve_to_same_timestamp(date_str):
     )
     try:
         t_osn, t_s3 = _first_time_value(ds_osn), _first_time_value(ds_s3)
+        logging.info(f"CROSS asked '{date_str}' -> OSN says {t_osn}, "
+                     f"S3 says {t_s3}")
         assert t_osn == t_s3 == _expected_time(date_str), (
             f"date '{date_str}': OSN time={t_osn}, S3 time={t_s3}"
         )

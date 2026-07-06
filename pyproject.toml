@@ -80,6 +80,10 @@ markers = [
 ]
 # Plain `pytest` stays fast/offline; select integration tests with -m.
 addopts = "-m 'not integration'"
+# Show each test's logging.info lines live (asked date -> confirmed store time).
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(levelname)s  %(message)s"
 
 [project.scripts]
 generate-llc-dataset = "dbof.cli.generate_cutout_dataset:main"
