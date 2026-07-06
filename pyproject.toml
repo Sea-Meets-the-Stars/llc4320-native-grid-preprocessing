@@ -71,6 +71,16 @@ test = ["pytest"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.pytest.ini_options]
+markers = [
+    "integration: touches real data stores (network and/or cluster filesystem)",
+    "mit: requires the MIT orcd filesystem (/orcd/data/abodner/003/LLC4320)",
+    "s3_dbof: requires network + NRP S3 credentials for the dbof bucket (s3-west.nrp-nautilus.io)",
+    "osn: requires network access to the public OSN kerchunk store (anonymous)",
+]
+# Plain `pytest` stays fast/offline; select integration tests with -m.
+addopts = "-m 'not integration'"
+
 [project.scripts]
 generate-llc-dataset = "dbof.cli.generate_cutout_dataset:main"
 generate-global = "dbof.cli.generate_global:main"

@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
+import numpy as np
 import xarray as xr
 
 from dbof.transfer import config as config
@@ -46,6 +47,15 @@ def _dataset_name_from_date(date_str: str) -> str:
     """
     dt = datetime.strptime(date_str, DATE_FMT)
     return dt.strftime("%Y%m%dT%H") + ".zarr"
+
+
+def date_has_valid_data(ds, var, time_idx, face=1, tile=720):
+    """Cheap corrupt-date guard: a healthy *var* sample has >2 unique values
+    (NaN over land + varying ocean); all-zeros/all-NaN dates have <=2.
+    Samples a single *tile* x *tile* chunk of *face* only."""
+    sample = ds[var].isel(time=time_idx, face=face,
+                          j=slice(0, tile), i=slice(0, tile)).values
+    return np.unique(sample).size > 2
 
 
 def _apply_variable_override(static_variables, time_variables, subset,
@@ -203,6 +213,12 @@ def run(
         for date_str in _resolve_dates(cfg, date_override):
             iteration = mit_date_to_iteration(date_str)
             time_idx = mit_date_to_time_idx(date_str, ntime)
+            bad = [v for v in time_variables if v != "time"
+                   and not date_has_valid_data(ds, v, time_idx)]
+            if bad:
+                logging.warning(f"SKIPPING {date_str}: {bad} sample(s) are "
+                                "all zeros/NaNs — corrupt source data.")
+                continue
             s3_url = zarr_io._build_s3_url(cfg.output.bucket, target.folder,
                                            _dataset_name_from_date(date_str))
             zarr_io.write_store(
