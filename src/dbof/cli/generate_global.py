@@ -8,8 +8,8 @@ Pipeline variants
 -----------------
 SURF
     Core ocean variables (Theta, Salt, Eta, U, V, W) from OSN kerchunk;
-    forcing variables (oceTAUX, oceTAUY, SIarea) from S3 timestep stores
-    written by ``transfer_llc4320.py`` into the ``LLC4320`` folder.
+    forcing variables (oceTAUX, oceTAUY, SIarea, oceQnet) from S3 timestep
+    stores written by ``transfer_llc4320.py`` into ``LLC4320_RAW/SURFACE``.
 
 OSN
     All variables from OSN kerchunk endpoints (surface + wind).  No S3
