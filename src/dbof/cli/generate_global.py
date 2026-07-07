@@ -56,6 +56,7 @@ import time
 from pathlib import Path
 
 # distributed / IO
+import numpy as np
 import yaml
 import tqdm
 
@@ -542,6 +543,13 @@ def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
                 spec["model_channels"], spec["compute_channels"],
                 spec["compute_fn"],
             )
+
+        # Cheap validity guard (mirrors transfer date_has_valid_data): an
+        # equatorial strip sample of each channel must have >2 unique values.
+        for c, ch in enumerate(spec["channel_names"]):
+            if ch != "SIarea" and np.unique(data[c, 7600:8320, ::24]).size <= 2:
+                raise ValueError(f"channel '{ch}' sample is all zeros/NaN — "
+                                 f"corrupt input for {date_str}?")
 
         # Write to zarr.
         logging.info("Writing snapshot to zarr dataset")
