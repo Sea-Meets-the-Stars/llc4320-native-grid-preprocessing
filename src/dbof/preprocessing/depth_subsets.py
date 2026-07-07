@@ -15,6 +15,8 @@ in the YAML config) to the corresponding entry-point function.
 import numpy as np
 import dask
 
+import dbof.utils.native_gradient as ng
+
 from dbof.preprocessing.depth_strategies import (
     apply_depth_strategies,
 )
@@ -671,7 +673,11 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     so they can be extracted at _sfc, _z25m, _mld, and _mld_mean.
 
     U and V live on staggered grids (i_g / j_g) and are interpolated to
-    tracer points before the depth reduction.  Eta is inherently 2D
+    tracer points AND rotated from the model (x, y) basis to geographic
+    (east, north) components before the depth reduction — the resulting
+    channels are stitched as scalars, so the rotation must happen here
+    (unlike the raw model channels 'U'/'V', which are mate-paired and
+    re-oriented by the face stitch instead).  Eta is inherently 2D
     (surface only) and is handled as a special case.
 
     Parameters
@@ -717,18 +723,24 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     if "Eta_sfc" in requested:
         results["Eta_sfc"] = ds_merge["Eta"]
 
-    # -- Velocity: interpolate staggered → tracer points, then apply depths --
-    if any(c.startswith("U_") for c in requested):
+    # -- Velocity: interpolate staggered → tracer points AND rotate the
+    #    model (x, y) components to geographic (east, north) via CS/SN,
+    #    then apply depths.  Rotation is required because these channels
+    #    are stitched as scalars in faces_dataset_to_latlon (their
+    #    suffixed names, e.g. 'U_sfc', are never mate-paired), so the
+    #    face stitch does NOT re-orient them the way it does for the raw
+    #    model channels 'U'/'V'.  The output 'U_*' channels are therefore
+    #    eastward and 'V_*' northward velocity.
+    if any(c.startswith("U_") or c.startswith("V_") for c in requested):
         _ensure_mld()
-        U_c = grid.interp(ds_merge.U, 'X', boundary='fill')
-        results.update(apply_depth_strategies(
-            U_c, "U", ds_merge, mld=mld, requested=requested))
-
-    if any(c.startswith("V_") for c in requested):
-        _ensure_mld()
-        V_c = grid.interp(ds_merge.V, 'Y', boundary='fill')
-        results.update(apply_depth_strategies(
-            V_c, "V", ds_merge, mld=mld, requested=requested))
+        u_east, v_north = ng.rotate_vector_to_geographic(
+            ds_merge.U, ds_merge.V, ds_merge, grid)
+        if any(c.startswith("U_") for c in requested):
+            results.update(apply_depth_strategies(
+                u_east, "U", ds_merge, mld=mld, requested=requested))
+        if any(c.startswith("V_") for c in requested):
+            results.update(apply_depth_strategies(
+                v_north, "V", ds_merge, mld=mld, requested=requested))
 
     # -- W (on the vertical face grid) -> interpolate to tracer centres
     #    (k / Z) so the depth strategies align with the tracer-centred MLD.

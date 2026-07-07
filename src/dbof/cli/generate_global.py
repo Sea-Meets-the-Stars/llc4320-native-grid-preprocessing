@@ -477,7 +477,7 @@ def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
 
 
 def _setup_generation(cfg, log_file, fs, fs_sync, clobber: bool):
-    """9. One-time setup performed only when there is work to do.
+    """One-time setup performed only when there is work to do.
 
     Builds the data source, dask client, run metadata, and grid.
 
@@ -500,7 +500,7 @@ def _setup_generation(cfg, log_file, fs, fs_sync, clobber: bool):
 
 
 def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
-    """10. Generate each planned subset/date."""
+    """Generate each planned subset/date."""
     for spec, date_str, date_prefix in tqdm.tqdm(to_generate, desc="generate"):
         logging.info(f"\n{'='*60}")
         logging.info(f"Generating subset: {spec['subset_name']}  date: {date_str}")
@@ -555,7 +555,7 @@ def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
 
 def _report_and_cleanup(cfg, dask_client, to_generate: list,
                         wall_start: float) -> None:
-    """11. Log the run summary and tear down the dask client / s3fs cache."""
+    """Log the run summary and tear down the dask client / s3fs cache."""
     wall_elapsed = time.monotonic() - wall_start
     wall_hours = wall_elapsed / 3600.0
     n_workers = len(dask_client.scheduler_info().get("workers", {}))
@@ -616,32 +616,32 @@ def main(
     """
     wall_start = time.monotonic()
 
-    # 1-4. Resolve the invocation + YAML into a GlobalJobConfig.
+    # Resolve the invocation + YAML into a GlobalJobConfig.
     cfg, clobber = _resolve_job_config(
         config_file, run_id, subset, pipeline, clobber)
     date_iterations = cfg.data.date_iterations
 
-    # 5. Logging.
+    # Logging.
     log_file = _setup_run_logging(cfg, date_iterations)
 
-    # 6. Resolve per-subset specs.
+    # Resolve per-subset specs.
     subset_specs = _resolve_subset_specs(cfg)
 
-    # 7-8. Pre-flight plan (returns empty + logs the no-work summary if done).
+    # Pre-flight plan (returns empty + logs the no-work summary if done).
     fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
     to_generate = _preflight_plan(
         cfg, subset_specs, date_iterations, fs_sync, clobber, wall_start)
     if not to_generate:
         return
 
-    # 9. One-time generation setup.
+    # One-time generation setup.
     data_source, dask_client, ds_grid, grid = _setup_generation(
         cfg, log_file, fs, fs_sync, clobber)
 
-    # 10. Generate each planned subset/date.
+    # Generate each planned subset/date.
     _generate(cfg, to_generate, ds_grid, grid, data_source, fs)
 
-    # 11. Report + cleanup.
+    # Report + cleanup.
     _report_and_cleanup(cfg, dask_client, to_generate, wall_start)
 
 

@@ -25,6 +25,7 @@ def faces_dataset_to_latlon(ds, metric_vector_pairs):
     """
     This function is based on xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon
     but has been updated to be compatible with all xarray versions.
+    https://xmitgcm.readthedocs.io/en/latest/_modules/xmitgcm/llcreader/llcmodel.html
 
     xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon() stitches the 13 LLC
     faces into a single coherent 2D rectangular image. This is NOT interpolation
