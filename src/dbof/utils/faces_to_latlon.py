@@ -35,6 +35,9 @@ injecting zero-filled seam lines.  (The pipelines did this before
 July 2026; see ``tests/test_vector_rotation_equivalence.py`` for the
 measured proof, and ``docs/Global_Maps.md`` for the impact on old stores.)
 
+1 re-tiles model-basis vectors; 2 produces geographic ones — 
+the legacy bug was using 1's output as if it were 2's.
+
 Consequently the production rule is: **every channel reaching
 ``stitch_and_mask`` must be a tracer-point scalar or geographic vector
 component, and is stitched through the scalar path.**  ``stitch_and_mask``

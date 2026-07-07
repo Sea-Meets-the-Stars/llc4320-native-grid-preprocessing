@@ -532,10 +532,15 @@ def test_real_snapshot_A_vs_B():
     interior = np.s_[2:-2, :]                # skip pad-seam / edge rows
     err_e = np.abs(pred_e - b_e)[interior]
     err_n = np.abs(pred_n - b_n)[interior]
-    frac_e = np.nanmean(err_e < 1e-3 * scale)
-    frac_n = np.nanmean(err_n < 1e-3 * scale)
+    # fraction over VALID (ocean, finite) pixels only — NaN land pixels
+    # otherwise count as mismatches
+    err_e = err_e[np.isfinite(err_e)]
+    err_n = err_n[np.isfinite(err_n)]
+    frac_e = (err_e < 1e-3 * scale).mean()
+    frac_n = (err_n < 1e-3 * scale).mean()
     dtheta_max = np.degrees(np.nanmax(np.abs(np.arctan2(dsn, dcs))))
     print(f"\nmax |angle deficit| = {dtheta_max:.1f}°")
+    print(f"valid pixels: east {err_e.size:,}, north {err_n.size:,}")
     print(f"raw disagreement  max|A-B|: east {np.nanmax(np.abs(a_e - b_e)):.3f}, "
           f"north {np.nanmax(np.abs(a_n - b_n)):.3f}")
     print(f"reconstruction R(deficit)·A (+shift) matches B at "
