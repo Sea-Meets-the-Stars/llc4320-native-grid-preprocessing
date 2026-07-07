@@ -11,34 +11,35 @@ variables required to produce them, avoiding unnecessary I/O.
 # ---------------------------------------------------------------------------
 # Keyword → required-variable mappings
 # ---------------------------------------------------------------------------
-# Each entry is (tuple_of_channel_prefixes, list_of_raw_variables).
-# A channel matches if it starts with any prefix in the tuple.
+# Each entry is (tuple_of_channel_stems, list_of_raw_variables).
+# A channel matches if it starts with any stem in the tuple.
+# Covered by tests/test_variable_selection.py.
 
 _CHANNEL_VARIABLE_RULES = [
     # Tracers: any buoyancy/density/gradient-based diagnostic
     (
-        ('N2_', 'mixed_layer', 'ml_heat', 'Ri_', 'Fr_', 'Bu_',
-         'ertel_pv', 'uB', 'vB', 'wB', 'Ro_', 'KE_',
-         'gradb2_', 'gradtheta2_', 'gradsalt2_', 'gradrho2_',
-         'turner_angle_', 'frontogenesis_'),
+        ('N2', 'mixed_layer', 'ml_heat', 'Ri', 'Fr', 'Bu',
+         'ertel_pv', 'uB', 'vB', 'wB', 'Ro', 'KE',
+         'gradb2', 'gradtheta2', 'gradsalt2', 'gradrho2',
+         'turner_angle', 'frontogenesis', 'density', 'buoyancy'),
         ['Theta', 'Salt'],
     ),
-    # Velocity: shear, dimensionless numbers, fluxes, kinematics
+    # Velocity: shear, dimensionless numbers, fluxes, kinematics.  The raw
+    # pair is always coupled: geographic rotation mixes U and V.
     (
-        ('vertical_shear', 'Ri_', 'Fr_', 'Ro_', 'Bu_',
+        ('vertical_shear', 'Ri', 'Fr', 'Ro', 'Bu', 'rossby_number',
          'ertel_pv', 'uB', 'vB',
-         'relative_vorticity_', 'strain_', 'divergence_',
-         'okubo_weiss_', 'frontogenesis_', 'ug_', 'vg_'),
+         'relative_vorticity', 'strain', 'divergence',
+         'okubo_weiss', 'frontogenesis', 'ug', 'vg',
+         'U', 'V'),
         ['U', 'V'],
     ),
-    # Vertical velocity: PV and wB
+    # Vertical velocity: PV, wB, and the native W channels
     (
-        ('ertel_pv', 'wB'),
+        ('ertel_pv', 'wB', 'W'),
         ['W'],
     ),
-    # Wind stress (oceTAUX/oceTAUY are computed channels: interp + CS/SN
-    # rotation to geographic east/north — both raw components are always
-    # needed because the rotation couples them).
+    # Wind stress: both raw components always needed (rotation couples them)
     (
         ('wind_stress_curl', 'ekman_pumping', 'u_ekman', 'v_ekman',
          'oceTAUX', 'oceTAUY'),
@@ -46,17 +47,12 @@ _CHANNEL_VARIABLE_RULES = [
     ),
     # Sea-surface height
     (
-        ('gradeta2_', 'frontogenesis_', 'ug_', 'vg_', 'Eta_'),
+        ('gradeta2', 'frontogenesis', 'ug', 'vg', 'Eta'),
         ['Eta'],
     ),
-    # Native fields at depth (raw model variables through depth strategies)
-    (('Theta_',), ['Theta']),
-    (('Salt_',),  ['Salt']),
-    # Velocity channels are rotated to geographic east/north, which couples
-    # the pair: any U or V channel (suffixed depth channels 'U_*'/'V_*' or
-    # the unsuffixed surface-pipeline channels 'U'/'V') needs BOTH raw vars.
-    (('U_', 'V_', 'U', 'V'), ['U', 'V']),
-    (('W_',),     ['W']),
+    # Native tracer channels
+    (('Theta',), ['Theta']),
+    (('Salt',),  ['Salt']),
 ]
 
 # MLD / mld_mean depth strategies always need Theta + Salt for density.

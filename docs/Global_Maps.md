@@ -189,9 +189,9 @@ channels each subset was actually built with.
 | Subset              | Fields                                                                                      | Requires wind/ice data |
 |---------------------|---------------------------------------------------------------------------------------------|------------------------|
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      | No                     |
-| `surface_wind`      | `oceTAUX`, `oceTAUY`                                                                       | Yes                    |
+| `surface_wind`      | `oceTAUX`, `oceTAUY`, `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` (+ `oceQnet`, SURF only) | Yes  |
 | `icearea`           | `SIarea`                                                                                    | Yes                    |
-| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  | No                     |
+| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`, `density`, `buoyancy` | No              |
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` | No |
 | `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              | No                     |
 

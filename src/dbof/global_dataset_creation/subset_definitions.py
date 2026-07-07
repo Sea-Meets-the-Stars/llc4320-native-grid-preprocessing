@@ -41,11 +41,17 @@ SURFACE_SUBSETS = {
         "compute_features_channels": ["U", "V"],
     },
 
+    # oceQnet exists only in the LLC_SURF S3 stores, not the OSN kerchunk
+    # endpoints — added via pipeline_model_channels for SURF only.
     "surface_wind": {
         "dataset_name": "surface_wind.zarr",
         "surface_only": True,
         "model_data_feature_channels": [],
-        "compute_features_channels": ["oceTAUX", "oceTAUY"],
+        "pipeline_model_channels": {"SURF": ["oceQnet"]},
+        "compute_features_channels": [
+            "oceTAUX", "oceTAUY",
+            "wind_stress_curl", "ekman_pumping", "u_ekman", "v_ekman",
+        ],
     },
 
     "icearea": {
@@ -62,6 +68,7 @@ SURFACE_SUBSETS = {
         "compute_features_channels": [
             "gradb2", "gradsalt2", "gradtheta2",
             "gradeta2", "gradrho2", "turner_angle",
+            "density", "buoyancy",
         ],
     },
 
@@ -264,7 +271,14 @@ def get_subset_definition(pipeline: str, subset_name: str) -> dict:
             f"Valid subsets: {list(table)}"
         )
 
-    return dict(table[subset_name])
+    defn = dict(table[subset_name])
+    # Optional per-pipeline extra model channels (e.g. oceQnet is available
+    # to SURF but not OSN).
+    extra = defn.pop("pipeline_model_channels", None)
+    if extra and pipeline in extra:
+        defn["model_data_feature_channels"] = (
+            list(defn["model_data_feature_channels"]) + list(extra[pipeline]))
+    return defn
 
 
 def get_compute_fn(pipeline: str, subset_name: str):
