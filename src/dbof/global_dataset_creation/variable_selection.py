@@ -36,9 +36,12 @@ _CHANNEL_VARIABLE_RULES = [
         ('ertel_pv', 'wB'),
         ['W'],
     ),
-    # Wind stress
+    # Wind stress (oceTAUX/oceTAUY are computed channels: interp + CS/SN
+    # rotation to geographic east/north — both raw components are always
+    # needed because the rotation couples them).
     (
-        ('wind_stress_curl', 'ekman_pumping', 'u_ekman', 'v_ekman'),
+        ('wind_stress_curl', 'ekman_pumping', 'u_ekman', 'v_ekman',
+         'oceTAUX', 'oceTAUY'),
         ['oceTAUX', 'oceTAUY'],
     ),
     # Sea-surface height
@@ -49,8 +52,10 @@ _CHANNEL_VARIABLE_RULES = [
     # Native fields at depth (raw model variables through depth strategies)
     (('Theta_',), ['Theta']),
     (('Salt_',),  ['Salt']),
-    (('U_',),     ['U']),
-    (('V_',),     ['V']),
+    # Velocity channels are rotated to geographic east/north, which couples
+    # the pair: any U or V channel (suffixed depth channels 'U_*'/'V_*' or
+    # the unsuffixed surface-pipeline channels 'U'/'V') needs BOTH raw vars.
+    (('U_', 'V_', 'U', 'V'), ['U', 'V']),
     (('W_',),     ['W']),
 ]
 

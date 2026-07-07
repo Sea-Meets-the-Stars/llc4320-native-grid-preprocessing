@@ -588,7 +588,7 @@ def test_real_product_zero_lines():
 
     endpoint = os.environ.get("DBOF_S3_ENDPOINT",
                               "https://s3-west.nrp-nautilus.io")
-    bucket = os.environ.get("DBOF_BUCKET", "llc")
+    bucket = os.environ.get("DBOF_BUCKET", "dbof")
     folder = os.environ.get("DBOF_FOLDER")
     run_id = os.environ.get("DBOF_RUN_ID")
     date_prefix = os.environ.get("DBOF_DATE_PREFIX")

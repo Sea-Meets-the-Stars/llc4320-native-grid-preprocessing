@@ -112,6 +112,14 @@ def faces_dataset_to_latlon(ds, metric_vector_pairs):
 # ---------------------------------------------------------------------------
 # Staggered → tracer interpolation
 # ---------------------------------------------------------------------------
+# NOTE: interp_staggered_to_tracer and set_vector_pair_attrs are no longer
+# used by the production processors (process_surface / process_depth).
+# Vector channels are now interpolated AND rotated to geographic components
+# by the subset compute functions (rotate_vector_to_geographic) and stitched
+# as scalars.  These helpers are kept for tests and reference — the
+# mate/vector stitch path they enable applies a staggered-grid pixel shift
+# that misregisters tracer-point data on the rotated faces
+# (see tests/test_vector_rotation_equivalence.py).
 
 #: Maps staggered variable names to the xgcm axis along which they must be
 #: interpolated to reach the tracer-point (C-grid center) location.
@@ -199,8 +207,9 @@ def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
     Parameters
     ----------
     ds_to_convert : xr.Dataset
-        Face-gridded dataset containing all *channels* (already on the tracer
-        grid with vector-pair attrs set).
+        Face-gridded dataset containing all *channels*, already on the tracer
+        grid (vector fields rotated to geographic components upstream).  Any
+        'mate' attrs are stripped so all channels use the scalar stitch path.
     channels : list[str]
         Ordered channel names to include in the output array.
     mask_dict : dict[str, DataArray]
@@ -220,6 +229,16 @@ def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
     mask_names = list(mask_dict.keys())
     ds_to_convert = ds_to_convert.assign(mask_dict)
     all_vars = channels + mask_names
+
+    # Defensive: strip any stray 'mate' attrs so every channel goes through
+    # the SCALAR stitch path.  Vector channels are rotated to geographic
+    # (east/north) components upstream (rotate_vector_to_geographic), and
+    # the mate/vector stitch path must not run on top of that — it applies
+    # a staggered-grid pixel shift that misregisters tracer-point data
+    # (see tests/test_vector_rotation_equivalence.py).  Raw variables read
+    # via xmitgcm's llcreader carry 'mate' attrs by default.
+    for vname in ds_to_convert.variables:
+        ds_to_convert[vname].attrs.pop('mate', None)
 
     # Face → lat-lon stitch.
     logging.info("Converting LLC faces -> rectangular lat/lon")

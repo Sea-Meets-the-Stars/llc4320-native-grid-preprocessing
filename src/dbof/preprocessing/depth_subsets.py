@@ -15,8 +15,6 @@ in the YAML config) to the corresponding entry-point function.
 import numpy as np
 import dask
 
-import dbof.utils.native_gradient as ng
-
 from dbof.preprocessing.depth_strategies import (
     apply_depth_strategies,
 )
@@ -32,6 +30,9 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     froude_number_3d,
     rossby_number_3d,
     burger_number_3d,
+    # -- geographic vectors --
+    geographic_velocity_3d,
+    geographic_wind_stress,
     # -- wind --
     wind_stress_curl,
     ekman_pumping,
@@ -608,7 +609,7 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
 
 def compute_surface_wind(ds_merge, grid, computed_feature_channels):
-    """Subset: surface_wind — curl, Ekman pumping, Ekman transport.
+    """Subset: surface_wind — geographic wind stress, curl, Ekman pumping/transport.
 
     Parameters
     ----------
@@ -625,6 +626,13 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
         Materialised arrays keyed by channel name.
     """
     results = {}
+
+    if {"oceTAUX", "oceTAUY"} & set(computed_feature_channels):
+        tau_east, tau_north = geographic_wind_stress(ds_merge, grid)
+        if "oceTAUX" in computed_feature_channels:
+            results["oceTAUX"] = tau_east
+        if "oceTAUY" in computed_feature_channels:
+            results["oceTAUY"] = tau_north
 
     if "wind_stress_curl" in computed_feature_channels:
         results["wind_stress_curl"] = wind_stress_curl(ds_merge, grid)
@@ -733,8 +741,7 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     #    eastward and 'V_*' northward velocity.
     if any(c.startswith("U_") or c.startswith("V_") for c in requested):
         _ensure_mld()
-        u_east, v_north = ng.rotate_vector_to_geographic(
-            ds_merge.U, ds_merge.V, ds_merge, grid)
+        u_east, v_north = geographic_velocity_3d(ds_merge, grid)
         if any(c.startswith("U_") for c in requested):
             results.update(apply_depth_strategies(
                 u_east, "U", ds_merge, mld=mld, requested=requested))

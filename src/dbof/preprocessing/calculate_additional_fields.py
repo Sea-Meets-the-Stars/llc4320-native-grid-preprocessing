@@ -76,9 +76,7 @@ def geographic_velocity(ds_merge, grid):
 
     The native ``U``/``V`` are stored on the staggered model grid and on
     model-relative axes; this returns them interpolated to tracer points and
-    rotated to true east/north via the grid ``CS``/``SN`` coefficients.  Use
-    when saving / analysing raw velocity for a chunk or tile, where the global
-    face-stitching that would otherwise perform this rotation is not run.
+    rotated to true east/north via the grid ``CS``/``SN`` coefficients.  
 
     Parameters
     ----------

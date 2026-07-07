@@ -36,16 +36,16 @@ SURFACE_SUBSETS = {
         "dataset_name": "native_fields.zarr",
         "surface_only": True,
         "model_data_feature_channels": [
-            "Theta", "Salt", "Eta", "U", "V", "W",
+            "Theta", "Salt", "Eta", "W",
         ],
-        "compute_features_channels": [],
+        "compute_features_channels": ["U", "V"],
     },
 
     "surface_wind": {
         "dataset_name": "surface_wind.zarr",
         "surface_only": True,
-        "model_data_feature_channels": ["oceTAUX", "oceTAUY"],
-        "compute_features_channels": [],
+        "model_data_feature_channels": [],
+        "compute_features_channels": ["oceTAUX", "oceTAUY"],
     },
 
     "icearea": {
@@ -145,8 +145,9 @@ DEPTH_SUBSETS = {
     "surface_wind": {
         "dataset_name": "surface_wind.zarr",
         "surface_only": True,
-        "model_data_feature_channels": ["oceTAUX", "oceTAUY", "oceQnet"],
+        "model_data_feature_channels": ["oceQnet"],
         "compute_features_channels": [
+            "oceTAUX", "oceTAUY",
             "wind_stress_curl", "ekman_pumping", "u_ekman", "v_ekman",
         ],
     },

@@ -20,9 +20,51 @@ import dbof.preprocessing.calculate_additional_fields as calculate_additional_fi
 #  COMPUTE FUNCTIONS
 # ===========================================================================
 
-def compute_native_fields(ds_merge, grid, computed_feature_channels):
+def _compute_no_op(ds_merge, grid, computed_feature_channels):
     """No-op callback for subsets that only output raw model variables."""
     return {}
+
+
+def compute_native_fields(ds_merge, grid, computed_feature_channels):
+    """Subset: native_fields — geographic velocity components.
+
+    ``U``/``V`` are interpolated from the staggered grid to tracer points
+    AND rotated from the model (x, y) basis to geographic (east, north)
+    via CS/SN.  The rotation must happen here because these channels are
+    stitched as scalars in ``faces_dataset_to_latlon`` — the mate/vector
+    stitch path is not used (it applies a staggered-grid pixel shift that
+    misregisters tracer-point data).  The output ``U`` channel is
+    therefore eastward velocity and ``V`` northward velocity.
+    """
+    requested = set(computed_feature_channels)
+    results = {}
+    if {"U", "V"} & requested:
+        u_east, v_north = calculate_additional_fields.geographic_velocity(
+            ds_merge, grid)
+        if "U" in requested:
+            results["U"] = u_east
+        if "V" in requested:
+            results["V"] = v_north
+    return results
+
+
+def compute_surface_wind(ds_merge, grid, computed_feature_channels):
+    """Subset: surface_wind — geographic wind-stress components.
+
+    Same treatment as ``compute_native_fields``: interp to tracer points
+    + CS/SN rotation, so the output ``oceTAUX`` channel is eastward and
+    ``oceTAUY`` northward wind stress.
+    """
+    requested = set(computed_feature_channels)
+    results = {}
+    if {"oceTAUX", "oceTAUY"} & requested:
+        tau_east, tau_north = calculate_additional_fields.geographic_wind_stress(
+            ds_merge, grid)
+        if "oceTAUX" in requested:
+            results["oceTAUX"] = tau_east
+        if "oceTAUY" in requested:
+            results["oceTAUY"] = tau_north
+    return results
 
 
 def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
@@ -188,8 +230,8 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
 SUBSET_COMPUTE_FNS = {
     "native_fields":     compute_native_fields,
-    "surface_wind":      compute_native_fields,   # no-op — raw model vars only
-    "icearea":           compute_native_fields,   # no-op — raw model vars only
+    "surface_wind":      compute_surface_wind,
+    "icearea":           _compute_no_op,          # raw model vars only
     "frontal_structure": compute_frontal_structure,
     "kinematic":         compute_kinematic,
     "frontogenesis":     compute_frontogenesis,
