@@ -17,11 +17,18 @@ Synthetic tests (offline, run by default):
 
 Real-data tests (opt-in; images to tests/output/):
 
-  test_real_grid_cs_sn_convention  LLC4320 CS/SN match the stitch convention
-                                   off-cap                  (DBOF_GRID_CHECK=1)
+  test_real_grid_cs_sn_deviation   angle deficit of real CS/SN vs the swap
+                                   convention (= B's residual rotation error)
+                                                            (DBOF_GRID_CHECK=1)
   test_real_grid_cs_sn_face_plot   CS/SN per face, LLC layout (DBOF_GRID_CHECK=1)
-  test_real_snapshot_A_vs_B        both paths on one raw OSN wind snapshot
+  test_real_snapshot_A_vs_B        both paths on one raw OSN wind snapshot;
+                                   A-B == R(angle deficit) + 1 px north shift
                                                             (DBOF_RAW_CHECK=1)
+
+NOTE: real CS/SN equal the exact swap convention only on some tiles; elsewhere
+the angle varies.  Path B therefore differs from A on real data by BOTH the
+one-pixel shift AND an unapplied residual rotation.  The synthetic tests set
+CS/SN to the exact convention on purpose, isolating the shift.
 
 *  https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html
 ** https://xmitgcm.readthedocs.io/en/latest/_modules/xmitgcm/llcreader/llcmodel.html
@@ -403,10 +410,17 @@ _needs_raw = pytest.mark.skipif(
            "(optional DBOF_DATE, within 2011-11-01..2012-07-15)")
 
 
+#: Per-face rotation the vector stitch applies (measured by
+#: _measure_stitch_rotation): identity on faces 0-5, (0, -1) on faces 7-12.
+_SWAP_CS = np.array([1.0] * 7 + [0.0] * 6)
+_SWAP_SN = np.array([0.0] * 7 + [-1.0] * 6)
+
+
 @_needs_grid
-def test_real_grid_cs_sn_convention():
-    """LLC4320 CS/SN over ocean must equal the stitch convention on every
-    non-cap face: (1, 0) on faces 0-5, (0, ±1) on faces 7-12."""
+def test_real_grid_cs_sn_deviation():
+    """Quantify how far real CS/SN deviate from the swap-only rotation that
+    Path B implicitly applies.  That deviation angle IS Path B's residual
+    rotation error (B never applies it; A does).  Asserts only CS²+SN²≈1."""
     ds_grid = _load_real_grid()
     cs, sn = ds_grid["CS"].values, ds_grid["SN"].values
     hfac = ds_grid["hFacC"].values
@@ -414,16 +428,19 @@ def test_real_grid_cs_sn_convention():
         hfac = hfac[:, 0]
     ocean = hfac > 0
 
+    print()
     for f in range(N_FACES):
         if f == CAP_FACE or not ocean[f].any():
             continue
         cs_f, sn_f = cs[f][ocean[f]], sn[f][ocean[f]]
-        exp_cs = 1.0 if f < CAP_FACE else 0.0
-        exp_sn = 0.0 if f < CAP_FACE else np.sign(np.median(sn_f))
-        dev = max(np.abs(cs_f - exp_cs).max(), np.abs(sn_f - exp_sn).max())
-        print(f"face {f:2d}: CS≈{exp_cs:+.0f} SN≈{exp_sn:+.0f} "
-              f"max dev {dev:.3e}")
-        assert dev < 1e-6, f"face {f} deviates from the stitch convention"
+        assert np.allclose(cs_f**2 + sn_f**2, 1.0, atol=1e-5), \
+            f"face {f}: CS/SN not an orthonormal rotation"
+        # angle deficit relative to the swap convention, in degrees
+        dtheta = np.degrees(np.arctan2(
+            _SWAP_SN[f] * cs_f - _SWAP_CS[f] * sn_f,
+            _SWAP_CS[f] * cs_f + _SWAP_SN[f] * sn_f))
+        print(f"face {f:2d}: |angle deficit| median {np.median(np.abs(dtheta)):6.2f}°"
+              f"  max {np.abs(dtheta).max():6.2f}°")
 
 
 @_needs_grid
@@ -462,15 +479,16 @@ def test_real_grid_cs_sn_face_plot():
 
 @_needs_raw
 def test_real_snapshot_A_vs_B():
-    """Both paths on one raw OSN wind snapshot (oceTAUX/Y).  Expect: east
-    identical; B's north = A's north rolled one pixel in latitude on the
-    rotated half.  Writes real_snapshot_A_vs_B.png."""
+    """Both paths on one raw OSN wind snapshot (oceTAUX/Y).  On the real grid
+    A-B has TWO causes: B's residual rotation error (CS/SN deviate from the
+    swap convention) and B's one-pixel north shift on the rotated half.
+    Verified by exact reconstruction: rotating A by the local angle deficit
+    and shifting the north must reproduce B.  Writes real_snapshot_A_vs_B.png."""
     import dbof.llc4320_ingestion.get_raw_data as get_raw_data
     import dbof.preprocessing.preproc_llc_core_data as preproc
     from dbof.global_dataset_creation.data_sources import OSN_ENDPOINT
     from dbof.global_dataset_creation.grid_setup import set_up_grid
     from dbof.global_dataset_creation.iterations import LLC_FACES, osn_date_to_iteration
-    from dbof.preprocessing.calculate_additional_fields import geographic_wind_stress
 
     date = os.environ.get("DBOF_DATE", "2012-01-15 12:00:00")
     ds_grid, _, grid = set_up_grid("OSN", None)
@@ -485,32 +503,58 @@ def test_real_snapshot_A_vs_B():
     a_e, a_n = np.asarray(a_e, np.float32), np.asarray(a_n, np.float32)
     b_e, b_n = np.asarray(b_e, np.float32), np.asarray(b_n, np.float32)
 
+    # stitch true CS/SN and the per-face swap rotation as scalars, then
+    # rotate A by the angle deficit (swap - true) and shift the north
+    n_j, n_i = ds_merge.sizes["j"], ds_merge.sizes["i"]
+    shape = (N_FACES, n_j, n_i)
+
+    def _stitch_field(data, name):
+        da = xr.DataArray(np.broadcast_to(data, shape).astype(np.float32).copy(),
+                          dims=("face", "j", "i"), name=name,
+                          coords={"face": ds_merge.face, "j": ds_merge.j,
+                                  "i": ds_merge.i})
+        return _stitch(xr.Dataset({name: da}).chunk({"face": 1}))[name].values
+
+    cs_t = _stitch_field(ds_merge.CS.values, "cs")
+    sn_t = _stitch_field(ds_merge.SN.values, "sn")
+    cs_0 = _stitch_field(_SWAP_CS[:, None, None], "cs0")
+    sn_0 = _stitch_field(_SWAP_SN[:, None, None], "sn0")
+
+    dcs = cs_0 * cs_t + sn_0 * sn_t          # cos(swap - true)
+    dsn = sn_0 * cs_t - cs_0 * sn_t          # sin(swap - true)
+    pred_e = dcs * a_e - dsn * a_n
+    pred_n = dsn * a_e + dcs * a_n
     rot = np.zeros(a_e.shape, bool)
     rot[:, _RECT_ROTATED_COL_START:] = True
-    scale = np.nanstd(a_n)
+    pred_n = np.where(rot, np.roll(pred_n, 1, axis=0), pred_n)
 
-    de = np.abs(a_e - b_e)
-    dn = np.abs(a_n - b_n)
-    dn_roll = np.abs(np.roll(a_n, 1, axis=0) - b_n)
-    print(f"\neast  max|A-B| = {np.nanmax(de):.3e}")
-    print(f"north max|A-B|           unrot / rot: "
-          f"{np.nanmax(dn[~rot]):.3e} / {np.nanmax(dn[rot]):.3e}")
-    print(f"north max|roll(A,1)-B|   rot        : {np.nanmax(dn_roll[rot]):.3e}")
+    scale = np.nanstd(a_n)
+    interior = np.s_[2:-2, :]                # skip pad-seam / edge rows
+    err_e = np.abs(pred_e - b_e)[interior]
+    err_n = np.abs(pred_n - b_n)[interior]
+    frac_e = np.nanmean(err_e < 1e-3 * scale)
+    frac_n = np.nanmean(err_n < 1e-3 * scale)
+    dtheta_max = np.degrees(np.nanmax(np.abs(np.arctan2(dsn, dcs))))
+    print(f"\nmax |angle deficit| = {dtheta_max:.1f}°")
+    print(f"raw disagreement  max|A-B|: east {np.nanmax(np.abs(a_e - b_e)):.3f}, "
+          f"north {np.nanmax(np.abs(a_n - b_n)):.3f}")
+    print(f"reconstruction R(deficit)·A (+shift) matches B at "
+          f"east {frac_e:.4%}, north {frac_n:.4%} of pixels")
 
     sub = np.s_[::20, ::20]
-    dmax = np.nanmax(dn) or 1
+    dmax = np.nanmax(np.abs(a_n - b_n)) or 1
     _save_panels(
-        [("N", [("north A (rotated+scalar)", a_n[sub], "RdBu_r", -3*scale, 3*scale),
-                ("north B (mate+vector)", b_n[sub], "RdBu_r", -3*scale, 3*scale),
-                ("A-B", (a_n - b_n)[sub], "PuOr", -dmax, dmax),
-                ("roll(A,1,lat)-B", (np.roll(a_n, 1, axis=0) - b_n)[sub],
-                 "PuOr", -dmax, dmax)])],
+        [("E", [("east A", a_e[sub], "RdBu_r", -3*scale, 3*scale),
+                ("east A-B (angle deficit)", (a_e - b_e)[sub], "PuOr", -dmax, dmax),
+                ("east pred-B (=0)", (pred_e - b_e)[sub], "PuOr", -dmax, dmax)]),
+         ("N", [("north A", a_n[sub], "RdBu_r", -3*scale, 3*scale),
+                ("north A-B (deficit + 1px shift)", (a_n - b_n)[sub],
+                 "PuOr", -dmax, dmax),
+                ("north pred-B (=0)", (pred_n - b_n)[sub], "PuOr", -dmax, dmax)])],
         OUTPUT_DIR / "real_snapshot_A_vs_B.png",
-        f"oceTAU {date}: B north = A north shifted 1 px (lat) on rotated half")
+        f"oceTAU {date}: A-B fully explained by R(angle deficit) + 1 px shift")
 
-    assert np.nanmax(de) < 1e-4 * scale                    # east identical
-    assert np.nanmax(dn[~rot]) < 1e-4 * scale              # north, unrot half
-    assert np.nanmedian(dn_roll[rot]) < np.nanmedian(dn[rot])  # shift explains B
+    assert frac_e > 0.999 and frac_n > 0.999
 
 
 if __name__ == "__main__":
