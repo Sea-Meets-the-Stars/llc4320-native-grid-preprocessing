@@ -281,15 +281,15 @@ def _resolve_job_config(
     pipeline: str = None,
     clobber: bool = False,
 ):
-    """1-4. Resolve the invocation into a fully-built ``GlobalJobConfig``.
+    """Resolve the invocation into a fully-built ``GlobalJobConfig``.
 
     Combines the four pure (no S3, no dask) configuration-resolution steps:
 
-    1. parse args (CLI ``--config`` etc. take effect only when called with no
+    - parse args (CLI ``--config`` etc. take effect only when called with no
        ``config_file``) and load the raw YAML config;
-    2. resolve and validate the pipeline + active_subsets;
-    3. validate the date iterations; and
-    4. build the ``GlobalJobConfig``.
+    - resolve and validate the pipeline + active_subsets;
+    - validate the date iterations; and
+    - build the ``GlobalJobConfig``.
 
     Returns
     -------
@@ -299,7 +299,7 @@ def _resolve_job_config(
     clobber : bool
         Resolved clobber flag.
     """
-    # (1) Parse args, load YAML.
+    # Parse args, load YAML.
     if config_file is None:
         cli = _parse_args()
         config_file = cli.config
@@ -311,7 +311,7 @@ def _resolve_job_config(
     with open(config_file, "r") as fh:
         raw = yaml.safe_load(fh) or {}
 
-    # (2) Resolve pipeline and active_subsets (validate early).
+    # Resolve pipeline and active_subsets (validate early).
     pipeline_str = pipeline or raw.get("pipeline")
     if pipeline_str is None:
         raise ValueError(
@@ -338,7 +338,7 @@ def _resolve_job_config(
                 f"Valid subsets: {valid}"
             )
 
-    # (3) Date iterations (from YAML).
+    # Date iterations (from YAML).
     date_iterations = raw.get("data", {}).get("date_iterations")
     if not date_iterations:
         raise ValueError(
@@ -347,7 +347,7 @@ def _resolve_job_config(
             "(e.g. '2012-11-09 12:00:00')."
         )
 
-    # (4) Build GlobalJobConfig.
+    # Build GlobalJobConfig.
     run_cfg = config.RunConfig(**(raw.get("run") or {}))
     if run_id is not None:
         run_cfg = config.RunConfig(run_id=run_id, log_dir=run_cfg.log_dir)
@@ -375,7 +375,7 @@ def _resolve_job_config(
 
 
 def _setup_run_logging(cfg, date_iterations: list):
-    """5. Logging (run metadata is saved later, in _setup_generation)."""
+    """Logging (run metadata is saved later, in _setup_generation)."""
     log_file = setup_logging(cfg)  # appends if the log already exists
     logging.info("Unified global pipeline starting.")
     logging.info(f"Pipeline: {cfg.pipeline}")
@@ -386,7 +386,7 @@ def _setup_run_logging(cfg, date_iterations: list):
 
 
 def _resolve_subset_specs(cfg) -> list:
-    """6. Resolve per-subset specs (cheap: no S3, no dask)."""
+    """Resolve per-subset specs (cheap: no S3, no dask)."""
     subset_specs = []
     for subset_name in cfg.active_subsets:
         defn = get_subset_definition(cfg.pipeline, subset_name)
@@ -417,7 +417,7 @@ def _resolve_subset_specs(cfg) -> list:
 
 def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
                     fs_sync, clobber: bool, wall_start: float) -> list:
-    """7-8. Pre-flight: decide each subset/date before any heavy setup.
+    """Pre-flight: decide each subset/date before any heavy setup.
 
     Also handles the nothing-to-generate case: when no work remains, the
     no-work summary is logged and the s3fs instance cache is cleared here,
@@ -461,7 +461,7 @@ def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
                     "regenerate it in place."
                 )
 
-    # 8. Nothing to generate: skip all downstream setup.
+    # Nothing to generate: skip all downstream setup.
     if not to_generate:
         logging.info("All subset/date zarr stores are already complete -- "
                      "nothing to generate (skipping dask client + grid load).")
