@@ -12,15 +12,9 @@ Pipeline flow
     → face → latlon stitch + land mask
     → return (C, H, W) array
 
-Vector fields (U/V, oceTAUX/oceTAUY) are COMPUTED channels: the subset
-compute functions interpolate them to tracer points and rotate the model
-(x, y) components to geographic (east, north) via CS/SN.  All channels
-reaching the stitch are tracer-point scalars / geographic components and
-are stitched through the scalar path.  The former model-channel treatment
-(``interp_staggered_to_tracer`` + ``set_vector_pair_attrs`` + vector-aware
-stitch) is intentionally NOT used: xmitgcm's vector stitch applies a
-staggered-grid pixel shift that misregisters tracer-point data on the
-rotated faces (see ``tests/test_vector_rotation_equivalence.py``).
+Vector fields (U/V, oceTAUX/oceTAUY) are COMPUTED channels — rotated to
+geographic components upstream and stitched as scalars.  See the
+vector-handling policy in ``dbof.utils.faces_to_latlon``.
 
 Key difference from ``process_surface``
 ---------------------------------------

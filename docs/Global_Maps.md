@@ -215,7 +215,7 @@ MIT first using `transfer_llc4320.py`.
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `rossby_number`, `okubo_weiss` | sfc, z25m, mld, mld_mean | `coriolis_f` |
 | `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc, z25m, mld, mld_mean |                   |
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
-| `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
+| `surface_wind`      | *(surface_only)* `oceTAUX`, `oceTAUY`, `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model field `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
 
 ---
@@ -427,6 +427,42 @@ lon, lat = grid.lon, grid.lat
 land_mask = grid.land_mask
 ds_grid = grid.to_dataset()
 ```
+
+---
+
+## Vector fields: orientation and history
+
+**In current stores, `U`, `V`, `oceTAUX`, and `oceTAUY` are true
+geographic components** — `U`/`oceTAUX` eastward, `V`/`oceTAUY` northward
+— colocated with the tracers at cell centres. The pipelines interpolate
+the staggered model components to tracer points and rotate them from the
+model (x, y) basis to (east, north) using the grid `CS`/`SN` coefficients
+before the face stitch (canonical explanation: the "Vector-handling
+policy" in `dbof/utils/faces_to_latlon.py`; proof:
+`tests/test_vector_rotation_equivalence.py`, which writes comparison
+figures to `tests/output/`).
+
+**Stores generated before July 2026 have known vector artifacts** and
+should not be mixed with regenerated data:
+
+- *SURF/OSN `native_fields` (U/V) and `surface_wind` (oceTAUX/Y), both
+  pipelines:* the fields were interpolated to tracer points but then
+  passed through xmitgcm's mate/vector face stitch, whose one-pixel
+  shift-and-pad is only correct for staggered input. Result: the
+  **northward** components (V, oceTAUY) are displaced one pixel (~2 km)
+  relative to the land mask and all other channels over the rotated half
+  of the map (source faces 7–12), plus zero-filled seam lines at the
+  rotated facet edges. Eastward components are unaffected.
+- *DEPTH `native_fields` (`U_*`, `V_*`):* worse — these channels were
+  interpolated but **never rotated**, and were stitched as scalars. Over
+  the rotated half of the map U and V are effectively swapped (with a
+  sign), i.e. wrong at full amplitude.
+
+Regenerating the affected subsets fixes both. Note the fix also changed
+the **channel order** in `native_fields` (now `Theta, Salt, Eta, W, U, V`)
+and `surface_wind` (DEPTH: `oceQnet, oceTAUX, oceTAUY, ...`), because
+vector fields moved from model channels to computed channels — always
+index by the store's `channel_names` attribute, not by position.
 
 ---
 

@@ -611,6 +611,9 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 def compute_surface_wind(ds_merge, grid, computed_feature_channels):
     """Subset: surface_wind — geographic wind stress, curl, Ekman pumping/transport.
 
+    Output ``oceTAUX`` is eastward and ``oceTAUY`` northward wind stress
+    (see the vector-handling policy in ``dbof.utils.faces_to_latlon``).
+
     Parameters
     ----------
     ds_merge : xr.Dataset
@@ -680,12 +683,10 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     Feeds the raw 3D model variables through ``apply_depth_strategies``
     so they can be extracted at _sfc, _z25m, _mld, and _mld_mean.
 
-    U and V live on staggered grids (i_g / j_g) and are interpolated to
-    tracer points AND rotated from the model (x, y) basis to geographic
-    (east, north) components before the depth reduction — the resulting
-    channels are stitched as scalars, so the rotation must happen here
-    (unlike the raw model channels 'U'/'V', which are mate-paired and
-    re-oriented by the face stitch instead).  Eta is inherently 2D
+    U and V are interpolated to tracer points and rotated to geographic
+    components before the depth reduction, so the output ``U_*`` channels
+    are eastward and ``V_*`` northward velocity (see the vector-handling
+    policy in ``dbof.utils.faces_to_latlon``).  Eta is inherently 2D
     (surface only) and is handled as a special case.
 
     Parameters
@@ -731,14 +732,8 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     if "Eta_sfc" in requested:
         results["Eta_sfc"] = ds_merge["Eta"]
 
-    # -- Velocity: interpolate staggered → tracer points AND rotate the
-    #    model (x, y) components to geographic (east, north) via CS/SN,
-    #    then apply depths.  Rotation is required because these channels
-    #    are stitched as scalars in faces_dataset_to_latlon (their
-    #    suffixed names, e.g. 'U_sfc', are never mate-paired), so the
-    #    face stitch does NOT re-orient them the way it does for the raw
-    #    model channels 'U'/'V'.  The output 'U_*' channels are therefore
-    #    eastward and 'V_*' northward velocity.
+    # -- Velocity: interp + rotate to geographic (east/north), then apply
+    #    depths.  Output 'U_*' is eastward, 'V_*' northward velocity.
     if any(c.startswith("U_") or c.startswith("V_") for c in requested):
         _ensure_mld()
         u_east, v_north = geographic_velocity_3d(ds_merge, grid)

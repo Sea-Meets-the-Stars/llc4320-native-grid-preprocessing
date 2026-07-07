@@ -10,16 +10,9 @@ Pipeline flow
     → face → latlon stitch + land mask
     → return (C, H, W) array
 
-Vector fields (U/V, oceTAUX/oceTAUY) are COMPUTED channels: the subset
-compute functions interpolate them to tracer points and rotate the model
-(x, y) components to geographic (east, north) via CS/SN
-(``rotate_vector_to_geographic``).  All channels reaching the stitch are
-therefore tracer-point scalars / geographic components and are stitched
-through the scalar path.  The former model-channel treatment
-(``interp_staggered_to_tracer`` + ``set_vector_pair_attrs`` + vector-aware
-stitch) is intentionally NOT used: xmitgcm's vector stitch applies a
-staggered-grid pixel shift that misregisters tracer-point data on the
-rotated faces (see ``tests/test_vector_rotation_equivalence.py``).
+Vector fields (U/V, oceTAUX/oceTAUY) are COMPUTED channels — rotated to
+geographic components upstream and stitched as scalars.  See the
+vector-handling policy in ``dbof.utils.faces_to_latlon``.
 """
 
 import logging
@@ -36,20 +29,17 @@ _STAGGERED_DIMS = frozenset({"i_g", "j_g"})
 def _assert_no_staggered_model_channels(model_vars: dict) -> None:
     """Refuse staggered-grid variables in the model-channel path.
 
-    Raw staggered vectors passed straight to the face stitch would come out
-    on the wrong basis (and the mate/vector path misregisters tracer-point
-    data), so vector fields must go through the compute-function path
-    (interp + CS/SN rotation) instead.
+    Vector fields must go through the compute-function path (interp +
+    CS/SN rotation) — see the vector-handling policy in
+    ``dbof.utils.faces_to_latlon``.
     """
     for name, da in model_vars.items():
         if _STAGGERED_DIMS & set(da.dims):
             raise ValueError(
                 f"Model channel '{name}' is on a staggered grid "
                 f"(dims {da.dims}).  Staggered vectors must be handled as "
-                "computed channels via rotate_vector_to_geographic (see "
-                "surface_subsets.compute_native_fields / "
-                "compute_surface_wind), not passed through the stitch as "
-                "raw model channels."
+                "computed channels (interp + CS/SN rotation) — see the "
+                "vector-handling policy in dbof.utils.faces_to_latlon."
             )
 
 

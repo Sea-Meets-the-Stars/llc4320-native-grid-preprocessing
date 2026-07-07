@@ -28,13 +28,10 @@ def _compute_no_op(ds_merge, grid, computed_feature_channels):
 def compute_native_fields(ds_merge, grid, computed_feature_channels):
     """Subset: native_fields — geographic velocity components.
 
-    ``U``/``V`` are interpolated from the staggered grid to tracer points
-    AND rotated from the model (x, y) basis to geographic (east, north)
-    via CS/SN.  The rotation must happen here because these channels are
-    stitched as scalars in ``faces_dataset_to_latlon`` — the mate/vector
-    stitch path is not used (it applies a staggered-grid pixel shift that
-    misregisters tracer-point data).  The output ``U`` channel is
-    therefore eastward velocity and ``V`` northward velocity.
+    ``U``/``V`` are interpolated to tracer points and rotated to
+    geographic components, so the output ``U`` channel is eastward and
+    ``V`` northward velocity.  See the vector-handling policy in
+    ``dbof.utils.faces_to_latlon`` for why.
     """
     requested = set(computed_feature_channels)
     results = {}
@@ -51,9 +48,8 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
 def compute_surface_wind(ds_merge, grid, computed_feature_channels):
     """Subset: surface_wind — geographic wind-stress components.
 
-    Same treatment as ``compute_native_fields``: interp to tracer points
-    + CS/SN rotation, so the output ``oceTAUX`` channel is eastward and
-    ``oceTAUY`` northward wind stress.
+    Same treatment as ``compute_native_fields``: the output ``oceTAUX``
+    channel is eastward and ``oceTAUY`` northward wind stress.
     """
     requested = set(computed_feature_channels)
     results = {}
