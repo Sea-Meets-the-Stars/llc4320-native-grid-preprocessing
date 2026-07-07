@@ -43,6 +43,16 @@ Outputs: ``tests/output/vector_rotation_equivalence.png``
 Run:
     pytest tests/test_vector_rotation_equivalence.py -v
     DBOF_GRID_CHECK=1 pytest tests/test_vector_rotation_equivalence.py -v
+
+
+    DBOF_PRODUCT_CHECK=1 \
+    DBOF_BUCKET=dbof \
+    DBOF_FOLDER=surface_fields \
+    DBOF_RUN_ID=vtest1 \
+    DBOF_DATE_PREFIX=20120501_120000 \
+    DBOF_DATASET=native_fields.zarr \
+    pytest tests/test_vector_rotation_equivalence.py::test_real_product_zero_lines -s
+
 """
 
 import os
