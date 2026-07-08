@@ -1,20 +1,19 @@
-"""Verify the LLC4320 raw-store copy: compare sample chunks between the old
-and new S3 locations for given dates.
+"""Verify a raw-store copy: compare sample chunks between an old and new
+S3 location for given dates.
 
-Usage:
-    python dev/verify_raw_copy.py "2012-01-15 12:00:00" ["2012-03-01 00:00:00" ...]
+Usage (2026 LLC4320_v1 -> LLC4320_RAW/DEPTH migration):
+    python -m dbof.transfer.verify_copy \
+        --endpoint https://s3-west.nrp-nautilus.io --bucket dbof/ \
+        --old-folder LLC4320_v1 --new-folder LLC4320_RAW/DEPTH \
+        "2012-01-15 12:00:00" ["2012-03-01 00:00:00" ...]
 """
 
-import sys
+import argparse
 
 import numpy as np
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 
-ENDPOINT = "https://s3-west.nrp-nautilus.io"
-BUCKET = "dbof/"
-OLD_FOLDER = "LLC4320_v1"
-NEW_FOLDER = "LLC4320_RAW/DEPTH"
 VARS = ["Theta", "Salt", "Eta", "U", "V", "W", "oceTAUX", "oceTAUY", "oceQnet"]
 
 
@@ -26,13 +25,13 @@ def _sample(ds, var, face=1, tile=720):
     return da.isel(sel).values
 
 
-def main(dates):
+def main(endpoint, bucket, old_folder, new_folder, dates):
     failures = 0
     for date in dates:
         ds_old = get_raw_data.get_llc_timestep_data(
-            ENDPOINT, BUCKET, OLD_FOLDER, date, vars_requested=VARS)
+            endpoint, bucket, old_folder, date, vars_requested=VARS)
         ds_new = get_raw_data.get_llc_timestep_data(
-            ENDPOINT, BUCKET, NEW_FOLDER, date, vars_requested=VARS)
+            endpoint, bucket, new_folder, date, vars_requested=VARS)
         for var in VARS:
             if var not in ds_old or var not in ds_new:
                 print(f"{date}  {var:8s}  SKIP (missing: "
@@ -51,6 +50,11 @@ def main(dates):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        sys.exit(__doc__)
-    sys.exit(main(sys.argv[1:]))
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--endpoint", required=True)
+    p.add_argument("--bucket", required=True)
+    p.add_argument("--old-folder", required=True)
+    p.add_argument("--new-folder", required=True)
+    p.add_argument("dates", nargs="+")
+    a = p.parse_args()
+    raise SystemExit(main(a.endpoint, a.bucket, a.old_folder, a.new_folder, a.dates))

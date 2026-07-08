@@ -78,11 +78,11 @@ def process_snapshot(
         Shape ``(C, H, W)`` where C = len(model + computed channels),
         H = 12960, W = 17280.  Land pixels are NaN.
     """
-    # 1. Compute derived fields (includes tracer-point interpolation and
+    # Compute derived fields (includes tracer-point interpolation and
     #    geographic rotation for vector channels).
     calculated_fields = compute_fields_fn(ds_merge, grid, computed_feature_channels)
 
-    # 2. Assemble all channels into a single Dataset for one conversion pass.
+    # Assemble all channels into a single Dataset for one conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels
     model_vars = {ch: ds_merge[ch] for ch in model_feature_channels}
     _assert_no_staggered_model_channels(model_vars)
@@ -92,10 +92,10 @@ def process_snapshot(
     )
     ds_to_convert = ds.assign(update_vars)[channels_to_convert]
 
-    # 3. Land mask only (ice mask removed — applied post-hoc if needed).
+    # Land mask only (ice mask removed — applied post-hoc if needed).
     mask_dict = {"_land_mask": (ds_merge.hFacC == 0)}
 
-    # 4. Face → latlon stitch + mask → (C, H, W).
+    # Face → latlon stitch + mask → (C, H, W).
     data = stitch_and_mask(ds_to_convert, channels_to_convert, mask_dict)
 
     logging.info("Surface snapshot assembly complete")

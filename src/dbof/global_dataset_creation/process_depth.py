@@ -93,16 +93,16 @@ def process_snapshot(
         Shape ``(C, H, W)`` where C = len(model + computed channels),
         H = 12960, W = 17280.  Land pixels are NaN.
     """
-    # 1. Compute derived fields (3D → 2D reduction happens inside).
+    # Compute derived fields (3D → 2D reduction happens inside).
     calculated_fields = compute_fields_fn(ds_merge, grid, computed_feature_channels)
 
-    # 2. Extract surface slice from any 3D raw model variables.
+    # Extract surface slice from any 3D raw model variables.
     available = [ch for ch in model_feature_channels if ch in ds_merge]
     ds_model_subset = _select_surface(ds_merge[available])
     surface_model_vars = {ch: ds_model_subset[ch] for ch in available}
     _assert_no_staggered_model_channels(surface_model_vars)
 
-    # 3. Assemble all channels into a single Dataset for one conversion pass.
+    # Assemble all channels into a single Dataset for one conversion pass.
     channels_to_convert = model_feature_channels + computed_feature_channels
 
     # Build a surface-level base dataset for face→latlon conversion.
@@ -117,11 +117,11 @@ def process_snapshot(
     )
     ds_to_convert = ds_surface.assign(update_vars)[channels_to_convert]
 
-    # 4. Build surface land mask from hFacC.
+    # Build surface land mask from hFacC.
     hfac = ds_merge.hFacC if "k" not in ds_merge.hFacC.dims else ds_merge.hFacC.isel(k=0)
     mask_dict = {"_land_mask": (hfac == 0)}
 
-    # 5. Face → latlon stitch + mask → (C, H, W).
+    # Face → latlon stitch + mask → (C, H, W).
     data = stitch_and_mask(ds_to_convert, channels_to_convert, mask_dict,
                            progress_bar=True)
 
