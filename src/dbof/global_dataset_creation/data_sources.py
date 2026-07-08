@@ -17,9 +17,8 @@ OSN
     timestep stores are used.
 
 DEPTH
-    All variables from S3 timestep stores in ``LLC4320_v1`` (full depth).
-    Grid is read from the ``LLC4320`` folder (original, non-corrupt
-    transfer location).
+    All variables (full depth) and the grid from S3 timestep stores in
+    ``LLC4320_RAW/DEPTH``.
 """
 
 # ---------------------------------------------------------------------------
@@ -48,15 +47,12 @@ LLC_SURF_SOURCE = {
 }
 
 #: LLC_DEPTH source for the depth-resolved pipeline (full-depth timestep
-#: stores), i.e. s3://dbof/LLC4320_RAW/DEPTH/.  ``grid_folder`` points to
-#: the original transfer location where ``grid.zarr`` lives (the
-#: non-corrupt copy) — update it only once grid.zarr is confirmed at the
-#: new location.
+#: stores), i.e. s3://dbof/LLC4320_RAW/DEPTH/.  ``grid.zarr`` is read from
+#: the same folder
 LLC_DEPTH_SOURCE = {
     "s3_endpoint":  "https://s3-west.nrp-nautilus.io",
     "bucket":       "dbof/",
     "folder":       "LLC4320_RAW/DEPTH",
-    "grid_folder":  "LLC4320",
 }
 
 

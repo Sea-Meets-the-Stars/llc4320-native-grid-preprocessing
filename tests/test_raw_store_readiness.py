@@ -26,12 +26,6 @@ A discovery test additionally lists each prefix on S3 and checks that
 A hermetic test pins the pipeline's ``data_sources`` constants to the
 ``LLC4320_RAW`` prefixes, so a source-dict regression is caught offline.
 
-NOTE: ``LLC_DEPTH_SOURCE["grid_folder"]`` still points the DEPTH pipeline's
-*grid* read at the legacy ``dbof/LLC4320`` prefix.  Once
-``test_grid_store_opens[DEPTH]`` passes against the new location, flip
-``grid_folder`` to ``LLC4320_RAW/DEPTH`` in
-``dbof/global_dataset_creation/data_sources.py``.
-
 Running (skipped by default; needs network + NRP S3 credentials)::
 
     pytest --run-integration -m s3_dbof tests/test_raw_store_readiness.py
@@ -159,6 +153,9 @@ def test_pipeline_data_sources_point_at_raw():
 
     assert data_sources.LLC_SURF_SOURCE["folder"] == f"{RAW_PREFIX}/SURFACE"
     assert data_sources.LLC_DEPTH_SOURCE["folder"] == f"{RAW_PREFIX}/DEPTH"
+    # DEPTH grid must come from the same folder — no legacy grid_folder
+    # override (dbof/LLC4320 is retired).
+    assert "grid_folder" not in data_sources.LLC_DEPTH_SOURCE
 
 
 # ---------------------------------------------------------------------------

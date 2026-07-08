@@ -146,12 +146,12 @@ so it still requires dbof credentials; the pure-OSN pipeline does not.
 
 ## Legacy prefixes
 
-* `s3://dbof/LLC4320/` — original first S3 copy. **Still referenced:** the
-  DEPTH pipeline reads `grid.zarr` from here via
-  `LLC_DEPTH_SOURCE["grid_folder"]`
-  (`src/dbof/global_dataset_creation/data_sources.py`). Flip `grid_folder`
-  to `LLC4320_RAW/DEPTH` once `test_grid_store_opens[DEPTH]` passes, then
-  this prefix can be retired.
+* `s3://dbof/LLC4320/` — original first S3 copy; superseded by the 2026 migration to
+  `LLC4320_RAW/SURFACE` No longer referenced by the
+  pipelines (the legacy `grid_folder` override was removed from
+  `LLC_DEPTH_SOURCE` on 08 JUL 2026); still used as the comparison baseline
+  (`OLD_TMPL`) in `tests/test_transfer_integrity.py`. Retire that comparison
+  before deleting this prefix.
 * `s3://dbof/LLC4320_v1/` — superseded by the 2026 migration to
   `LLC4320_RAW/DEPTH` (verified with `dbof/transfer/verify_copy.py`).
   Candidate for deletion after the readiness tests pass against
