@@ -43,7 +43,9 @@ s3://dbof/
 │   └── {run_id}/{date}/{subset}.zarr
 ├── depth_fields/                     # global pipeline output (DEPTH)
 │   └── {run_id}/{date}/{subset}.zarr
-├── native_grid_dbof_training_data/   # processed global grid
+├── LLC4320_GRID_2D/                  # derived 2D lat/lon grid
+│   └── llc4320_grid.zarr
+├── native_grid_dbof_training_data/   # legacy generate-global output + old grid copy
 │   └── llc4320_grid.zarr
 ├── LLC4320/                          # LEGACY — original first S3 copy
 └── LLC4320_v1/                       # LEGACY — superseded by LLC4320_RAW/DEPTH
@@ -121,6 +123,23 @@ Global fields calculated at various depths (DEPTH pipeline).
 * **Location:** `s3://dbof/surface_fields/{run_id}/{date}/{subset}.zarr`
 * **Dates:** none yet
 * **Current version:** N/A [08 JUL 2026]
+
+### LLC4320_GRID_2D
+
+Derived 2D lat/lon grid written by `generate_grid_global.py`
+(`generate-global-grid-zarr`): the native 13-face grid converted to a single
+rectangular `(j, i)` = (12960, 17280) image. Contains 12 surface-relevant
+variables (`XC`, `YC`, `rA`, `Depth`, `SN`, `CS`, `dxC`, `dyG`, `dyC`,
+`dxG`, `rAz`, `hFacC` at k=0); no vertical grid information. Companion to
+the `surface_fields`/`depth_fields` outputs — read via `GridAccessConfig` /
+`grid_access` configs, not by the raw-data pipelines.
+
+* **Location:** `s3://dbof/LLC4320_GRID_2D/llc4320_grid.zarr`
+* **History:** copied on 08 JUL 2026 from
+  `s3://dbof/native_grid_dbof_training_data/llc4320_grid.zarr` (the original
+  copy remains there; versioned legacy configs, e.g. `access_depth_V4.yaml`,
+  still reference it). When regenerating, pass
+  `--folder LLC4320_GRID_2D` to `generate-global-grid-zarr`.
 
 ## OSN public bucket (anonymous access)
 
