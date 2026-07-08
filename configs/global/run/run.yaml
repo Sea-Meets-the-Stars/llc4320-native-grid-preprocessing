@@ -14,7 +14,7 @@
 pipeline: "SURF"
 
 run:
-  run_id: "vtest"
+  run_id: "vtest1"
   log_dir: "notebooks/notebooks_global/test_logs"
 
 data:
@@ -27,7 +27,6 @@ data:
   #   llc_wind (oceTAUX, oceTAUY, SIarea, KPPhbl, PhiBot): 2011-11-01 - 2012-07-15
   date_iterations:
     - '2012-05-01 12:00:00'
-    - '2012-05-09 12:00:00'
 
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
@@ -66,7 +65,7 @@ runtime:
 #
 # Only list subsets valid for the pipeline set above.
 active_subsets:
-  - icearea
+  - surface_wind
 
 # ---------------------------------------------------------------------------
 # Depth suffixes  (DEPTH pipeline only, optional)
