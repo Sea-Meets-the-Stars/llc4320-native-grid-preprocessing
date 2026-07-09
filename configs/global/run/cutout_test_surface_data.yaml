@@ -3,13 +3,13 @@
 pipeline: "SURF"
 
 run:
-  run_id: "cutout_test_data_v1_0"
+  run_id: "cutout_test_data_v1_2"
   log_dir: "logs/"
 
 data:
   date_iterations:
     - '2012-02-09 12:00:00'
-    # - '2012-08-01 12:00:00'
+    - '2012-01-01 12:00:00'
 
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
