@@ -50,8 +50,8 @@ def _dataset_name_from_date(date_str: str) -> str:
 
 
 # Variables exempt from the corrupt-date guard: 'time' is not a field, and
-# sea-ice is legitimately all zeros away from the poles (e.g. face 1).
-VALIDITY_CHECK_SKIP = {"time", "SIarea"}
+# sea-ice is legitimately all zeros away from the poles (e.g. face 1)
+VALIDITY_CHECK_SKIP = {"time", "SIarea", "SIheff", "SIhsnow", "SIuice", "SIvice"}
 
 
 def date_has_valid_data(ds, var, time_idx, face=1, tile=720):
