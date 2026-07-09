@@ -47,10 +47,12 @@ subset compute functions (``geographic_velocity``,
 ``geographic_wind_stress`` and 3D variants).
 """
 
+import contextlib
 import logging
 
 import numpy as np
 import xarray as xr
+from dask.diagnostics import ProgressBar
 from xmitgcm.llcreader import llcmodel
 from xmitgcm.llcreader.llcmodel import (
     _faces_coords_to_latlon,
@@ -275,16 +277,20 @@ def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
         metric_vector_pairs=[],
     )
 
-    # Materialise.
+    # Materialise ALL channels + masks in ONE dask.compute.  Computing each
+    # channel separately (.values per channel) submits a separate update_graph;
+    # channels that share a lazy lineage (e.g. surface_wind's oceTAUX/oceTAUY
+    # stitch, which wind_stress_curl/ekman_* all derive from) get their shared
+    # keys re-optimized differently on each call, which the scheduler flags as
+    # "Detected different run_spec" and can deadlock.  A single compute submits
+    # the shared sub-graph once (also faster: it is computed once, not per
+    # derived channel).
     logging.info("Materialising stitched arrays")
-    if progress_bar:
-        from dask.diagnostics import ProgressBar
-        with ProgressBar():
-            mask_arrays = [ds_rect[m].values.astype(bool) for m in mask_names]
-            channel_arrays = [ds_rect[ch].values for ch in channels]
-    else:
-        mask_arrays = [ds_rect[m].values.astype(bool) for m in mask_names]
-        channel_arrays = [ds_rect[ch].values for ch in channels]
+    with ProgressBar() if progress_bar else contextlib.nullcontext():
+        computed = ds_rect[channels + mask_names].compute()
+
+    mask_arrays = [computed[m].values.astype(bool) for m in mask_names]
+    channel_arrays = [computed[ch].values for ch in channels]
 
     # Combine all masks with OR.
     combined_mask = mask_arrays[0]
