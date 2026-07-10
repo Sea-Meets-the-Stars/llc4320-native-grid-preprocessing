@@ -17,7 +17,7 @@ output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
   folder: "native_grid_dbof_training_data/"
-  dataset_name: "dataset_creation.zarr"
+  dataset_name: "cutout_dataset_creation.zarr"
 
 features:
   model_data_feature_channels:

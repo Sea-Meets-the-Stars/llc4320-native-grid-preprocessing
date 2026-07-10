@@ -94,8 +94,8 @@ def test_face_mapping_handles_rotation(monkeypatch):
     a 720x720 face-local slice on the right face.
     """
     face_id_map, j_face_map, i_face_map = _make_rotated_lookup_arrays()
-    monkeypatch.setattr(tm, "_LOOKUP_CACHE",
-                        (face_id_map, j_face_map, i_face_map))
+    monkeypatch.setattr(tm, "_build_lookup_arrays",
+                        lambda: (face_id_map, j_face_map, i_face_map))
 
     # Pixel firmly inside the rotated face's first rect tile.
     info = tm.rect_ij_to_tile(i_rect=720 + 50, j_rect=10)
@@ -139,8 +139,8 @@ def test_run_round_trip(monkeypatch, tmp_path, prop_name):
     # --- Synthetic tile geometry: every rect pixel resolves to face 0 at
     # --- face-local coords matching the rect coords (mod FACE_SIZE).
     face_id_map, j_face_map, i_face_map = _make_simple_lookup_arrays()
-    monkeypatch.setattr(tm, "_LOOKUP_CACHE",
-                        (face_id_map, j_face_map, i_face_map))
+    monkeypatch.setattr(tm, "_build_lookup_arrays",
+                        lambda: (face_id_map, j_face_map, i_face_map))
 
     # --- Stub the S3 source resolver so no network / config file is touched.
     fake_s3_cfg = {
@@ -247,11 +247,122 @@ def test_resolve_s3_source_default_is_depth():
 
 
 # ---------------------------------------------------------------------------
+# Geographic (lon, lat) -> rect (i, j) resolution
+# ---------------------------------------------------------------------------
+
+def test_latlon_to_rect_ij(monkeypatch):
+    """Nearest-pixel lookup on a small synthetic stitched grid.
+
+    Stubs the S3 grid load and the face stitch so the test runs offline, then
+    confirms ``latlon_to_rect_ij`` returns the argmin pixel.
+    """
+    n = 5
+    lon1d = np.linspace(-40.0, -30.0, n)   # varies along i: [-40,-37.5,...,-30]
+    lat1d = np.linspace(20.0, 30.0, n)     # varies along j: [20,22.5,...,30]
+    XC = np.broadcast_to(lon1d[None, :], (n, n)).copy()
+    YC = np.broadcast_to(lat1d[:, None], (n, n)).copy()
+    rect = xr.Dataset({"XC": (("j", "i"), XC), "YC": (("j", "i"), YC)})
+
+    monkeypatch.setattr(
+        tu.get_raw_data, "get_llc_depth_gridfile", lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        tu.preproc_llc_core_data, "process_llc4320_3d_grid", lambda co: rect,
+    )
+    monkeypatch.setattr(
+        tu.faces_to_latlon, "faces_dataset_to_latlon", lambda ds, **k: rect,
+    )
+
+    s3_cfg = {"s3_endpoint": "x", "bucket": "x", "grid_folder": "x"}
+    # Target closest to lon idx 3 (-32.5) and lat idx 3 (27.5).
+    i_rect, j_rect = tu.latlon_to_rect_ij(-32.4, 27.6, s3_cfg)
+    assert (i_rect, j_rect) == (3, 3)
+
+
+def test_latlon_to_rect_ij_wraps_longitude(monkeypatch):
+    """A +180/-180 seam must not fool the nearest-pixel search."""
+    n = 3
+    # Grid longitudes straddle the seam at 179/-179; latitude constant.
+    lon1d = np.array([178.0, 179.0, -179.0])
+    lat1d = np.array([0.0, 0.0, 0.0])
+    XC = np.broadcast_to(lon1d[None, :], (n, n)).copy()
+    YC = np.broadcast_to(lat1d[:, None], (n, n)).copy()
+    rect = xr.Dataset({"XC": (("j", "i"), XC), "YC": (("j", "i"), YC)})
+    monkeypatch.setattr(
+        tu.get_raw_data, "get_llc_depth_gridfile", lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        tu.preproc_llc_core_data, "process_llc4320_3d_grid", lambda co: rect,
+    )
+    monkeypatch.setattr(
+        tu.faces_to_latlon, "faces_dataset_to_latlon", lambda ds, **k: rect,
+    )
+    # 180.5degE is 1.5deg from 179 but only 0.5deg from -179 (across the seam).
+    i_rect, _ = tu.latlon_to_rect_ij(
+        180.5, 0.0, {"s3_endpoint": "x", "bucket": "x", "grid_folder": "x"},
+    )
+    assert i_rect == 2  # the -179 column, chosen via wrapped distance
+
+
+def test_run_requires_exactly_one_location():
+    """``run`` must reject zero or two location conventions."""
+    ts = "2012-11-09 12:00:00"
+    with pytest.raises(ValueError, match="exactly one"):
+        tu.run(timestamp=ts)  # neither i,j nor lon,lat
+    with pytest.raises(ValueError, match="exactly one"):
+        tu.run(i_rect=1, j_rect=1, lon=1.0, lat=1.0, timestamp=ts)  # both
+
+
+# ---------------------------------------------------------------------------
+# Single canonical compute path (PR #10: no property math in tile_utils)
+# ---------------------------------------------------------------------------
+
+def test_density_uses_canonical_compute_fn():
+    """The density property must delegate to the one shared σ₀ routine.
+
+    The whole point of the PR-10 fix is that tile properties are *not* computed
+    by bespoke functions in ``tile_utils``; density must be the canonical
+    ``calculated_fields_at_depth.potential_density_anomaly_3d``.
+    """
+    import dbof.preprocessing.calculated_fields_at_depth as cfd
+
+    assert tu.TILE_PROPERTIES["density"].compute is cfd.potential_density_anomaly_3d
+    # And no property-calculation helper leaked back into tile_utils.
+    assert not hasattr(tu, "_compute_sigma0")
+    assert not hasattr(tu, "SIGMA0_REFERENCE_DENSITY")
+
+
+def test_potential_density_anomaly_3d_value():
+    """The canonical σ₀ routine returns jmd95(S, Θ, 0) − 1000 on a tiny tile."""
+    import dbof.preprocessing.calculated_fields_at_depth as cfd
+    import dbof.utils.jmd95_xgcm_implementation as jmd95
+    from dbof.preprocessing.physical_constants import SIGMA0_REFERENCE_DENSITY
+
+    theta = np.full((1, 2, 2, 2), 3.0, dtype=np.float32)
+    salt = np.full((1, 2, 2, 2), 35.5, dtype=np.float32)
+    ds = xr.Dataset(
+        {
+            "Theta": (("face", "k", "j", "i"), theta),
+            "Salt": (("face", "k", "j", "i"), salt),
+        },
+        coords={"face": [0], "k": np.arange(2)},
+    )
+    sigma0 = cfd.potential_density_anomaly_3d(ds).compute()
+    expected = float(jmd95.jmd95(35.5, 3.0, 0.0)) - SIGMA0_REFERENCE_DENSITY
+    assert sigma0.name == "sigma0"
+    np.testing.assert_allclose(sigma0.values, expected, atol=1e-4)
+
+
+# ---------------------------------------------------------------------------
 # Helpers (private to the tests)
 # ---------------------------------------------------------------------------
 
 def _stub_lookup_arrays(monkeypatch):
-    """Install trivial lookup arrays that just identify face 0 everywhere."""
+    """Stub ``_build_lookup_arrays`` to identify face 0 everywhere.
+
+    The stitched build is the single seam the mapping code calls (there is no
+    module-level cache any more), so tests replace it directly.
+    """
     face_id_map = np.zeros((tm.RECT_H, tm.RECT_W), dtype=np.int8)
     # Face-local coords mirror rect coords mod FACE_SIZE so the face-local
     # slice always has a 720-wide span -- keeps rect_ij_to_tile's sanity
@@ -261,8 +372,8 @@ def _stub_lookup_arrays(monkeypatch):
     j_face_map = np.broadcast_to(jj[:, None], (tm.RECT_H, tm.RECT_W)).copy()
     i_face_map = np.broadcast_to(ii[None, :], (tm.RECT_H, tm.RECT_W)).copy()
     monkeypatch.setattr(
-        tm, "_LOOKUP_CACHE",
-        (face_id_map, j_face_map, i_face_map),
+        tm, "_build_lookup_arrays",
+        lambda: (face_id_map, j_face_map, i_face_map),
     )
 
 
@@ -420,10 +531,9 @@ def test_rect_ij_to_tile_against_grid_zarr(i_rect, j_rect):
     import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
     import dbof.utils.faces_to_latlon as faces_to_latlon
 
-    # Reset the cached stitched lookup arrays so this real-grid test exercises
-    # the production code path (the offline tests above install stubs via
-    # monkeypatch, which auto-rolls back, but an explicit reset is cheap).
-    tm._LOOKUP_CACHE = None
+    # No cache to reset -- ``rect_ij_to_tile`` rebuilds the stitched lookup
+    # arrays on each call, and the offline tests' monkeypatched
+    # ``_build_lookup_arrays`` stubs auto-roll back before this test runs.
 
     # The tile code reads the canonical LLC_DEPTH source.
     s3 = tu._resolve_s3_source(None)

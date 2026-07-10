@@ -9,7 +9,7 @@ from functools import partial
 global_chunks={"i": 720, "j": 720, "i_g": 720, "j_g": 720}
 
 # ---------------------------------------------------------------------
-# Helper: close all open dataset_creation references
+# Helper: close all open cutout_dataset_creation references
 # ---------------------------------------------------------------------
 def _multi_file_closer(closers):
     """Invoke all delayed _close() handlers for lazily-opened datasets."""
@@ -23,7 +23,7 @@ def get_remote_llc_data(endpoint_url, it, face_range):
 
     This function opens kerchunk JSON references for a selected set of LLC
     faces and a single model iteration, constructs lazily-evaluated xarray
-    datasets via Zarr, and combines them into a single dataset_creation using
+    datasets via Zarr, and combines them into a single cutout_dataset_creation using
     coordinate-based merging. Data access is deferred using Dask until
     explicitly computed.
 
@@ -39,7 +39,7 @@ def get_remote_llc_data(endpoint_url, it, face_range):
     Returns
     -------
     xarray.Dataset
-        Combined LLC4320 dataset_creation for the requested faces and iteration,
+        Combined LLC4320 cutout_dataset_creation for the requested faces and iteration,
         containing surface-level variables with lazy Dask-backed arrays.
 
     Notes
@@ -47,7 +47,7 @@ def get_remote_llc_data(endpoint_url, it, face_range):
     - Data are accessed anonymously over S3 using kerchunk reference files.
     - Chunking is applied in the horizontal dimensions (``i``, ``j``).
     - A custom close handler is attached to ensure all underlying datasets
-      are properly closed when the combined dataset_creation is closed.
+      are properly closed when the combined cutout_dataset_creation is closed.
     """
 
     # Include SSH
@@ -122,7 +122,7 @@ def get_remote_llc_data(endpoint_url, it, face_range):
     datasets, closers = dask.compute(datasets, closers)
 
     # -----------------------------
-    # Combine into a single dataset_creation
+    # Combine into a single cutout_dataset_creation
     # -----------------------------
     print("Combining datasets by coordinates...")
     ds = xr.combine_by_coords(
@@ -249,7 +249,7 @@ def get_remote_gridfile(endpoint_url):
     Returns
     -------
     xarray.Dataset
-        Grid fields combined into a single LLC4320 dataset_creation.
+        Grid fields combined into a single LLC4320 cutout_dataset_creation.
     """
     fs = s3fs.S3FileSystem(
         anon=True,

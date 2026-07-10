@@ -14,7 +14,7 @@ def generate_static_land_face_masks_for_sampling(ds_grid, target_km_res):
     Parameters
     ----------
     ds_grid : xarray.Dataset
-        LLC grid dataset_creation containing metric terms.
+        LLC grid cutout_dataset_creation containing metric terms.
     target_km_res : float
         Target physical resolution (km) used to define halo width.
 

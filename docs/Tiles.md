@@ -18,9 +18,9 @@ Code lives in `src/dbof/tiles/`:
 
 | Module | Responsibility |
 |--------|----------------|
-| `tile_mapping.py` | Resolve a rectangular-grid `(i, j)` pixel → its enclosing LLC tile (face + face-local slices). |
-| `tile_utils.py` | Data loading, the property registry, compute scaffolding, output assembly, and the `run()` orchestrator. |
-| `generate_tile.py` | Thin CLI wrapper around `tile_utils.run()`. |
+| `dbof/tiles/tile_mapping.py` | Resolve a rectangular-grid `(i, j)` pixel → its enclosing LLC tile (face + face-local slices). |
+| `dbof/tiles/tile_utils.py` | Data loading, geographic `(lon, lat)`→`(i, j)` resolution, the property registry, compute scaffolding, output assembly, and the `run()` orchestrator. |
+| `dbof/cli/generate_tile.py` | Thin CLI wrapper around `tile_utils.run()`; installed as the `generate-tile` console script. |
 
 ---
 
@@ -83,9 +83,16 @@ the tracer variables it needs, a compute callback returning a lazy
 | `temperature` | `Theta` | `degC` | `Theta` | passthrough |
 | `salinity` | `Salt` | `psu` | `Salt` | passthrough |
 
-`density` reuses `utils.physical_calculations.density_of_field`, which calls the
-JMD95 equation of state with `p = 0` at every level — i.e. **potential density
-referenced to the surface** at every depth.
+`density`'s `compute` callback **is** the canonical
+`preprocessing.calculated_fields_at_depth.potential_density_anomaly_3d` — the
+one σ₀ routine shared with the global depth pipeline (JMD95 with `p = 0` at
+every level, i.e. **potential density referenced to the surface**, minus
+`physical_constants.SIGMA0_REFERENCE_DENSITY` = 1000 kg m⁻³). No property
+*calculation* lives in `tile_utils` — the registry points `compute` at the
+single canonical function for each field; only trivial native-variable
+selection (temperature/salinity) stays in `tile_utils`. See the
+[Known issues](#known-issues--notes) note on the broader compute-unification
+work.
 
 ### Adding a new property
 
@@ -108,25 +115,38 @@ TILE_PROPERTIES["my_field"] = TileProperty(
 
 ## CLI usage
 
-The script is importable and runnable as a module:
+Installed as the `generate-tile` console script (also runnable as
+`python -m dbof.cli.generate_tile`). The tile location is given **either** as a
+rect-grid pixel (`--i`/`--j`) **or** as a geographic coordinate (`--lon`/`--lat`,
+resolved to the nearest rect pixel via the grid file) — supply exactly one pair:
 
 ```bash
-python -m dbof.tiles.generate_tile \
+# by rect-grid pixel
+generate-tile \
     --i 9800 --j 9000 \
     --timestamp '2012-11-09 12:00:00' \
     --property density \
     [--output ./density_tile301_20121109T12.nc] \
-    [--s3-config some_override.yaml]
+    [--clobber] [--qa-plot] [--s3-config some_override.yaml]
+
+# by geographic location (resolved to i, j via grid.zarr)
+generate-tile --lon -45.0 --lat 33.0 \
+    --timestamp '2012-11-09 12:00:00' --property temperature
 ```
 
 | Flag | Required | Meaning |
 |------|----------|---------|
-| `--i` | yes | rect-grid i coord, `0..17279` (any pixel inside the tile) |
-| `--j` | yes | rect-grid j coord, `0..12959` (any pixel inside the tile) |
+| `--i` / `--j` | one pair | rect-grid coords, `i∈0..17279`, `j∈0..12959` (any pixel inside the tile) |
+| `--lon` / `--lat` | one pair | geographic degrees E / N; resolved to the nearest rect pixel via `grid.zarr` |
 | `--timestamp` | yes | snapshot time, `'YYYY-MM-DD HH:MM:SS'` (UTC) |
 | `--property` | no | `density` (default), `temperature`, or `salinity` |
 | `--output` | no | output path; see below |
+| `--clobber` | no | overwrite an existing output file instead of skipping |
+| `--qa-plot` | no | also write a surface QA plot (PNG) next to the NetCDF |
 | `--s3-config` | no | optional legacy YAML override (see [Data source](#data-source)) |
+
+Exactly one of the `--i`/`--j` or `--lon`/`--lat` pairs must be supplied;
+passing neither or both is a CLI error.
 
 **Output path rule** (`--output`):
 
@@ -143,7 +163,7 @@ python -m dbof.tiles.generate_tile \
 from dbof.tiles import tile_utils
 
 out_path = tile_utils.run(
-    i_rect=9800,
+    i_rect=9800,              # OR pass lon=/lat= instead (exactly one pair)
     j_rect=9000,
     timestamp="2012-11-09 12:00:00",
     property="density",       # key into TILE_PROPERTIES
@@ -152,10 +172,18 @@ out_path = tile_utils.run(
     clobber=False,            # skip if the output file already exists
     gen_qa_plot=False,        # also write a surface PNG next to the NetCDF
 )
+
+# ...or select the tile by geographic location:
+out_path = tile_utils.run(
+    lon=-45.0, lat=33.0,
+    timestamp="2012-11-09 12:00:00",
+    property="temperature",
+)
 ```
 
-`run()` returns the absolute `Path` of the written NetCDF, or `None` if the
-output already existed and `clobber=False`.
+`run()` returns the absolute `Path` of the written NetCDF. If the output
+already existed and `clobber=False` the run is skipped, but the existing path
+is still returned (the function always returns a `Path`).
 
 To resolve a tile without doing any I/O:
 
@@ -221,12 +249,16 @@ re-implementing it:
 - `get_raw_data.get_llc_depth_gridfile` / `get_llc_timestep_data` — S3 readers
   (with the depth chunking and cache-disabled storage options).
 - `preprocessing.preproc_llc_core_data.process_llc4320_3d_grid` — grid extraction.
-- `utils.physical_calculations.density_of_field` — JMD95 potential density.
-- `utils.faces_to_latlon.faces_dataset_to_latlon` — face stitching (for the
-  tile→face lookup).
+- `preprocessing.calculated_fields_at_depth.potential_density_anomaly_3d` — the
+  single canonical σ₀ routine shared with the global depth pipeline (wraps the
+  JMD95 `_density_lazy` helper and subtracts `SIGMA0_REFERENCE_DENSITY`).
+- `utils.faces_to_latlon.faces_dataset_to_latlon` — face stitching (for both the
+  tile→face lookup and the geographic `(lon, lat)`→`(i, j)` resolver).
 - `global_dataset_creation.iterations.mit_date_to_iteration` / `DATE_FMT` —
   date↔iteration conversion (same conventions as the global pipeline; see
   [Iteration / date conventions](Global_Maps.md#iteration--date-conventions)).
+- `global_dataset_creation.metadata._git_commit_hash` — git provenance (falls
+  back to the old `logging` location before the branch is rebased).
 
 ---
 
@@ -248,12 +280,22 @@ conda run -n ocean14 python -m pytest tests/test_generate_tile.py \
 
 ---
 
-## Notes
+## Known issues / Notes
 
 - The tile holds `~2 vars × 51 × 720² × 4 B ≈ 210 MB` lazily — trivial in
   memory. The default threaded Dask scheduler is sufficient; no
   `dask.distributed.Client` is needed.
 - Materialisation happens in a single `.compute()` (wrapped in a `ProgressBar`),
   matching the one-compute pattern used by the global depth pipeline.
+- **Compute unification.** Every property calculation has exactly one
+  implementation, in `preprocessing.calculated_fields_at_depth`; the tile
+  registry's `compute` callbacks point straight at those canonical functions
+  (density → `potential_density_anomaly_3d`), and `tile_utils` holds no field
+  math of its own. `mixed_layer_depth` was refactored to call the same
+  `potential_density_anomaly_3d`, so the `ρ − 1000` offset is defined once
+  (`physical_constants.SIGMA0_REFERENCE_DENSITY`). The remaining generalization
+  — organizing all calculated fields (tracers *and* vectors) behind a per-field
+  class and driving both pipelines through one dispatch — is the follow-up
+  `tile_fields` work.
 
 *Generated by JXP and Claude.*

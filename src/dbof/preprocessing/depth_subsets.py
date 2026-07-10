@@ -31,10 +31,13 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     rossby_number_3d,
     burger_number_3d,
     balanced_richardson_number_3d,
+    # -- geographic vectors --
+    geographic_velocity_3d,
+    geographic_wind_stress,
     # -- wind --
     wind_stress_curl,
     ekman_pumping,
-    ekman_transport_velocity,
+    ekman_transport,
     # -- fluxes --
     advective_buoyancy_fluxes_3d,
     # -- PV --
@@ -61,6 +64,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     modified_okubo_weiss_3d,
 )
 from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
+from dbof.preprocessing.vertical_helpers import _interp_w_to_tracer_levels
 
 
 # ---------------------------------------------------------------------------
@@ -515,9 +519,11 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
             okubo_weiss_3d(ds_merge, grid, jacobian=jac),
             "okubo_weiss", ds_merge, mld=mld, requested=requested))
 
-    # coriolis_f is 2D (latitude-only) — no depth strategies needed.
+    # coriolis_f has no depth dependence — no depth strategies needed.
+    # Keep it as a DataArray (dims (face, j, i) on the native grid) so
+    # _materialise_results preserves dimension names and coordinates.
     if "coriolis_f" in requested:
-        results["coriolis_f"] = coriolis_parameter(ds_merge, grid).values
+        results["coriolis_f"] = coriolis_parameter(ds_merge, grid)
 
     return _materialise_results(results)
 
@@ -626,7 +632,10 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
 
 def compute_surface_wind(ds_merge, grid, computed_feature_channels):
-    """Subset: surface_wind — curl, Ekman pumping, Ekman transport.
+    """Subset: surface_wind — geographic wind stress, curl, Ekman pumping/transport.
+
+    Output ``oceTAUX`` is eastward and ``oceTAUY`` northward wind stress
+    (see the vector-handling policy in ``dbof.utils.faces_to_latlon``).
 
     Parameters
     ----------
@@ -644,6 +653,13 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
     """
     results = {}
 
+    if {"oceTAUX", "oceTAUY"} & set(computed_feature_channels):
+        tau_east, tau_north = geographic_wind_stress(ds_merge, grid)
+        if "oceTAUX" in computed_feature_channels:
+            results["oceTAUX"] = tau_east
+        if "oceTAUY" in computed_feature_channels:
+            results["oceTAUY"] = tau_north
+
     if "wind_stress_curl" in computed_feature_channels:
         results["wind_stress_curl"] = wind_stress_curl(ds_merge, grid)
 
@@ -652,7 +668,7 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
 
     ekman_channels = {"u_ekman", "v_ekman"}
     if ekman_channels.intersection(computed_feature_channels):
-        ek = ekman_transport_velocity(ds_merge, grid)
+        ek = ekman_transport(ds_merge, grid)
         for ch in ekman_channels:
             if ch in computed_feature_channels:
                 results[ch] = ek[ch]
@@ -690,8 +706,10 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     Feeds the raw 3D model variables through ``apply_depth_strategies``
     so they can be extracted at _sfc, _z25m, _mld, and _mld_mean.
 
-    U and V live on staggered grids (i_g / j_g) and are interpolated to
-    tracer points before the depth reduction.  Eta is inherently 2D
+    U and V are interpolated to tracer points and rotated to geographic
+    components before the depth reduction, so the output ``U_*`` channels
+    are eastward and ``V_*`` northward velocity (see the vector-handling
+    policy in ``dbof.utils.faces_to_latlon``).  Eta is inherently 2D
     (surface only) and is handled as a special case.
 
     Parameters
@@ -737,24 +755,25 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     if "Eta_sfc" in requested:
         results["Eta_sfc"] = ds_merge["Eta"]
 
-    # -- Velocity: interpolate staggered → tracer points, then apply depths --
-    if any(c.startswith("U_") for c in requested):
+    # -- Velocity: interp + rotate to geographic (east/north), then apply
+    #    depths.  Output 'U_*' is eastward, 'V_*' northward velocity.
+    if any(c.startswith("U_") or c.startswith("V_") for c in requested):
         _ensure_mld()
-        U_c = grid.interp(ds_merge.U, 'X', boundary='fill')
-        results.update(apply_depth_strategies(
-            U_c, "U", ds_merge, mld=mld, requested=requested))
+        u_east, v_north = geographic_velocity_3d(ds_merge, grid)
+        if any(c.startswith("U_") for c in requested):
+            results.update(apply_depth_strategies(
+                u_east, "U", ds_merge, mld=mld, requested=requested))
+        if any(c.startswith("V_") for c in requested):
+            results.update(apply_depth_strategies(
+                v_north, "V", ds_merge, mld=mld, requested=requested))
 
-    if any(c.startswith("V_") for c in requested):
-        _ensure_mld()
-        V_c = grid.interp(ds_merge.V, 'Y', boundary='fill')
-        results.update(apply_depth_strategies(
-            V_c, "V", ds_merge, mld=mld, requested=requested))
-
-    # -- W (on k_l vertical grid, tracer horizontal grid) --
+    # -- W (on the vertical face grid) -> interpolate to tracer centres
+    #    (k / Z) so the depth strategies align with the tracer-centred MLD.
     if any(c.startswith("W_") for c in requested):
         _ensure_mld()
+        W_c = _interp_w_to_tracer_levels(ds_merge)
         results.update(apply_depth_strategies(
-            ds_merge.W, "W", ds_merge, mld=mld, requested=requested))
+            W_c, "W", ds_merge, mld=mld, requested=requested))
 
     return _materialise_results(results)
 

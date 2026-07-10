@@ -26,11 +26,11 @@ import dbof.preprocessing.weighted_coordinate_sampling as weighted_coordinate_sa
 
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 
-import dbof.dataset_creation.zarr_dataset as zarr_dataset
+import dbof.cutout_dataset_creation.zarr_dataset as zarr_dataset
 
-import dbof.dataset_creation.metadata as metadata
-import dbof.dataset_creation.dask_pipeline as dask_pipeline
-import dbof.dataset_creation.config as config
+import dbof.cutout_dataset_creation.metadata as metadata
+import dbof.cutout_dataset_creation.dask_pipeline as dask_pipeline
+import dbof.cutout_dataset_creation.config as config
 from dbof.preprocessing.calculate_additional_fields import relative_vorticity
 
 # Constants --------------------------
@@ -170,7 +170,7 @@ def process_time_snapshot(cfg: config.JobConfig, metadata_writer, zarr_ds, ds_me
 
 def main():
     """
-    Entry point for native-grid LLC patch dataset_creation generation.
+    Entry point for native-grid LLC patch cutout_dataset_creation generation.
 
     Orchestrates argument parsing, Dask setup, filesystem initialization,
     and iteration over time snapshots.
@@ -227,7 +227,7 @@ def main():
         down_sample_res=cfg.output.down_sample_res,
     )
 
-    logging.info(f"Zarr dataset_creation created.")
+    logging.info(f"Zarr cutout_dataset_creation created.")
 
     # Get our grid and static masks once ever. These never change.
     ds_grid, land_face_mask = set_up_grid_data_and_masks(cfg)

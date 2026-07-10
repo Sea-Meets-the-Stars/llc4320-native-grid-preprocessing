@@ -36,16 +36,22 @@ SURFACE_SUBSETS = {
         "dataset_name": "native_fields.zarr",
         "surface_only": True,
         "model_data_feature_channels": [
-            "Theta", "Salt", "Eta", "U", "V", "W",
+            "Theta", "Salt", "Eta", "W",
         ],
-        "compute_features_channels": [],
+        "compute_features_channels": ["U", "V"],
     },
 
+    # oceQnet exists only in the LLC_SURF S3 stores, not the OSN kerchunk
+    # endpoints — added via pipeline_model_channels for SURF only.
     "surface_wind": {
         "dataset_name": "surface_wind.zarr",
         "surface_only": True,
-        "model_data_feature_channels": ["oceTAUX", "oceTAUY"],
-        "compute_features_channels": [],
+        "model_data_feature_channels": [],
+        "pipeline_model_channels": {"SURF": ["oceQnet"]},
+        "compute_features_channels": [
+            "oceTAUX", "oceTAUY",
+            "wind_stress_curl", "ekman_pumping", "u_ekman", "v_ekman",
+        ],
     },
 
     "icearea": {
@@ -62,6 +68,7 @@ SURFACE_SUBSETS = {
         "compute_features_channels": [
             "gradb2", "gradsalt2", "gradtheta2",
             "gradeta2", "gradrho2", "turner_angle",
+            "density", "buoyancy",
         ],
     },
 
@@ -93,6 +100,9 @@ SURFACE_SUBSETS = {
 
 #: Default depth suffixes applied when the YAML does not override.
 DEFAULT_DEPTH_SUFFIXES = ["sfc", "z25m", "mld", "mld_mean"]
+
+#: Surface-only (2D) bases: only ever emit ``_sfc``, never depth suffixes.
+SURFACE_ONLY_BASES = frozenset({"Eta", "gradeta2", "ug", "vg"})
 
 DEPTH_SUBSETS = {
 
@@ -142,8 +152,9 @@ DEPTH_SUBSETS = {
     "surface_wind": {
         "dataset_name": "surface_wind.zarr",
         "surface_only": True,
-        "model_data_feature_channels": ["oceTAUX", "oceTAUY", "oceQnet"],
+        "model_data_feature_channels": ["oceQnet"],
         "compute_features_channels": [
+            "oceTAUX", "oceTAUY",
             "wind_stress_curl", "ekman_pumping", "u_ekman", "v_ekman",
         ],
     },
@@ -260,7 +271,14 @@ def get_subset_definition(pipeline: str, subset_name: str) -> dict:
             f"Valid subsets: {list(table)}"
         )
 
-    return dict(table[subset_name])
+    defn = dict(table[subset_name])
+    # Optional per-pipeline extra model channels (e.g. oceQnet is available
+    # to SURF but not OSN).
+    extra = defn.pop("pipeline_model_channels", None)
+    if extra and pipeline in extra:
+        defn["model_data_feature_channels"] = (
+            list(defn["model_data_feature_channels"]) + list(extra[pipeline]))
+    return defn
 
 
 def get_compute_fn(pipeline: str, subset_name: str):
@@ -320,6 +338,10 @@ def expand_channels_with_suffixes(
     If *depth_suffixes* is ``None`` or empty, *channels* is returned as-is
     with any *extra_channels* appended.
 
+    Surface-only bases (:data:`SURFACE_ONLY_BASES`, e.g. ``Eta``) are never
+    expanded across the depth suffixes: they only ever get the ``_sfc``
+    channel, matching what the depth compute functions actually produce.
+
     Parameters
     ----------
     channels : list[str]
@@ -342,8 +364,12 @@ def expand_channels_with_suffixes(
 
     result = []
     for base in (channels or []):
-        for suffix in depth_suffixes:
-            result.append(f"{base}_{suffix}")
+        if base in SURFACE_ONLY_BASES:
+            # Inherently 2D field -- only the surface channel is produced.
+            result.append(f"{base}_sfc")
+        else:
+            for suffix in depth_suffixes:
+                result.append(f"{base}_{suffix}")
     if extra_channels:
         result.extend(extra_channels)
     return result
