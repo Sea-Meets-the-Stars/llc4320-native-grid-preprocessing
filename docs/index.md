@@ -7,6 +7,7 @@ Documentation for the LLC4320 native grid preprocessing pipeline for detecting f
 This project provides tools for:
 - Accessing raw LLC4320 model output data
 - Preprocessing LLC data for machine learning
+- Building global maps and single tiles on the native grid
 - Weighted sampling strategies
 - Halo masking techniques
 
@@ -18,6 +19,8 @@ This project provides tools for:
 
 Accessing_Raw_LLC4320_Data
 Preprocess_LLC_Data
+Global_Maps
+Tiles
 Weighted_Sampling
 Sampling_With_GradB2
 Halo_Masking
