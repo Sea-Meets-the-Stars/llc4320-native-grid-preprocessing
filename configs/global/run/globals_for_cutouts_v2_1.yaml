@@ -1,9 +1,9 @@
 # Pipeline: SURF | OSN | DEPTH
-#generate-global --config configs/global/run/cutout_test_surface_data.yaml
+#generate-global --config configs/global/run/globals_for_cutouts_v2_1.yaml
 pipeline: "SURF"
 
 run:
-  run_id: "globals_for_cutouts_v2_1"
+  run_id: "v2_1_00"
   log_dir: "logs/"
 
 data:
@@ -35,13 +35,13 @@ data:
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
-  folder: "test_data_for_cutouts/"
+  folder: "globals_for_cutouts/"
 
 
 runtime:
   zarr_async_concurrency: 8
   dask_scheduler: "distributed"
-  dask_n_workers: 4
+  dask_n_workers: 16
   dask_threads_per_worker: 4
 
 # ---------------------------------------------------------------------------
