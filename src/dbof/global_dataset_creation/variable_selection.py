@@ -18,10 +18,11 @@ variables required to produce them, avoiding unnecessary I/O.
 _CHANNEL_VARIABLE_RULES = [
     # Tracers: any buoyancy/density/gradient-based diagnostic
     (
-        ('N2', 'mixed_layer', 'ml_heat', 'Ri', 'Fr', 'Bu',
+        ('N2', 'mixed_layer', 'ml_heat', 'Ri', 'R_ib', 'Fr', 'Bu',
          'ertel_pv', 'uB', 'vB', 'wB', 'Ro', 'KE',
          'gradb2', 'gradtheta2', 'gradsalt2', 'gradrho2',
-         'turner_angle', 'frontogenesis', 'density', 'buoyancy'),
+         'turner_angle', 'frontogenesis', 'density', 'buoyancy',
+         'Wstar'),
         ['Theta', 'Salt'],
     ),
     # Velocity: shear, dimensionless numbers, fluxes, kinematics.  The raw
@@ -31,12 +32,15 @@ _CHANNEL_VARIABLE_RULES = [
          'ertel_pv', 'uB', 'vB',
          'relative_vorticity', 'strain', 'divergence',
          'okubo_weiss', 'frontogenesis', 'ug', 'vg',
-         'U', 'V'),
+         'U', 'V', 'Wstar'),
         ['U', 'V'],
     ),
-    # Vertical velocity: PV, wB, and the native W channels
+    # Vertical velocity: PV, wB, and the native W channels.  The native
+    # stem is 'W_' (not bare 'W') so it matches W_sfc/W_z25m/... but does
+    # NOT greedily swallow other capital-W channels such as 'Wstar_*'
+    # (which needs no vertical velocity).
     (
-        ('ertel_pv', 'wB', 'W'),
+        ('ertel_pv', 'wB', 'W_'),
         ['W'],
     ),
     # Wind stress: both raw components always needed (rotation couples them)

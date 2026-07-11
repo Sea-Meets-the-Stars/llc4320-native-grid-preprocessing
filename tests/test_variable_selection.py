@@ -75,6 +75,10 @@ def test_exact_mappings():
         "ertel_pv_tilt_sfc": {"Theta", "Salt", "U", "V", "W"},
         "uB_sfc":            {"Theta", "Salt", "U", "V"},
         "frontogenesis_geo": {"Theta", "Salt", "U", "V", "Eta"},
+        # Wstar needs tracers (for the buoyancy gradient) + velocities (for
+        # the Jacobian) but NOT vertical velocity W — guards against the
+        # bare-'W' stem greedily matching 'Wstar'.
+        "Wstar_sfc":         {"Theta", "Salt", "U", "V"},
     }
     for ch, expected in cases.items():
         got = set(required_model_variables([], [ch]))
