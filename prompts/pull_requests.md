@@ -57,3 +57,58 @@ the reader) and differed only in error handling; the branch side added a
 "skipped" rather than "errored" when the NRP/Nautilus S3 endpoint is
 unavailable. Choosing that side keeps the offline-friendly test posture the
 rest of `conftest.py` already follows (the `--run-integration` gating).
+
+### 2026-07-12 (Code review of PR #19 "Cutouts data v2" with inline comments)
+
+Executed the 2nd item under **cutouts_data_v2**: a high-effort,
+recall-biased code review of PR #19
+(`Sea-Meets-the-Stars/llc4320-native-grid-preprocessing#19`, head
+`466c749`, +3618/−1429 across 60 files) and posted the findings as inline
+PR comments.
+
+**Method.** Scoped the review to the Python diff (`src/` + `tests/`,
+~3.5k lines; docs/notebooks/configs skimmed for context only). Fanned out
+**7 independent finder angles** as subagents — line-by-line, removed-
+behavior, cross-file tracer, reuse, simplification, efficiency, altitude —
+each returning up to 6 candidates. Deduped, then **verified every surviving
+candidate by reading the current source** (also to get exact line numbers,
+since finders reported some diff-offset lines). Dropped weak/defensible
+candidates (e.g. empty-list `feature_channels` erroring is arguably intended;
+the dropped face-perimeter mask is documented as intentional for the
+stitched grid — folded that into the related finding as a "confirm intent"
+note).
+
+**Posted 10 inline comments** (one COMMENT review, id 4679967246 —
+not approve/request-changes):
+- *Correctness (6):* (1) `stitched_halo_mask` uses a single global-mean
+  grid spacing for fast-marching, vs the old per-face mean — km halos
+  misplaced at high/low latitude; (2) snapshot time via
+  `strptime(folder_name)` + `resolve_date_prefixes` accepting any
+  subdirectory → run-aborting `ValueError` on a stray dir; (3)
+  `date_prefixes[0]` → `IndexError` on empty discovery; (4) guardless
+  `weighted_sample_on_grid` (crashes when valid cells < sample count, or
+  `vals.min()` on an empty set); (5) `static_masks.py` calls the renamed
+  `halo_mask.llc_halo_mask` → latent `AttributeError` in dead-but-shipped
+  code (also flags the now-unapplied face-perimeter mask); (6)
+  `access.meta.loc[keep_ids]` breaks image/metadata row-alignment if
+  `image_id` is ever duplicated.
+- *Efficiency (3):* per-snapshot re-`persist()` of static `dxC`/`dyC` in
+  `generate_halo_ice_mask`; `gradb2` read twice per snapshot (their own
+  TODO); `_open_subset_readers` (S3 `ls` + reader opens) re-run 3+ times
+  per snapshot.
+- *Cleanup (1):* a ~30-line dead commented-out block in `static_masks.py`
+  referencing pre-rename names.
+
+Review URL:
+`https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/19#pullrequestreview-4679967246`
+(verified: 10 inline comments attached).
+
+**What I learned.** The PR is a solid refactor — most deleted behavior
+(U/V tracer interpolation moved upstream, `log10(gradb2)` weighting, ice
+polarity, grid-edge rejection) was correctly re-established, and the
+cross-file tracer confirmed callers/imports resolve. The real theme of the
+findings is the **native→stitched grid migration**: the halo fast-marching
+lost its per-face spacing approximation, and a few native-grid helpers were
+carried over with a stale callee name / no longer wired in. The other
+cluster is **robustness of the new discovery path** (folder-name parsing
+and empty/degenerate inputs that the old data-driven path never hit).
