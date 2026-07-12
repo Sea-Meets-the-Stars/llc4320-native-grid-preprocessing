@@ -262,7 +262,7 @@ def test_main_grid_dispatch(tmp_path, fake_grid_reader, monkeypatch):
         mode="grid",
         s3_endpoint="https://example",
         bucket="dbof",
-        folder="native_grid_dbof_training_data",
+        folder="LLC4320_GRID_2D",
         grid_dataset_name="llc4320_grid.zarr",
         grid_output_filename="grid_out.nc",
     )

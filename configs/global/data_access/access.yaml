@@ -44,5 +44,5 @@ data_access:
 grid_access:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "native_grid_dbof_training_data"
+  folder: "LLC4320_GRID_2D"
   dataset_name: "llc4320_grid.zarr"

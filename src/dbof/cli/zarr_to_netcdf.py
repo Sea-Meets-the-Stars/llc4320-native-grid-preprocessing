@@ -105,7 +105,7 @@ Usage — grid
       --mode grid \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder native_grid_dbof_training_data \\
+      --folder LLC4320_GRID_2D \\
       --grid-dataset-name llc4320_grid.zarr \\
       --output-dir /scratch/llc4320_netcdf/
 """
@@ -347,7 +347,7 @@ def grid_zarr_to_netcdf(
     bucket : str
         S3 bucket name, e.g. 'dbof'.
     folder : str
-        S3 folder path, e.g. 'native_grid_dbof_training_data'.
+        S3 folder path, e.g. 'LLC4320_GRID_2D'.
     grid_dataset_name : str
         Zarr store name within ``folder`` (default: ``llc4320_grid.zarr``).
     output_dir : str
