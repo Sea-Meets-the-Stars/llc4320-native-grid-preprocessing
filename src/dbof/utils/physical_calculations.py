@@ -14,7 +14,7 @@ def grad_squared(zonal_grad, merid_grad):
     Returns
     -------
     xarray.DataArray or dask array
-        Sum of the squared zonal and meridional gradient components.
+        Sum of the squared zonal and meridional gradient components [(field_units m^-1)^2] .
     """
     return zonal_grad ** 2 + merid_grad ** 2
 

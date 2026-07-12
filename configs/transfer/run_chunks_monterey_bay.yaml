@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------------------
+# Config for the LLC4320 transfer CLI — CHUNKS mode  (transfer_llc4320.py)
+#
+# Transfers a single native 720x720 spatial chunk (all 51 depth levels) of the
+# LLC4320 grid, for the chunk surrounding a user-supplied lat/lon, across many
+# timestamps.  No computation — pure data transfer.
+#
+# 3D chunk layout: (k=51, face=1, j=720, i=720)
+#   — one S3 GET retrieves the full water column for the chunk.
+#
+# Output layout (grid written once; one store per date):
+#   dbof/LLC4320_RAW/CHUNKS/{chunk_name}/grid.zarr            # XC, YC, Z, hFac, ...
+#   dbof/LLC4320_RAW/CHUNKS/{chunk_name}/{YYYYMMDDTHH}.zarr   # Theta, Salt, U, ...
+#
+# Usage:
+#   transfer-timestep --config configs/transfer/run_chunks_monterey_bay.yaml --init-store
+# ---------------------------------------------------------------------------
+
+run:
+  run_id: "transfer_chunks_monterey_bay"
+  log_dir: "./logs"
+
+data:
+  # Path to the full LLC4320 zarr store on the local / cluster filesystem.
+  MIT_data_path: "/orcd/data/abodner/003/LLC4320/LLC4320"
+
+  # Dates to transfer (one output directory each), ISO 'YYYY-MM-DD HH:MM:SS'.
+  # Both the full and chunk extents loop over this list in a single run.
+  date_iterations:
+    - '2012-06-29 12:00:00'
+    - '2012-06-30 12:00:00'
+    - '2012-07-01 12:00:00'
+    - '2012-07-02 12:00:00'
+    - '2012-07-03 12:00:00'
+    - '2012-07-04 12:00:00'
+    - '2012-07-05 12:00:00'
+    - '2012-07-06 12:00:00'
+    - '2012-07-07 12:00:00'
+    - '2012-07-03 00:00:00'
+    - '2012-07-03 03:00:00'
+    - '2012-07-03 06:00:00'
+    - '2012-07-03 09:00:00'
+    - '2012-07-03 15:00:00'
+    - '2012-07-03 18:00:00'
+    - '2012-07-03 21:00:00'
+    - '2012-07-04 00:00:00'
+
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  # All raw transfers live under {bucket}/{raw_prefix}/; chunks land in
+  # {raw_prefix}/{chunks_subdir}/{chunk_name}/ (defaults: LLC4320_RAW / CHUNKS).
+  raw_prefix: "LLC4320_RAW"
+  chunks_subdir: "CHUNKS"
+
+# ---------------------------------------------------------------------------
+# Transfer-specific settings
+# ---------------------------------------------------------------------------
+transfer:
+  mode: "chunks"
+
+  # Location to transfer.  The lat/lon is resolved to the nearest native grid
+  # cell, then floored to the enclosing 720x720 chunk.  chunk_name is the
+  # directory label under chunks_prefix; the resolved face + slices are stored
+  # as zarr attributes for provenance.
+  location:
+    lat: 36.8        # Monterey Bay, CA
+    lon: -121.9
+    chunk_name: "monterey_bay"
+
+  # Time-varying fields transferred for the chunk (the DEPTH portion plus the
+  # 2D surface fields).  3D fields (Theta, Salt, U, V, W) carry all 51 depths;
+  # 2D fields (Eta, oceTAUX, ...) are single-level.
+  variables:
+    - Theta
+    - Salt
+    - U
+    - V
+    - W
+    - Eta
+    - oceTAUX
+    - oceTAUY
+    - SIarea
+    - oceQnet
+    - time
+
+  # Static grid variables — written once to {chunk_name}/grid.zarr, sliced to
+  # the same chunk.  XC/YC are required (used to resolve the lat/lon).
+  static_variables:
+    - XC
+    - YC
+    - XG
+    - YG
+    - Depth
+    - CS
+    - SN
+    - drC
+    - drF
+    - dxC
+    - dxF
+    - dxG
+    - dxV
+    - dyC
+    - dyF
+    - dyG
+    - dyU
+    - hFacC
+    - hFacS
+    - hFacW
+    - mask_c
+    - mask_s
+    - mask_w
+    - Z
+    - Zl
+    - Zu
+    - Zp1
+    - PHrefC
+    - PHrefF
+    - rhoRef
+    - rA
+    - rAz
+    - rAw
+    - rAs
+  static_dataset_name: "grid.zarr"
+
+  # Native chunk size (720x720). Do not change unless the source chunking changes.
+  tile_j: 720
+  tile_i: 720
+
+runtime:
+  zarr_async_concurrency: 128
+  dask_scheduler: "synchronous"

@@ -3,6 +3,35 @@ import dbof.cutout_dataset_creation.zarr_dataset as zarr_dataset
 import dbof.io.filesystems as filesystems
 
 
+# ---------------------------------------------------------------------------
+# Integration-test gating
+# ---------------------------------------------------------------------------
+# Tests marked 'integration' touch real data stores (MIT filesystem, dbof S3,
+# OSN) and are skipped by default so plain `pytest` stays fast and offline.
+# Opt in explicitly:
+#
+#   pytest --run-integration                          # all integration tests
+#   pytest --run-integration -m "mit and not s3_dbof" # e.g. dbof bucket down
+#
+# (Pattern from the pytest docs: "control skipping of tests according to
+# command line option".)
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-integration", action="store_true", default=False,
+        help="run tests marked 'integration' (touch real data stores)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-integration"):
+        return
+    skip = pytest.mark.skip(reason="integration test: pass --run-integration")
+    for item in items:
+        if "integration" in item.keywords:
+            item.add_marker(skip)
+
+
 @pytest.fixture(scope="session")
 def zarr_reader():
     bucket = "dbof"

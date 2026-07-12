@@ -115,8 +115,8 @@ cmaps:
   oceQnet:          [thermal, "Net heat flux (W m⁻²)"]
   wind_stress_curl: [balance, "Wind stress curl (N m⁻³)"]
   ekman_pumping:    [balance, "Ekman pumping (m s⁻¹)"]
-  u_ekman:          [balance, "Ekman transport u (m s⁻¹)"]
-  v_ekman:          [balance, "Ekman transport v (m s⁻¹)"]
+  u_ekman:          [balance, "Ekman transport u (m² s⁻¹)"]
+  v_ekman:          [balance, "Ekman transport v (m² s⁻¹)"]
 
   # --- energetics ---
   KE_sfc:      [speed, "Kinetic energy surface (m² s⁻²)"]

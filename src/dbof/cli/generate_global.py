@@ -8,8 +8,8 @@ Pipeline variants
 -----------------
 SURF
     Core ocean variables (Theta, Salt, Eta, U, V, W) from OSN kerchunk;
-    forcing variables (oceTAUX, oceTAUY, SIarea) from S3 timestep stores
-    written by ``transfer_llc4320.py`` into the ``LLC4320`` folder.
+    forcing variables (oceTAUX, oceTAUY, SIarea, oceQnet) from S3 timestep
+    stores written by ``transfer_llc4320.py`` into ``LLC4320_RAW/SURFACE``.
 
 OSN
     All variables from OSN kerchunk endpoints (surface + wind).  No S3
@@ -56,6 +56,7 @@ import time
 from pathlib import Path
 
 # distributed / IO
+import numpy as np
 import yaml
 import tqdm
 
@@ -281,15 +282,15 @@ def _resolve_job_config(
     pipeline: str = None,
     clobber: bool = False,
 ):
-    """1-4. Resolve the invocation into a fully-built ``GlobalJobConfig``.
+    """Resolve the invocation into a fully-built ``GlobalJobConfig``.
 
     Combines the four pure (no S3, no dask) configuration-resolution steps:
 
-    1. parse args (CLI ``--config`` etc. take effect only when called with no
+    - parse args (CLI ``--config`` etc. take effect only when called with no
        ``config_file``) and load the raw YAML config;
-    2. resolve and validate the pipeline + active_subsets;
-    3. validate the date iterations; and
-    4. build the ``GlobalJobConfig``.
+    - resolve and validate the pipeline + active_subsets;
+    - validate the date iterations; and
+    - build the ``GlobalJobConfig``.
 
     Returns
     -------
@@ -299,7 +300,7 @@ def _resolve_job_config(
     clobber : bool
         Resolved clobber flag.
     """
-    # (1) Parse args, load YAML.
+    # Parse args, load YAML.
     if config_file is None:
         cli = _parse_args()
         config_file = cli.config
@@ -311,7 +312,7 @@ def _resolve_job_config(
     with open(config_file, "r") as fh:
         raw = yaml.safe_load(fh) or {}
 
-    # (2) Resolve pipeline and active_subsets (validate early).
+    # Resolve pipeline and active_subsets (validate early).
     pipeline_str = pipeline or raw.get("pipeline")
     if pipeline_str is None:
         raise ValueError(
@@ -338,7 +339,7 @@ def _resolve_job_config(
                 f"Valid subsets: {valid}"
             )
 
-    # (3) Date iterations (from YAML).
+    # Date iterations (from YAML).
     date_iterations = raw.get("data", {}).get("date_iterations")
     if not date_iterations:
         raise ValueError(
@@ -347,7 +348,7 @@ def _resolve_job_config(
             "(e.g. '2012-11-09 12:00:00')."
         )
 
-    # (4) Build GlobalJobConfig.
+    # Build GlobalJobConfig.
     run_cfg = config.RunConfig(**(raw.get("run") or {}))
     if run_id is not None:
         run_cfg = config.RunConfig(run_id=run_id, log_dir=run_cfg.log_dir)
@@ -375,7 +376,7 @@ def _resolve_job_config(
 
 
 def _setup_run_logging(cfg, date_iterations: list):
-    """5. Logging (run metadata is saved later, in _setup_generation)."""
+    """Logging (run metadata is saved later, in _setup_generation)."""
     log_file = setup_logging(cfg)  # appends if the log already exists
     logging.info("Unified global pipeline starting.")
     logging.info(f"Pipeline: {cfg.pipeline}")
@@ -386,7 +387,7 @@ def _setup_run_logging(cfg, date_iterations: list):
 
 
 def _resolve_subset_specs(cfg) -> list:
-    """6. Resolve per-subset specs (cheap: no S3, no dask)."""
+    """Resolve per-subset specs (cheap: no S3, no dask)."""
     subset_specs = []
     for subset_name in cfg.active_subsets:
         defn = get_subset_definition(cfg.pipeline, subset_name)
@@ -417,7 +418,7 @@ def _resolve_subset_specs(cfg) -> list:
 
 def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
                     fs_sync, clobber: bool, wall_start: float) -> list:
-    """7-8. Pre-flight: decide each subset/date before any heavy setup.
+    """Pre-flight: decide each subset/date before any heavy setup.
 
     Also handles the nothing-to-generate case: when no work remains, the
     no-work summary is logged and the s3fs instance cache is cleared here,
@@ -461,7 +462,7 @@ def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
                     "regenerate it in place."
                 )
 
-    # 8. Nothing to generate: skip all downstream setup.
+    # Nothing to generate: skip all downstream setup.
     if not to_generate:
         logging.info("All subset/date zarr stores are already complete -- "
                      "nothing to generate (skipping dask client + grid load).")
@@ -477,7 +478,7 @@ def _preflight_plan(cfg, subset_specs: list, date_iterations: list,
 
 
 def _setup_generation(cfg, log_file, fs, fs_sync, clobber: bool):
-    """9. One-time setup performed only when there is work to do.
+    """One-time setup performed only when there is work to do.
 
     Builds the data source, dask client, run metadata, and grid.
 
@@ -500,7 +501,7 @@ def _setup_generation(cfg, log_file, fs, fs_sync, clobber: bool):
 
 
 def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
-    """10. Generate each planned subset/date."""
+    """Generate each planned subset/date."""
     for spec, date_str, date_prefix in tqdm.tqdm(to_generate, desc="generate"):
         logging.info(f"\n{'='*60}")
         logging.info(f"Generating subset: {spec['subset_name']}  date: {date_str}")
@@ -543,6 +544,13 @@ def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
                 spec["compute_fn"],
             )
 
+        # Cheap validity guard (mirrors transfer date_has_valid_data): an
+        # equatorial strip sample of each channel must have >2 unique values.
+        for c, ch in enumerate(spec["channel_names"]):
+            if ch != "SIarea" and np.unique(data[c, 7600:8320, ::24]).size <= 2:
+                raise ValueError(f"channel '{ch}' sample is all zeros/NaN — "
+                                 f"corrupt input for {date_str}?")
+
         # Write to zarr.
         logging.info("Writing snapshot to zarr dataset")
         zarr_ds.write_snapshot(data, it)
@@ -555,7 +563,7 @@ def _generate(cfg, to_generate: list, ds_grid, grid, data_source, fs) -> None:
 
 def _report_and_cleanup(cfg, dask_client, to_generate: list,
                         wall_start: float) -> None:
-    """11. Log the run summary and tear down the dask client / s3fs cache."""
+    """Log the run summary and tear down the dask client / s3fs cache."""
     wall_elapsed = time.monotonic() - wall_start
     wall_hours = wall_elapsed / 3600.0
     n_workers = len(dask_client.scheduler_info().get("workers", {}))
@@ -616,32 +624,32 @@ def main(
     """
     wall_start = time.monotonic()
 
-    # 1-4. Resolve the invocation + YAML into a GlobalJobConfig.
+    # Resolve the invocation + YAML into a GlobalJobConfig.
     cfg, clobber = _resolve_job_config(
         config_file, run_id, subset, pipeline, clobber)
     date_iterations = cfg.data.date_iterations
 
-    # 5. Logging.
+    # Logging.
     log_file = _setup_run_logging(cfg, date_iterations)
 
-    # 6. Resolve per-subset specs.
+    # Resolve per-subset specs.
     subset_specs = _resolve_subset_specs(cfg)
 
-    # 7-8. Pre-flight plan (returns empty + logs the no-work summary if done).
+    # Pre-flight plan (returns empty + logs the no-work summary if done).
     fs, fs_sync = create_s3_filesystems(cfg.output.s3_endpoint)
     to_generate = _preflight_plan(
         cfg, subset_specs, date_iterations, fs_sync, clobber, wall_start)
     if not to_generate:
         return
 
-    # 9. One-time generation setup.
+    # One-time generation setup.
     data_source, dask_client, ds_grid, grid = _setup_generation(
         cfg, log_file, fs, fs_sync, clobber)
 
-    # 10. Generate each planned subset/date.
+    # Generate each planned subset/date.
     _generate(cfg, to_generate, ds_grid, grid, data_source, fs)
 
-    # 11. Report + cleanup.
+    # Report + cleanup.
     _report_and_cleanup(cfg, dask_client, to_generate, wall_start)
 
 
