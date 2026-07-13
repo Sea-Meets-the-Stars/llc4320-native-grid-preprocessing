@@ -23,10 +23,10 @@ def test_example_config_loads():
     assert isinstance(cfg.input, InputConfig)
 
     # Source path + explicit timestamps as written in the example.
-    assert cfg.input.folder == "surface_fields/global_SURF_test01"
+    assert cfg.input.folder == "test_data_for_cutouts/cutout_test_data_v1"
     assert cfg.input.bucket == "dbof"
     assert cfg.input.s3_endpoint == "https://s3-west.nrp-nautilus.io"
-    assert cfg.input.date_prefixes == ["20121109_120000"]
+    assert cfg.input.date_prefixes == ["20120209_120000", "20120801_120000"]
 
     # grid_access parsed into the nested dataclass (example matches defaults).
     assert isinstance(cfg.input.grid_access, GridAccessConfig)
@@ -57,4 +57,32 @@ def test_missing_input_section_raises(tmp_path):
     cfg_file = tmp_path / "no_input.yaml"
     cfg_file.write_text("run:\n  run_id: x\n")
     with pytest.raises(ValueError, match="input.folder"):
+        load_config(str(cfg_file))
+
+
+def test_feature_channels_loaded_from_top_level():
+    """Top-level `feature_channels` is read into FeaturesConfig."""
+    import yaml
+    cfg = load_config(str(EXAMPLE_CONFIG))
+    raw = yaml.safe_load(EXAMPLE_CONFIG.read_text())
+    assert cfg.features.feature_channels == raw["feature_channels"]
+
+
+def test_feature_channels_default_when_omitted(tmp_path):
+    """Omitting `feature_channels` falls back to the default channel list."""
+    cfg_file = tmp_path / "no_features.yaml"
+    cfg_file.write_text("run:\n  run_id: x\ninput:\n  folder: surface_fields/run\n")
+    cfg = load_config(str(cfg_file))
+    assert cfg.features.feature_channels == ["Eta", "Salt", "Theta", "U", "V", "W", "gradb2", "SIarea"]
+
+
+def test_missing_required_channel_raises(tmp_path):
+    """A config whose feature_channels omits a required channel fails."""
+    cfg_file = tmp_path / "missing_required.yaml"
+    cfg_file.write_text(
+        "run:\n  run_id: x\n"
+        "input:\n  folder: surface_fields/run\n"
+        "feature_channels:\n  - Theta\n  - gradb2\n"  # missing SIarea
+    )
+    with pytest.raises(ValueError, match="SIarea"):
         load_config(str(cfg_file))

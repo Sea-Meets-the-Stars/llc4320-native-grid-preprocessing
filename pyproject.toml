@@ -71,6 +71,9 @@ test = ["pytest"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"dbof.plotting" = ["*.yaml"]
+
 [tool.pytest.ini_options]
 markers = [
     "integration: touches real data stores (network and/or cluster filesystem)",

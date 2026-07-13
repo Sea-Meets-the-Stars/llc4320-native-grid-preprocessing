@@ -9,10 +9,10 @@ def create_metadata_writer(bucket: str, folder: str, run_id: str, fs_sync=None, 
     bucket = bucket.strip().strip("/")
     folder = folder.strip().strip("/")
 
-    base = f"s3://{str(PurePosixPath(bucket, folder, run_id, "metadata"))}"
-    return MetadataWriter(str(base), flush_every=flush_every, fs=fs_sync)
+    base = str(PurePosixPath(bucket, folder, run_id, "metadata"))
+    return MetadataWriter(base, flush_every=flush_every, fs=fs_sync)
 
-#Multi thread safe writer
+#Multi thread safe writer NOT process safe
 class MetadataWriter:
     def __init__(self, path, flush_every=10_000, fs=None):
         self.path = path
@@ -25,9 +25,6 @@ class MetadataWriter:
             self.fs = fs
 
         self.lock = threading.Lock()
-
-        # if not os.path.exists(meda_data_file_path):
-        #     pd.DataFrame(columns=metadata_cols).to_parquet(meda_data_file_path)
 
     def add(self, meta: dict):
         # add one record
@@ -47,11 +44,6 @@ class MetadataWriter:
         fname = f"part-{uuid.uuid4().hex}.parquet"
         full_path = f"{self.path.rstrip('/')}/{fname}"
 
-
-        # if self.fs.exists(self.path):
-        #     old = pd.read_parquet(self.path, filesystem=self.fs)
-        #     df = pd.concat([old, df], ignore_index=True)
-
         df.to_parquet(
             full_path,
             engine="pyarrow",
@@ -63,3 +55,24 @@ class MetadataWriter:
     def close(self):
         with self.lock:
             self._flush_locked()
+
+
+# Factory
+def create_metadata_reader(bucket: str, folder: str, run_id: str, fs_sync):
+    bucket = bucket.strip().strip("/")
+    folder = folder.strip().strip("/")
+    metadata_glob = f"{PurePosixPath(bucket, folder, run_id, 'metadata')}/*.parquet"
+    return MetadataReader(metadata_glob, fs=fs_sync)
+
+
+class MetadataReader:
+    """Reads all parquet parts written for a run into a single DataFrame."""
+    def __init__(self, metadata_glob, fs):
+        self.metadata_glob = metadata_glob
+        self.fs = fs
+
+    def read(self) -> pd.DataFrame:
+        files = self.fs.glob(self.metadata_glob)
+        if not files:
+            raise FileNotFoundError(f"No metadata parquet files at {self.metadata_glob}")
+        return pd.read_parquet(files, filesystem=self.fs)

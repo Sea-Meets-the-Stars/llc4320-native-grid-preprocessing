@@ -42,3 +42,6 @@ Thumbs.db
 *.zarr
 *.parquet
 
+# Rendered test artifacts
+tests/output/
+

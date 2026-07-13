@@ -42,6 +42,7 @@ Chunk strategy
 import numpy as np
 import zarr
 import xarray as xr
+import dask.array as da
 from pathlib import PurePosixPath
 
 
@@ -218,6 +219,29 @@ class GlobalGridZarrReader:
             arr = self.root[vname][:]
             attrs = dict(self.root[vname].attrs)
             data_vars[vname] = xr.Variable(('j', 'i'), arr, attrs)
+        return xr.Dataset(data_vars)
+
+    def to_dataset_lazy(self, variables=None) -> xr.Dataset:
+        """
+        Lazy counterpart to to_dataset(): wrap each grid variable's zarr array
+        in a dask array so data is read on access rather than up front.
+
+        Parameters
+        ----------
+        variables : list[str] or None
+            Subset of variables to include.  None loads all.
+
+        Returns
+        -------
+        xr.Dataset with dims (j, i), dask-backed.
+        """
+        names = self.variables if variables is None else variables
+        data_vars = {}
+        for vname in names:
+            zarr_arr = self.root[vname]
+            lazy = da.from_array(zarr_arr, chunks=zarr_arr.chunks)
+            attrs = dict(zarr_arr.attrs)
+            data_vars[vname] = xr.Variable(('j', 'i'), lazy, attrs)
         return xr.Dataset(data_vars)
 
     # ------------------------------------------------------------------
