@@ -1,6 +1,6 @@
 run:
-  run_id: "cutout_test_data_v1"
-  log_dir: "../test_logs/"
+  run_id: "1_00/"
+  log_dir: "logs/"
 
 # Source: generate-global output consumed as cutout input.
 # Each field in `feature_channels` is mapped to the subset store that contains
@@ -9,13 +9,12 @@ run:
 input:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "test_data_for_cutouts/cutout_test_data_v1"   # path to the dir holding the date_prefix snapshots
-  # This timestamp is corrupted on MIT "20120801_120000"
-  date_prefixes:                                # including no dates should process all. TODO ensujre the bad date is removed
+  folder: "globals_for_cutouts/v2_1_00/"   
+  #date_prefixes:                                # including no dates should process all. 
   grid_access:                                  # rectangular llc4320 grid store
     s3_endpoint: "https://s3-west.nrp-nautilus.io"
     bucket: "dbof"
-    folder: "native_grid_dbof_training_data"
+    folder: "LLC4320_GRID_2D"
     dataset_name: "llc4320_grid.zarr"
 
 sampling: # info on these configs can be found in docs/Sampling_With_GradB2.md
@@ -27,8 +26,8 @@ output:
   down_sample_res: 64
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof/"
-  folder: "cutouts_dataset_v2_TESTING/"
-  dataset_name: "cutout_dataset_creation.zarr"
+  folder: "cutouts_dataset_v2/"
+  dataset_name: "cutout_dataset.zarr"
 
 feature_channels:
     - Eta
