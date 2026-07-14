@@ -1,22 +1,25 @@
 # Pipeline Data-Flow Diagrams
 
-This page shows how data moves through the three pipelines in this
-repository, as [Mermaid](https://mermaid.js.org/) flowcharts:
+This page shows how data moves through the pipelines in this repository, as
+[Mermaid](https://mermaid.js.org/) flowcharts:
 
-1. **Global** — build stitched, rectangular global fields (surface or
-   depth-resolved) from raw LLC4320 data.
-2. **Cutouts** — sample small, downsampled image cutouts from the global
+1. **Ingest** — get raw LLC4320 snapshot data into S3 (one-time / as needed).
+2. **Grid generation** — build the stitched global grid store (one-time).
+3. **Global** — build stitched, rectangular global fields (surface or
+   depth-resolved) from the raw data.
+4. **Cutouts** — sample small, downsampled image cutouts from the global
    fields for ML training.
-3. **Tiles** — extract a single 720×720 tile of one field from the raw
+5. **Tiles** — extract a single 720×720 tile of one field from the raw
    LLC4320 depth store (a lightweight, on-demand path).
 
-The pipelines are staged: **Global → Cutouts**. The **Tiles** pipeline is
-independent and reads the raw depth store directly.
+Diagrams 1–2 are one-time prerequisites that produce the raw stores and the
+grid. The processing pipelines are then staged **Global → Cutouts**, while
+**Tiles** is independent and reads the raw depth store directly.
 
-> Rendering note: these use fenced ```mermaid blocks, which GitHub renders
-> natively. For the Read the Docs / Sphinx build, the `sphinxcontrib-mermaid`
-> extension (or MyST's `mermaid` fence) must be enabled — see the Q&A in
-> `prompts/claude_docs.md`.
+> Rendering note: these are fenced ```mermaid blocks. GitHub renders them
+> natively. The Sphinx / Read the Docs build renders them via
+> `sphinxcontrib-mermaid` together with MyST's `myst_fence_as_directive =
+> ["mermaid"]` — both wired into `docs/conf.py` and `docs/requirements.txt`.
 
 Node labels reference the real modules/functions so the diagrams double as a
 code map. S3 locations use the `dbof` bucket on the NRP/Nautilus endpoint
@@ -24,21 +27,56 @@ code map. S3 locations use the `dbof` bucket on the NRP/Nautilus endpoint
 
 ---
 
-## 1. Global pipeline
+## 1. Ingest (raw LLC4320 → S3)
+
+How raw snapshot data becomes available to the pipelines. Two independent
+sources: MIT's local zarr store transferred to S3 by
+`dbof.cli.transfer_llc4320`, and the public OSN kerchunk endpoints read
+directly at run time.
+
+```mermaid
+flowchart LR
+    MIT["MIT local zarr store<br/>(LLC4320 native output)"]
+    MIT -->|"dbof.cli.transfer_llc4320"| RAWS["S3 dbof/LLC4320_RAW/SURFACE/<br/>{date}.zarr (surface + forcing)"]
+    MIT -->|"dbof.cli.transfer_llc4320"| RAWD["S3 dbof/LLC4320_RAW/DEPTH/<br/>{date}.zarr (51-level column)"]
+    OSN["OSN kerchunk (public)<br/>mghp.osn.xsede.org<br/>llc_surf + llc_wind"]
+
+    RAWS --> CG["→ Global (SURF forcing)"]
+    RAWD --> CGD["→ Global (DEPTH) and Tiles"]
+    OSN --> CO["→ Global (OSN / SURF core)"]
+```
+
+---
+
+## 2. Grid generation (one-time)
+
+The static stitched grid store, built once and reused read-only by all
+three processing pipelines.
+
+```mermaid
+flowchart LR
+    OSNG["OSN kerchunk grid<br/>(13 LLC faces)"]
+    OSNG -->|"dbof.cli.generate_grid_global"| GRIDZ["S3 grid store<br/>grid.zarr / llc4320_grid.zarr<br/>stitched (12960 x 17280)<br/>XC, YC, dxC, dyC, hFacC, CS, SN, ..."]
+    GRIDZ --> U1["→ Global: grid_setup (xgcm Grid)"]
+    GRIDZ --> U2["→ Cutouts: GlobalGridZarrReader"]
+    GRIDZ --> U3["→ Tiles: _load_grid_for_tile"]
+```
+
+---
+
+## 3. Global pipeline
 
 Entry point: `dbof.cli.generate_global:main` (batch driver:
 `dbof.cli.run_all_subsets`). Three mutually exclusive pipeline variants —
 **SURF**, **OSN**, **DEPTH** — differ only in where a snapshot's raw data is
-read from and whether depth strategies run.
+read from and whether depth strategies run. Inputs (the raw stores and the
+grid) come from the **Ingest** and **Grid generation** diagrams above.
 
 ```mermaid
 flowchart TD
-    subgraph INGEST["Ingest / one-time setup"]
-        MIT["MIT local zarr store"]
-        MIT -->|"dbof.cli.transfer_llc4320"| RAW["S3 dbof/LLC4320_RAW/<br/>SURFACE or DEPTH /{date}.zarr"]
-        OSN["OSN kerchunk<br/>(llc_surf + llc_wind)<br/>mghp.osn.xsede.org"]
-        GRIDGEN["dbof.cli.generate_grid_global"] --> GRIDZ["S3 grid store<br/>grid.zarr / llc4320_grid.zarr"]
-    end
+    RAW[("S3 LLC4320_RAW<br/>SURFACE or DEPTH /{date}.zarr")]
+    OSN[("OSN kerchunk<br/>llc_surf + llc_wind")]
+    GRIDZ[("S3 grid store<br/>grid.zarr")]
 
     subgraph LOAD["Per-snapshot load — generate_global.load_snapshot"]
         direction TB
@@ -77,7 +115,7 @@ only). See `docs/Global_Maps.md` for the full channel lists.
 
 ---
 
-## 2. Cutouts pipeline
+## 4. Cutouts pipeline
 
 Entry point: `dbof.cli.generate_cutout_dataset:main` →
 `dbof.cutout_dataset_creation.processing.run`. **Consumes the global
@@ -124,7 +162,7 @@ flowchart TD
 
 ---
 
-## 3. Tiles pipeline
+## 5. Tiles pipeline
 
 Entry point: `dbof.cli.generate_tile:main` → `dbof.tiles.tile_utils.run`.
 Independent, on-demand path: extract **one 720×720 tile** of a single
