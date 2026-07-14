@@ -21,6 +21,7 @@ Accessing_Raw_LLC4320_Data
 Preprocess_LLC_Data
 Global_Maps
 Tiles
+mermaid_diagrams
 Weighted_Sampling
 Sampling_With_GradB2
 Halo_Masking

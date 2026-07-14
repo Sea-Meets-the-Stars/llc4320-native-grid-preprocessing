@@ -35,7 +35,7 @@ read from and whether depth strategies run.
 flowchart TD
     subgraph INGEST["Ingest / one-time setup"]
         MIT["MIT local zarr store"]
-        MIT -->|"dbof.cli.transfer_llc4320"| RAW["S3 dbof/LLC4320_RAW/<br/>SURFACE|DEPTH/{date}.zarr"]
+        MIT -->|"dbof.cli.transfer_llc4320"| RAW["S3 dbof/LLC4320_RAW/<br/>SURFACE or DEPTH /{date}.zarr"]
         OSN["OSN kerchunk<br/>(llc_surf + llc_wind)<br/>mghp.osn.xsede.org"]
         GRIDGEN["dbof.cli.generate_grid_global"] --> GRIDZ["S3 grid store<br/>grid.zarr / llc4320_grid.zarr"]
     end
@@ -65,7 +65,7 @@ flowchart TD
     STRAT --> STITCH["faces_to_latlon.stitch_and_mask<br/>13 faces → (C, 12960, 17280)<br/>land→NaN, rotate U/V,τ to geographic"]
 
     STITCH --> WRITE["GlobalZarrDataset write"]
-    WRITE --> OUT["S3 dbof/{surface_fields|depth_fields}/<br/>{run_id}/{date_prefix}/{subset}.zarr<br/>attrs: channel_names, iteration"]
+    WRITE --> OUT["S3 dbof/{surface_fields or depth_fields}/<br/>{run_id}/{date_prefix}/{subset}.zarr<br/>attrs: channel_names, iteration"]
     OUT -->|"optional, dbof.cli.zarr_to_netcdf"| NC["per-channel NetCDF<br/>LLC4320_{date}_{channel}_{run_id}.nc"]
 ```
 
