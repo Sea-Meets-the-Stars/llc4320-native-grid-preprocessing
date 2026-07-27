@@ -30,6 +30,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     froude_number_3d,
     rossby_number_3d,
     burger_number_3d,
+    balanced_richardson_number_3d,
     # -- geographic vectors --
     geographic_velocity_3d,
     geographic_wind_stress,
@@ -60,6 +61,7 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     frontogenesis_tendency_3d,
     geostrophic_velocity_3d,
     frontogenesis_geo_3d,
+    modified_okubo_weiss_3d,
 )
 from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
 from dbof.preprocessing.vertical_helpers import _interp_w_to_tracer_levels
@@ -247,6 +249,12 @@ def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
         bu_3d = burger_number_3d(ds_merge, grid, mld=mld)   # lazy
         results.update(apply_depth_strategies(
             bu_3d, "Bu", ds_merge, mld=mld, requested=requested))
+
+    if any(c.startswith("R_ib_") for c in requested):
+        # Balanced Richardson number R_ib = N² f² / |∇_h b|² (lazy).
+        rib_3d = balanced_richardson_number_3d(ds_merge, grid)
+        results.update(apply_depth_strategies(
+            rib_3d, "R_ib", ds_merge, mld=mld, requested=requested))
 
     return _materialise_results(results)
 
@@ -558,8 +566,10 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     )
     need_ugvg = any(c.startswith("ug_") or c.startswith("vg_")
                     for c in requested)
+    # W* (modified Okubo-Weiss) — shares this subset's velocity Jacobian.
+    need_wstar = any(c.startswith("Wstar_") for c in requested)
 
-    if not (need_tendency or need_geo or need_ugvg):
+    if not (need_tendency or need_geo or need_ugvg or need_wstar):
         return results
 
     mld = _lazy_mld(ds_merge, requested)
@@ -567,10 +577,23 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     # -- shared intermediates --
     bg = compute_buoyancy_gradients_3d(ds_merge, grid)
 
+    # Velocity Jacobian — shared by the full tendency and by W*.  Compute
+    # it once here when either needs it (lazy; no .compute()).
+    jac = None
+    if need_tendency or need_wstar:
+        jac = compute_velocity_jacobian_3d(ds_merge, grid)
+
+    # Modified Okubo-Weiss W* — reuses the shared Jacobian.  Its buoyancy
+    # gradient is the physically consistent (unscaled) one built inside
+    # modified_okubo_weiss_3d, so it is NOT the ×-scaled ``bg`` above.
+    if need_wstar:
+        results.update(apply_depth_strategies(
+            modified_okubo_weiss_3d(ds_merge, grid, jacobian=jac),
+            "Wstar", ds_merge, mld=mld, requested=requested))
+
     # Full frontogenesis tendency F(u, v)
     tendency_3d = None
     if need_tendency:
-        jac = compute_velocity_jacobian_3d(ds_merge, grid)
         tendency_3d = frontogenesis_tendency_3d(
             ds_merge, grid, jacobian=jac, buoyancy_gradients=bg)
         if any(c.startswith("frontogenesis_tendency_") for c in requested):

@@ -127,6 +127,24 @@ extra_channels: [mixed_layer_depth]
 # → output channels: N2_sfc, N2_z25m, N2_mld, N2_mld_mean, mixed_layer_depth
 ```
 
+### Mixed-layer depth definitions
+
+The mixed-layer depth (MLD) — the depth to the base of the mixed layer — has
+several definitions. Two estimators are implemented in
+`calculated_fields_at_depth.py`, both returning a 2D field (positive metres):
+
+| Field    | Function                  | Definition                                                                 |
+|----------|---------------------------|----------------------------------------------------------------------------|
+| `MLD`    | `mixed_layer_depth`       | **Threshold (default).** Deepest depth where the potential density σ₀ exceeds σ₀ at the 10 m reference level by ≤ 0.03 kg m⁻³ (Bodner et al.). Lands on a discrete model level. |
+| `MLD_DI` | `mixed_layer_depth_DI`    | **Depth Integration Method.** N²-weighted mean depth over the upper 300 m: `MLD_DI = ∫₀³⁰⁰ z N²(z) dz / ∫₀³⁰⁰ N²(z) dz`. Continuous (off-level) depth near the base of the pycnocline. |
+
+The threshold estimator is the project default. The Depth Integration
+estimator weights by the buoyancy frequency squared N²(z); statically
+unstable layers (N² < 0) are floored to zero before weighting. The
+integration depth defaults to `MLD_INTEGRATION_DEPTH_M` (300 m). See
+`notebooks/notebooks_dev/mld_depth.ipynb` for a side-by-side comparison of
+the two definitions on a few profiles.
+
 ### Surface vs. depth-aware within the depth pipeline
 
 Subset entries can set `surface_only: true` to skip depth processing entirely.
@@ -197,7 +215,7 @@ channels each subset was actually built with.
 | `icearea`           | `SIarea`                                                                                    | Yes                    |
 | `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`, `density`, `buoyancy` | No              |
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` | No |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`              | No                     |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`, `Wstar`     | No                     |
 
 Subsets marked "Requires wind/ice data" need `oceTAUX`, `oceTAUY`, or
 `SIarea`. On **OSN** these come from the `llc_wind` kerchunk endpoint, which
@@ -211,16 +229,86 @@ MIT first using `transfer_llc4320.py`.
 |---------------------|----------------------------------------------------|-----------------------------|-----------------------------------------|
 | `stratification`    | `N2`                                               | sfc, z25m, mld, mld_mean   | `mixed_layer_depth`, `ml_heat_content`  |
 | `vertical_shear`    | `vertical_shear`, `Ri`                             | sfc, z25m, mld, mld_mean   |                                         |
-| `mixing_parameters` | `Fr`, `Ro`, `Bu`                                   | sfc, z25m, mld, mld_mean   |                                         |
+| `mixing_parameters` | `Fr`, `Ro`, `Bu`, `R_ib`                           | sfc, z25m, mld, mld_mean   |                                         |
 | `ertel_pv`          | `ertel_pv`, `ertel_pv_vertical`, `ertel_pv_tilt`  | sfc, z25m, mld, mld_mean   |                                         |
 | `buoyancy_fluxes`   | `uB`, `vB`, `wB`                                   | sfc, z25m, mld, mld_mean   |                                         |
 | `energetics`        | `KE`                                               | sfc, z25m, mld, mld_mean   |                                         |
 | `frontal_structure` | `gradb2`, `gradtheta2`, `gradsalt2`, `gradrho2`, `gradeta2`, `turner_angle` | sfc, z25m, mld, mld_mean |                   |
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `rossby_number`, `okubo_weiss` | sfc, z25m, mld, mld_mean | `coriolis_f` |
-| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg` | sfc, z25m, mld, mld_mean |                   |
+| `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`, `Wstar` | sfc, z25m, mld, mld_mean |                   |
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
 | `surface_wind`      | *(surface_only)* `oceTAUX`, `oceTAUY`, `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model field `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
+
+### Balanced Richardson number (`R_ib`)
+
+`R_ib` (in the `mixing_parameters` subset) is the **balanced Richardson
+number** (Thomas, Tandon & Mahadevan 2013) — the gradient Richardson number
+of a flow in thermal-wind balance, and a dimensionless measure of frontal
+stability:
+
+```
+R_ib = N² · f² / |∇_h b|²
+```
+
+where `N²` is the buoyancy frequency squared, `f` the Coriolis parameter,
+and `|∇_h b|²` the squared horizontal buoyancy-gradient magnitude. Because
+`N²` is a vertical density derivative, `R_ib` is **DEPTH-pipeline only**
+(there is no surface-pipeline variant). Both `N²` and `|∇_h b|²` are built
+from the *same* physically consistent, unscaled buoyancy `b = (g/ρ₀)·ρ`, so
+the ratio is genuinely dimensionless (the `×1e3`-scaled `grad_b2_3d` is
+deliberately **not** reused — it would bias `R_ib` by a constant `1e6`).
+`R_ib` is `NaN` where `|∇_h b|² = 0` and tends to `0` at the equator
+(`f → 0`). Statically unstable columns (`N² < 0`) are **floored to
+`N² = 0`**, so `R_ib = 0` there rather than negative. It is computed by
+`balanced_richardson_number_3d` in
+`src/dbof/preprocessing/calculated_fields_at_depth.py`.
+
+The same `N² ≥ 0` floor is applied to the gradient Richardson number `Ri`
+(the `vertical_shear` subset, `richardson_number_3d`): negative `N²` is
+clamped to `0` so unstable columns give `Ri = 0` rather than a negative
+value.
+
+### Modified Okubo-Weiss parameter (`Wstar`)
+
+`Wstar` (in the `frontogenesis` subset) is the **modified Okubo-Weiss
+parameter** of Bachman (2021). Like the classical Okubo-Weiss parameter
+`okubo_weiss` (the `kinematic` subset), it compares strain and vorticity,
+but `Wstar` is additionally **sensitive to the vertical shear** carried by
+the quasi-geostrophic `Q` vector. It is the eigenvalue combination
+
+```
+Wstar = 4 · sgn(l₂) · √(l₁² + l₂²)
+
+l₂ = W / 4                              W = σ_n² + σ_s² − ω²   (Okubo-Weiss)
+l₁ = ½·l₂ + ½·√(l₂² + |Q|²/f²)
+```
+
+where `(l₁, l₂)` are the eigenvalues of the QG strain-squared-plus-
+vorticity-squared tensor, `W` is the classical Okubo-Weiss parameter, `f`
+the Coriolis parameter, and `|Q|² = Q₁² + Q₂²` the squared magnitude of the
+QG `Q` vector (Hoskins, Draghici & Davies 1978):
+
+```
+Q₁ = −(∂u/∂x · ∂b/∂x + ∂v/∂x · ∂b/∂y)
+Q₂ = −(∂u/∂y · ∂b/∂x + ∂v/∂y · ∂b/∂y)
+```
+
+The classical Okubo-Weiss term reuses `okubo_weiss_3d`; the velocity
+gradients come from the shared velocity Jacobian; and — exactly as for
+`R_ib` — the horizontal buoyancy gradient `∇_h b` is built from the
+*unscaled* physical buoyancy `b = (g/ρ₀)·ρ` (the `×1e3`-scaled buoyancy is
+**not** reused). This keeps the dimensions honest: `∂b ~ s⁻²`, `Q ~ s⁻³`,
+`|Q|²/f² ~ s⁻⁴`, so `Wstar` carries the **same units as the classical
+Okubo-Weiss parameter, `s⁻²`**. Its sign follows that of `W` (positive ⇒
+strain-dominated). `Wstar` is `NaN` at the equator where `f → 0` (the QG
+scaling `|Q|²/f²` diverges). Because the `Q` vector needs the horizontal
+buoyancy gradient, `Wstar` requires **both** velocities (`U`, `V`) and
+tracers (`Theta`, `Salt`) — unlike the classical `okubo_weiss`, which needs
+only velocities; this is why it lives in the `frontogenesis` subset (which
+already loads both and builds the velocity Jacobian). It is computed by
+`modified_okubo_weiss_3d` in
+`src/dbof/preprocessing/calculated_fields_at_depth.py`.
 
 ---
 

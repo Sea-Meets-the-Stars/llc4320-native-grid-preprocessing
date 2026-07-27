@@ -23,6 +23,7 @@ Global_Maps.md
 Preprocess_LLC_Data
 Global_Maps
 Tiles
+mermaid_diagrams
 Weighted_Sampling
 Sampling_With_GradB2
 Halo_Masking

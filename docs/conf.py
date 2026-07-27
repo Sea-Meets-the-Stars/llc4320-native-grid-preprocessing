@@ -12,6 +12,7 @@ extensions = [
     "sphinx.ext.autodoc",
     "sphinx.ext.napoleon",
     "sphinx.ext.viewcode",
+    "sphinxcontrib.mermaid",
 ]
 
 # MyST parser configuration for markdown support
@@ -19,6 +20,10 @@ myst_enable_extensions = [
     "colon_fence",
     "deflist",
 ]
+
+# Render fenced ```mermaid code blocks via the sphinxcontrib-mermaid
+# directive (used in docs/mermaid_diagrams.md).
+myst_fence_as_directive = ["mermaid"]
 
 templates_path = ["_templates"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
