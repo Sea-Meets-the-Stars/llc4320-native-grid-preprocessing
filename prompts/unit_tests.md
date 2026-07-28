@@ -128,6 +128,62 @@ We wish to generate unit tests for the vertical_helpers.py module.
 
 ## Q&A
 
+Questions on the PR #26 review plan (see the 2026-07-28 log entry for the
+full plan). Please answer inline; I will not modify anything until then.
+
+1. **PR title.** Proposed rename: "Unit tests + validation notebooks for
+   native gradients (Jacobian, tracer) and vertical helpers". OK, or do
+   you prefer different wording?
+
+2. **λ/φ naming.** The code (from the ECCO tutorial) uses the standard
+   geographic convention λ=longitude (zonal), φ=latitude (meridional) —
+   the reviewer's (θ, φ) suggestion is the physics spherical-coordinates
+   convention and conflicts with ECCO. I propose to KEEP λ/φ but define
+   both symbols explicitly in every notebook and axis label (e.g.
+   "zonal (λ, longitude)"), and note the ECCO provenance. Renaming the
+   production outputs (du_lambda_dlambda, ...) would be a breaking
+   change. Agree with keep-and-define?
+
+3. **Depth sign convention.** `_get_depth_coord` returns positive-down
+   depth; the reviewer prefers native negative-up. Changing it now would
+   ripple through MLD/vertical code. I propose to KEEP positive-down but
+   (a) add the CF `positive: "down"` attribute + units to the returned
+   coordinate, (b) print/warn loudly in helpers and notebooks that the
+   native MITgcm Z has been flipped. OK, or do you want the convention
+   itself revisited?
+
+4. **Production-code changes allowed?** The reviewer asks that grid
+   location (all outputs at tracer centres) be "output and warnings" —
+   that means touching `src/dbof/utils/native_gradient.py` (attach
+   xarray attrs like `grid_location="tracer/C-point"` to outputs, extend
+   docstrings), not just tests/notebooks. OK to modify production code
+   in this PR?
+
+5. **51-level / 968 m vertical grid.** The cached S3 grid
+   (`dbof/LLC4320/grid.zarr`) holds only 51 levels down to ~968 m (the
+   DBOF training subset) — that is why the reviewer saw "800 m" instead
+   of full ocean depth. Is upper-968 m the intended DBOF domain (I then
+   state this prominently in the notebooks), or should the vertical
+   tests pull the full 90-level LLC4320 grid from another source?
+
+6. **Face-consistency test (reviewer's "are the faces doing what they
+   should").** I propose a new online test: an analytic tracer built
+   from XC/YC (e.g. s = sin(lat)) whose geographic gradient is known in
+   closed form; assert the computed (zonal, meridional) gradient matches
+   on EVERY face. This requires adding XC/YC to the cached grid fields
+   (~2 more 2-D fields, cache grows ~2 GB, one-time re-download). OK?
+
+7. **Anisotropy.** Add synthetic-grid variants with dxC != dyC (uniform
+   but unequal — still analytic) to the Jacobian and tracer tests. Is
+   uniform anisotropy sufficient, or do you also want spatially varying
+   metrics (no closed-form answer; would need a convergence-style test)?
+
+8. **Regional cutouts.** For the real-SST figures, replace the single
+   downsampled face with full-resolution cutouts of the issue #24
+   regions (W. North Atlantic 0-60N, Atlantic sector of the Southern
+   Ocean, +/-5 deg Eastern Pacific)? This also fixes "face mainly looks
+   at the continent" and "downsampled" comments.
+
 ## Logging
 
 The "Logs" section will record Claude's work.  Please use the following format:
@@ -643,3 +699,125 @@ structure, real-grid derivative), ends "offline/online tests passed."
 tests/test_native_gradient_tracer.py tests/test_vertical_helpers.py`):
 **33 passed, 7 skipped** by default (7 network tests gated by
 `RUN_LLC_NETWORK_TESTS`).
+
+### 2026-07-28 (Plan to address PR #26 review comments — plan only)
+
+Implemented the 1st task under PR (running as Claude Fable 5, per the
+prompt's "Use Fable if you can"). This is a **plan only**: questions are
+in the Q&A section above and nothing will be modified until they are
+answered.
+
+#### What the review says
+
+PR #26 has no inline review comments and no formal review — the feedback
+is a single long conversation comment from **CompClimate**
+(2026-07-28, issue-comment 5107540234) covering
+`native_gradient_tracer_tests.ipynb` and `vertical_helpers_tests.ipynb`,
+plus general points (PR title; make grid-cell locations of every
+operation explicit; follow ECCO naming conventions). It also references
+"an issue" with suggested regions — that is **issue #24** (W. North
+Atlantic 0-60N, Atlantic sector of the Southern Ocean, +/-5 deg Eastern
+Pacific).
+
+#### Facts I verified before planning
+
+- **λ/φ:** the code uses λ=longitude, φ=latitude (ECCO tutorial
+  convention). The reviewer suspected λ was latitude — the code is
+  right, but the notebooks never define the symbols. Doc problem, not a
+  code bug.
+- **"Fig 4 shows 800 m":** the cached S3 grid store carries only 51
+  vertical levels spanning 0.5-945.6 m (the DBOF training subset), not
+  the full-depth LLC4320. The figure is faithful to the data; the
+  notebook never states the domain is upper-ocean only. (Q&A #5.)
+- **Anisotropy:** the synthetic 13-face grid uses uniform `dxC=dyC` —
+  the reviewer's concern is correct; isotropy can hide dx/dy swaps.
+- **"geographic vs analytic" stats:** the notebook's section-4 stats
+  actually compare geographic-frame vs **model-frame** magnitudes
+  (rotation invariance); "analytic" never appears in that comparison —
+  labeling/text error in the markdown.
+- **Theta:** the OSN kerchunk variable is MITgcm `Theta` (potential
+  temperature); its surface level is what we called "SST". Metadata
+  should be surfaced in the notebook to confirm units/meaning.
+
+#### Plan, mapped to each review point
+
+**General / PR-wide**
+1. Rename the PR to something informative (Q&A #1).
+2. Add a **staggered C-grid schematic figure** (shared helper, reused by
+   the notebooks): tracer centre `(j,i)`, U point `(j,i_g)` west face,
+   V point `(j_g,i)` south face, with arrows showing each operation's
+   diff -> interp path and where results land. Addresses "where on a
+   gridcell the operations are actually going" for the uninitiated.
+3. Use **ECCO naming conventions** for grid locations everywhere in
+   notebook text (c/U/V points, i_g/j_g half-cell shifts) and state the
+   destination (tracer centres) of every output explicitly.
+4. Attach `grid_location` (and units) attrs to the outputs of
+   `calculate_native_gradient_tracer` / `calculate_jacobian` so the
+   location is machine-visible, per "having this as output and
+   warnings" (needs Q&A #4 approval to touch production code).
+
+**`native_gradient_tracer_tests.ipynb`**
+5. State up front that the function returns BOTH components (zonal
+   d/dλ, meridional d/dφ); plot the two components separately, not just
+   the magnitude, so equatorial (a)symmetry is visible.
+6. Define every symbol at first use: `p`,`q` are prescribed linear
+   slopes of the synthetic tracer (NOT pressure — will rename to
+   `slope_x`,`slope_y`); "geographic axes" = local east/north (λ/φ per
+   Q&A #2).
+7. Clarify "constant tracer" = the entire ocean filled with a single
+   number (yes, that was the reviewer's reading).
+8. Explain the synthetic 13-face grid in one paragraph (LLC face
+   topology, uniform metrics, constant rotation, why interiors are
+   analytic) and add **anisotropic variants** dxC != dyC (Q&A #7).
+9. Explain the face edges in figures: the halo ring is contaminated by
+   neighbour-face axes by construction, is excluded from every assert
+   (EDGE_MARGIN), and will be visually masked/annotated in figures.
+10. Replace the downsampled, continent-dominated face-10 map with
+    **full-resolution regional cutouts** from issue #24 (Q&A #8), plus a
+    computed-minus-reference difference map so accuracy is assessable.
+11. Wording: "SST gradients" instead of "fronts"; state that the field
+    is MITgcm `Theta` (potential temperature) surface level and show the
+    store metadata (units, long_name) in the notebook.
+12. Fix the section-4 text/labels: the comparison is geographic-frame vs
+    model-frame |grad| (rotation invariance), not "analytic".
+13. New **face-consistency test** (reviewer: "are the faces doing what
+    they should"): analytic tracer from XC/YC, e.g. s = sin(lat), whose
+    zonal gradient is 0 and meridional gradient is cos(lat)/R exactly;
+    assert per-face agreement so a staggering/rotation error on any
+    single face fails loudly (Q&A #6 — needs XC/YC in the grid cache).
+
+**`vertical_helpers_tests.ipynb`**
+14. Depth sign: keep positive-down (pending Q&A #3) but add CF
+    `positive: "down"` + `units: "m"` attrs to `_get_depth_coord`
+    output, and a prominent notebook banner + printed warning that
+    native MITgcm Z (negative-up) has been flipped — the "big flag" for
+    users of other ECCO packages.
+15. Rewrite the top-of-notebook description for clarity; define `drF`
+    (tracer-cell layer thickness, metres, defined between interfaces
+    Zp1[k] and Zp1[k+1]) and give units on every quantity.
+16. Define "linear profile" = tracer varying linearly with depth
+    (straight line in the tracer-vs-depth plane; yes, "straight down").
+17. Rewrite section 3's markdown: it demonstrates the thickness-weighted
+    mixed-layer mean (`_masked_ml_mean`) — show the hand computation it
+    is checked against.
+18. Section 4 / depth range: keep depth on the y-axis (it already is)
+    but state clearly the store is the 51-level, 0-968 m DBOF subset
+    (Q&A #5); reorder the notebook so the **real depth structure figure
+    comes first**, and audit every profile figure for depth-on-y,
+    increasing downward ("many figures have this error").
+19. New **cell-centre targeting test + figure**: prescribe a target
+    depth, show layer interfaces (Zp1) and centres (Z), and verify
+    `_nearest_k_to_depth` / `_select_at_depth` / `_extract_at_mld` land
+    on the intended cell CENTRE, not an interface — the reviewer's
+    "if you're trying to get to the middle of the cell you actually end
+    up there".
+
+#### Sequencing (after Q&A answers)
+
+(1) production-code attrs/docstrings (if approved) + rerun the affected
+unit tests; (2) new tests (face-consistency, anisotropy, cell-centre
+targeting) in the existing test modules; (3) notebook rewrites +
+re-execution via nbconvert; (4) PR rename + a reply comment on PR #26
+mapping each review bullet to the commit that addresses it.
+
+No files other than this prompt document were modified.
