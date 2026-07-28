@@ -110,7 +110,7 @@ We wish to generate unit tests for the vertical_helpers.py module.
     - Mimic it after the other Notebooks in notebooks_tests/
   - Log your work
 
-### PR
+## PR
 
 1. Please see the comments on the PR for more unit tests on GitHub: https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/26.  Read the review comments and develop a plan to address them.  Ask me questions before proceeding; put them in the Q&A section and I will answer them.  Use Fable if you can.  Log your work.
 
@@ -124,6 +124,7 @@ We wish to generate unit tests for the vertical_helpers.py module.
 6. Re-read this document.  Implement the 6th item under Native gradients/Jacobian
 7. Re-read this document.  Implement the 1st item under Native gradients/Gradient tracer
 8. Re-read this document.  Implement the 1st item under Native gradients/Vertical Helpers
+9. Re-read this document.  Implement the 1st task under PR
 
 ## Q&A
 
