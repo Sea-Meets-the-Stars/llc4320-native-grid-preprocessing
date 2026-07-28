@@ -114,6 +114,8 @@ We wish to generate unit tests for the vertical_helpers.py module.
 
 1. Please see the comments on the PR for more unit tests on GitHub: https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/26.  Read the review comments and develop a plan to address them.  Ask me questions before proceeding; put them in the Q&A section and I will answer them.  Use Fable if you can.  Log your work.
 
+2. I have answered your questions below.  Please read my responses and then proceed to address the PR with code changes.  Use Fable if you can.  Log your work.
+
 ## Prompts
 
 1. Re-read this document.  Implement the 1st item under Native gradients/Jacobian
@@ -125,6 +127,7 @@ We wish to generate unit tests for the vertical_helpers.py module.
 7. Re-read this document.  Implement the 1st item under Native gradients/Gradient tracer
 8. Re-read this document.  Implement the 1st item under Native gradients/Vertical Helpers
 9. Re-read this document.  Implement the 1st task under PR
+10. Re-read this document.  Implement the 2nd task under PR
 
 ## Q&A
 
@@ -134,6 +137,7 @@ full plan). Please answer inline; I will not modify anything until then.
 1. **PR title.** Proposed rename: "Unit tests + validation notebooks for
    native gradients (Jacobian, tracer) and vertical helpers". OK, or do
    you prefer different wording?
+>A. Yes, this is ok.
 
 2. **λ/φ naming.** The code (from the ECCO tutorial) uses the standard
    geographic convention λ=longitude (zonal), φ=latitude (meridional) —
@@ -143,6 +147,7 @@ full plan). Please answer inline; I will not modify anything until then.
    "zonal (λ, longitude)"), and note the ECCO provenance. Renaming the
    production outputs (du_lambda_dlambda, ...) would be a breaking
    change. Agree with keep-and-define?
+>A. Yes, keep and define.
 
 3. **Depth sign convention.** `_get_depth_coord` returns positive-down
    depth; the reviewer prefers native negative-up. Changing it now would
@@ -151,6 +156,7 @@ full plan). Please answer inline; I will not modify anything until then.
    coordinate, (b) print/warn loudly in helpers and notebooks that the
    native MITgcm Z has been flipped. OK, or do you want the convention
    itself revisited?
+>A. Yes, keep and print/warn.  Do not add the attribute.
 
 4. **Production-code changes allowed?** The reviewer asks that grid
    location (all outputs at tracer centres) be "output and warnings" —
@@ -158,6 +164,7 @@ full plan). Please answer inline; I will not modify anything until then.
    xarray attrs like `grid_location="tracer/C-point"` to outputs, extend
    docstrings), not just tests/notebooks. OK to modify production code
    in this PR?
+>A. Do not make these changes.  It is out of scope for this PR.
 
 5. **51-level / 968 m vertical grid.** The cached S3 grid
    (`dbof/LLC4320/grid.zarr`) holds only 51 levels down to ~968 m (the
@@ -165,6 +172,7 @@ full plan). Please answer inline; I will not modify anything until then.
    of full ocean depth. Is upper-968 m the intended DBOF domain (I then
    state this prominently in the notebooks), or should the vertical
    tests pull the full 90-level LLC4320 grid from another source?
+>A. The upper 968m is the intended DBOF domain.
 
 6. **Face-consistency test (reviewer's "are the faces doing what they
    should").** I propose a new online test: an analytic tracer built
@@ -172,17 +180,20 @@ full plan). Please answer inline; I will not modify anything until then.
    closed form; assert the computed (zonal, meridional) gradient matches
    on EVERY face. This requires adding XC/YC to the cached grid fields
    (~2 more 2-D fields, cache grows ~2 GB, one-time re-download). OK?
+>A. Yes, this is good. Please do it
 
 7. **Anisotropy.** Add synthetic-grid variants with dxC != dyC (uniform
    but unequal — still analytic) to the Jacobian and tracer tests. Is
    uniform anisotropy sufficient, or do you also want spatially varying
    metrics (no closed-form answer; would need a convergence-style test)?
+>A. Uniform anisotropy is sufficient.
 
 8. **Regional cutouts.** For the real-SST figures, replace the single
    downsampled face with full-resolution cutouts of the issue #24
    regions (W. North Atlantic 0-60N, Atlantic sector of the Southern
    Ocean, +/-5 deg Eastern Pacific)? This also fixes "face mainly looks
    at the continent" and "downsampled" comments.
+>A. Sure, give this a try
 
 ## Logging
 
