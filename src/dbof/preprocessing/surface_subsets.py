@@ -14,15 +14,73 @@ depth-resolved diagnostics see ``depth_subsets.py``.
 import dask
 
 import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
+import dbof.utils.physical_calculations as physical_calculations
+from dbof.preprocessing.calculated_fields_at_depth import (
+    ekman_pumping,
+    ekman_transport,
+    wind_stress_curl,
+)
 
 
 # ===========================================================================
 #  COMPUTE FUNCTIONS
 # ===========================================================================
 
-def compute_native_fields(ds_merge, grid, computed_feature_channels):
+def _compute_no_op(ds_merge, grid, computed_feature_channels):
     """No-op callback for subsets that only output raw model variables."""
     return {}
+
+
+def compute_native_fields(ds_merge, grid, computed_feature_channels):
+    """Subset: native_fields — geographic velocity components.
+
+    ``U``/``V`` are interpolated to tracer points and rotated to
+    geographic components, so the output ``U`` channel is eastward and
+    ``V`` northward velocity.  See the vector-handling policy in
+    ``dbof.utils.faces_to_latlon`` for why.
+    """
+    requested = set(computed_feature_channels)
+    results = {}
+    if {"U", "V"} & requested:
+        u_east, v_north = calculate_additional_fields.geographic_velocity(
+            ds_merge, grid)
+        if "U" in requested:
+            results["U"] = u_east
+        if "V" in requested:
+            results["V"] = v_north
+    return results
+
+
+def compute_surface_wind(ds_merge, grid, computed_feature_channels):
+    """Subset: surface_wind — geographic wind stress, curl, Ekman pumping/transport.
+
+    Output ``oceTAUX`` is eastward and ``oceTAUY`` northward wind stress
+    (see the vector-handling policy in ``dbof.utils.faces_to_latlon``).
+    """
+    requested = set(computed_feature_channels)
+    results = {}
+
+    if {"oceTAUX", "oceTAUY"} & requested:
+        tau_east, tau_north = calculate_additional_fields.geographic_wind_stress(
+            ds_merge, grid)
+        if "oceTAUX" in requested:
+            results["oceTAUX"] = tau_east
+        if "oceTAUY" in requested:
+            results["oceTAUY"] = tau_north
+
+    if "wind_stress_curl" in requested:
+        results["wind_stress_curl"] = wind_stress_curl(ds_merge, grid)
+
+    if "ekman_pumping" in requested:
+        results["ekman_pumping"] = ekman_pumping(ds_merge, grid)
+
+    if {"u_ekman", "v_ekman"} & requested:
+        ek = ekman_transport(ds_merge, grid)
+        for ch in ("u_ekman", "v_ekman"):
+            if ch in requested:
+                results[ch] = ek[ch]
+
+    return results
 
 
 def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
@@ -62,6 +120,13 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
             gradsalt2=results["gradsalt2"],
             gradrho2=results["gradrho2"],
         )
+
+    # Surface density [kg m-3] and buoyancy [m s-2] (JMD95 at p=0; buoyancy
+    # b = g rho / rho_ref x1e3, matching buoyancy_field_3d).
+    if "density" in needed:
+        results["density"] = physical_calculations.density_of_field(ds_merge)
+    if "buoyancy" in needed:
+        results["buoyancy"] = physical_calculations.buoyancy_of_field(ds_merge) * 1e3
 
     # Only return channels that were actually requested.
     return {k: v for k, v in results.items() if k in computed_feature_channels}
@@ -188,8 +253,8 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
 SUBSET_COMPUTE_FNS = {
     "native_fields":     compute_native_fields,
-    "surface_wind":      compute_native_fields,   # no-op — raw model vars only
-    "icearea":           compute_native_fields,   # no-op — raw model vars only
+    "surface_wind":      compute_surface_wind,
+    "icearea":           _compute_no_op,          # raw model vars only
     "frontal_structure": compute_frontal_structure,
     "kinematic":         compute_kinematic,
     "frontogenesis":     compute_frontogenesis,

@@ -199,6 +199,46 @@ The surface panel is enough.
  - check that all of the new methods are well documented
  - check to see if any of the methods in tile_utils.py are present elsewhere in the code base.  If so, refactor to use those and remove the methods from tile_utils.py.
 
+## Clarifications
+
+### Prompt 12 (PR #10 review)
+
+1. **Full compute-path unification (jaketall7, `tile_utils.py:295` & `:353`).**
+   The review asks that tile properties be computed by the *same* functions the
+   global-maps pipeline uses ("exactly one function that calculates that
+   property"), and notes a Slack message with more detail that I do not have
+   access to. I addressed the concrete, unambiguous part now: `density` no
+   longer calls the parallel `physical_calculations.density_of_field`; it routes
+   through the single shared `calculated_fields_at_depth._density_lazy` (the
+   routine the global depth pipeline uses), and the magic-number `1000.0` is now
+   the named constant `SIGMA0_REFERENCE_DENSITY`. **Open question:** should this
+   PR go further and rewire the whole tile property registry onto the global
+   subset compute system (`subset_definitions.get_compute_fn` →
+   `calculated_fields_at_depth`), which would require building an `xgcm` grid for
+   the tile and a `ds_merge`? Or is that the job of the upcoming `tile_fields`
+   PR that lahoffman mentioned (which generalises to all calculated fields and
+   grids)? I deferred the full rewire pending the Slack details, since doing it
+   wrong would fight the incoming `tile_fields` design.
+>A. Here are the Slack details:
+
+Any computation of properties should have exactly one function that calculates that property in the code. Currently those calculations live in preprocessing -> Caclulated_fields_at_depth.
+
+_compute_sigma0is currently doing some calculations. Looks like a small thing as it calls physical calcs and subtracts a 1000, but it sets up the architecture for tiles_utils.py to contain future calculations of fields for tiles. This would be bad as we could have two different functions calculating for example relative vorticity.
+
+The current "compute functions" flow is messy and should probably be cleaned up a bit to make use, for future tasks like this, easier. That being said, the existing compute functions should be usable for this code as they only expect an xarray in. Not in faces format. If these functions are not usable by this code, they should be made to be, as there is no clear reason why they couldn't be.
+
+It would be cool to organize our compute functions with a class for each field similar to what Prof. X did in this PR to make use easier.
+
+2. **Rebase onto main (lahoffman).** The branch is 29 commits behind `main`.
+   lahoffman asked for a rebase and said the only strictly-needed fix is the
+   `_git_commit_hash` import. I made that import forward-compatible (prefers the
+   new `global_dataset_creation.metadata` location, falls back to the old
+   `logging` one) so it works both before and after a rebase. I did **not**
+   perform the rebase itself — it is a shared-branch, potentially-conflicting,
+   hard-to-reverse operation that I think a maintainer should drive. Confirm
+   whether you'd like me to attempt it.
+>A. Done
+
 ## Prompts
 
 1. Read this document.  Plan the code to implement the functionality.  Update this document with your plan under the Planning section.  If you have any questions, put them under the Clarification section.
@@ -213,14 +253,14 @@ The surface panel is enough.
 10. Re-read this document.  Execute the 4th item under Modifications 
 11. Re-read this document.  Execute the 2nd item under Docs
 
+12. Please see the PR comments at `https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/10`.  Do your best to address them.  If you have any questions, put them under the Clarification section.  Log your work.
+13. See my answer to Prompt 12.  Continue on addressing the PR comments. Log your work.
+14. Make comments and resolve conversations for any of the comments that you addressed in the PR. Log your work.
+
 
 ## Logging
 
 The "Logs" section will record Claude's work.  Please use the following format:
-
-### <Date> (Short summary of the work)
-
-<Detailed description of the work and what you learned>
 
 ### <Date> (Short summary of the work)
 
@@ -424,3 +464,187 @@ describes the *original* design (`dev/generate_tile_density.py`, surface-`hFacC`
 land masking, `configs/global_depth.yaml`); the shipped code dropped masking and
 moved to `src/dbof/tiles/` + the `data_sources` DEPTH source, so I documented the
 code as it actually is.
+
+### 2026-07-03 (Prompt 12: address PR #10 review comments)
+
+Pulled the review threads from
+`https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/10`
+(via `gh api .../pulls/10/comments` + `/reviews`) and worked through them. Two
+reviewers: **lahoffman** (approved, one required fix + rebase note) and
+**jaketall7** (changes requested, mostly around a single compute path).
+
+**Fixed (code):**
+
+1. **`_git_commit_hash` import location** (lahoffman, `tile_utils.py:53`). On
+   `main` this moved from `global_dataset_creation.logging` to
+   `global_dataset_creation.metadata`, but this branch is behind and still has
+   it in `logging`. Made the import `try metadata → except ImportError → logging`
+   so it works both now and after the eventual rebase.
+2. **`generate_tile.py` → `cli/`** (jaketall7, `generate_tile.py:2`).
+   `git mv src/dbof/tiles/generate_tile.py src/dbof/cli/generate_tile.py`;
+   registered `generate-tile = "dbof.cli.generate_tile:main"` under
+   `[project.scripts]` in `pyproject.toml`. `tile_utils.py` and `tile_mapping.py`
+   stay in `dbof/tiles/` (library code); the CLI wrapper lives with the other
+   entry points. No test imported `generate_tile`, so nothing broke.
+3. **Geographic input** (jaketall7, `generate_tile.py:61` — "how does a user
+   know what i,j to pass?"). Added `latlon_to_rect_ij(lon, lat, s3_cfg)` to
+   `tile_utils` (loads `XC`/`YC`, stitches to the rect grid via the same
+   `faces_to_latlon` routine, returns the nearest rect pixel with longitude
+   wrapped to [-180,180)). `run()` now accepts `lon`/`lat` as an alternative to
+   `i_rect`/`j_rect` (exactly one pair required, else `ValueError`), and the CLI
+   grew `--lon`/`--lat` with an argparse-level mutual-exclusion check.
+4. **Single density path + magic number** (jaketall7, `tile_utils.py:295`,
+   `:314`, `:353`). `_compute_sigma0` now calls
+   `calculated_fields_at_depth._density_lazy` (the density routine the global
+   depth pipeline uses) instead of the duplicate
+   `physical_calculations.density_of_field`; the bare `1000.0` is now the named
+   `SIGMA0_REFERENCE_DENSITY`. Dropped the `physical_calculations` import. The
+   *full* rewire onto the global subset compute system is deferred — see
+   Clarifications (needs jaketall7's Slack detail + the incoming `tile_fields`
+   PR).
+5. **`run()` returns a Path on skip** (jaketall7, `tile_utils.py:620`). The
+   skip branch now `return out_path` (was bare `return`), matching the promised
+   `Path` return type; docstring updated.
+6. **Removed the module-level lookup cache** (jaketall7, `tile_mapping.py:115`).
+   `_LOOKUP_CACHE` / `_get_lookup_arrays` deleted; `rect_ij_to_tile` calls
+   `_build_lookup_arrays()` directly. It runs once per tile generation, so the
+   cache only added hidden state the tests had to reach into.
+7. **Clarified the "cannot straddle a face" guard** (jaketall7,
+   `tile_mapping.py:144`). Expanded the docstring Notes + the Step-C comment:
+   the user's `(i,j)` is floored to a 720-aligned tile, faces are `6×720`, so a
+   near-edge point still floors to a tile wholly on one face — the single-face
+   assertion guards a malformed layout, not caller input.
+8. **`iterations` future move** (lahoffman, `tile_utils.py:52`) — informational;
+   left a NOTE comment that the import survives the planned relocation to
+   `llc4320_ingestion.date_iterations` (backwards-compatible shim).
+
+**Tests** (`tests/test_generate_tile.py`): repointed the three stub seams from
+`monkeypatch.setattr(tm, "_LOOKUP_CACHE", ...)` to
+`monkeypatch.setattr(tm, "_build_lookup_arrays", lambda: ...)`; removed the now-
+defunct `tm._LOOKUP_CACHE = None` reset in the live-S3 test. Added
+`test_latlon_to_rect_ij`, `test_latlon_to_rect_ij_wraps_longitude`, and
+`test_run_requires_exactly_one_location`.
+
+**Results (ocean14):**
+
+- Offline: `--deselect ...test_rect_ij_to_tile_against_grid_zarr` → **20 passed,
+  5 deselected** in ~19s.
+- Live S3: `test_rect_ij_to_tile_against_grid_zarr` (5 params) → **5 passed** in
+  ~126s. The cache removal did not affect the real-grid mapping.
+- `python -m dbof.cli.generate_tile --help` renders the new flags; the neither/
+  both-location case errors cleanly at the CLI.
+
+**Docs:** updated `docs/Tiles.md` (module table now shows `dbof/cli/` +
+`generate-tile`; CLI section documents `--lon`/`--lat`/`--clobber`/`--qa-plot`
+and the one-location rule; density building-block now points at `_density_lazy`;
+Python-API `run()` return-on-skip corrected; added a "Compute unification (in
+progress)" note under Known issues).
+
+**Not done (flagged in Clarifications):** the full compute-unification rewire and
+the branch rebase onto `main` — both need a maintainer decision (Slack detail /
+shared-branch rebase).
+
+### 2026-07-03 (Prompt 13: finish PR #10 compute unification + integrate main)
+
+Picked up the two items I'd deferred in Prompt 12, now that the answers are in.
+
+**State on resume.** The branch had been brought up to date with `main` (merge
+commit `41c1bab`, now 0 behind — this is the "Done" answer to the rebase
+question). `_git_commit_hash` now lives in `global_dataset_creation.metadata`;
+my Prompt-12 `try metadata → except → logging` import resolves to `metadata`
+automatically, and all Prompt-12 changes survived the merge (verified: the
+`cli/generate_tile.py` move, `latlon_to_rect_ij`, cache removal, tests — offline
+suite still 20/20). So the rebase item needed no further code from me.
+
+**Compute unification (the Slack answer to clarification #1).** The instruction:
+*every property has exactly one calculation function, and those live in
+`preprocessing/calculated_fields_at_depth`; `tile_utils` must not host field
+math (today it's just `ρ−1000`, but it sets up a bad precedent where tiles could
+grow a second copy of, e.g., relative vorticity). The existing compute functions
+take a plain xarray, so they should be reusable here.* What I did:
+
+1. Added the single canonical σ₀ routine
+   `calculated_fields_at_depth.potential_density_anomaly_3d(ds_merge, grid=None)`
+   = `_density_lazy(ds) − SIGMA0_REFERENCE_DENSITY`, named `sigma0` with units/
+   long_name. Signature matches the other field functions so it drops into the
+   same dispatch tables. Its `grid` arg is accepted-but-unused for uniformity.
+2. Added `SIGMA0_REFERENCE_DENSITY = 1000.0` to `physical_constants.py` so the
+   `−1000` offset is defined in exactly one place.
+3. Refactored `calculated_fields_at_depth.mixed_layer_depth` to call
+   `potential_density_anomaly_3d` instead of its own inline `rho = _density_lazy`
+   + `sigma0 = rho − 1000.0`. Numerics identical; removes the in-module
+   duplicate of the offset.
+4. **Removed all density math from `tile_utils`**: deleted `_compute_sigma0` and
+   the local `SIGMA0_REFERENCE_DENSITY`; the `density` registry entry's
+   `compute` now points directly at
+   `calculated_fields_at_depth.potential_density_anomaly_3d`. Added a module
+   comment stating property *calculations* do not live here — only trivial
+   native-variable selection (temperature/salinity passthroughs) remains, since
+   there's nothing to compute for a field the model already stores.
+
+I did **not** rewire onto `subset_definitions.get_compute_fn` / build an xgcm
+grid + `ds_merge` per tile, nor introduce a per-field class. The Slack note
+frames those ("organize compute functions with a class for each field") as the
+*nice-to-have* cleanup for the follow-up `tile_fields` PR; the required change
+here was removing the second computation path, which is done.
+
+**Tests.** Added `test_density_uses_canonical_compute_fn` (asserts the registry
+delegates to `potential_density_anomaly_3d` and that `_compute_sigma0` /
+`SIGMA0_REFERENCE_DENSITY` no longer exist on `tile_utils`) and
+`test_potential_density_anomaly_3d_value` (canonical routine returns
+`jmd95(35.5, 3, 0) − 1000`). Tile suite: **22 passed, 5 deselected** (~16s).
+The existing `test_run_round_trip[density]` still passes end-to-end through the
+new canonical path, so the delegation is exercised for real, not just by
+identity.
+
+**Full offline suite:** 55 passed, 1 skipped. The only failures
+(`test_zarr_to_netcdf`, `test_zarr_valid_reader` — `TypeError: Filesystem needs
+to support async operations`) are pre-existing and environment-related: I
+confirmed they fail identically on the committed HEAD with my `src/` changes
+stashed, and they touch none of the modules I edited.
+
+**What I learned.** `_density_lazy`'s docstring mentions "grid-metric variables"
+but its body only uses `Theta`/`Salt`, so the canonical σ₀ routine works
+unchanged on a bare tile tracer dataset — no grid needed, which is why the
+reviewer's "these functions only expect an xarray in" holds for density. Field
+functions that need differential operators (vorticity, strain, …) do take an
+xgcm `grid`; wiring those for tiles is the real content of the `tile_fields`
+follow-up.
+
+**Docs:** updated `docs/Tiles.md` — density now documented as delegating to
+`potential_density_anomaly_3d`; building-blocks list updated; the "Compute
+unification" note under Known issues rewritten from "in progress" to "done for
+calculations, per-field-class generalization deferred to `tile_fields`".
+
+### 2026-07-04 (Prompt 14: reply to + resolve the addressed PR #10 threads)
+
+Closed the loop on the review conversations for every comment fixed in Prompts
+12–13. Authenticated as `profxj` (PR author, `repo` scope).
+
+**Mechanics.** Pulled the 11 inline review comments
+(`gh api .../pulls/10/comments`) and the matching review threads via GraphQL
+(`reviewThreads` → thread node id + first-comment `databaseId` + `isResolved`;
+all 11 were unresolved). For each thread: posted a reply describing the fix
+(`POST /repos/.../pulls/10/comments/{id}/replies`), then resolved it
+(GraphQL `resolveReviewThread` mutation).
+
+**Threads replied-to + resolved (11/11):**
+
+- lahoffman `tile_utils.py` ×3 — tiles_fields generalization note (ack);
+  `iterations`→`date_iterations` future move (ack, import unaffected);
+  `_git_commit_hash`→`metadata` (fixed via try/except import).
+- jaketall7 `generate_tile.py` ×2 — move to `cli/` + `.toml` (done);
+  coordinate→i,j (added `--lon`/`--lat` + `latlon_to_rect_ij`).
+- jaketall7 `tile_mapping.py` ×2 — straddle guard (clarified); lookup cache
+  (removed).
+- jaketall7 `tile_utils.py` ×4 — support global-maps fields (compute now
+  delegates to canonical `calculated_fields_at_depth`); return existing path
+  (fixed); multiple compute paths (single `potential_density_anomaly_3d`);
+  magic number (named `SIGMA0_REFERENCE_DENSITY`).
+
+Verified afterward via GraphQL: **0 unresolved threads** remain on PR #10.
+
+**Note for the maintainer:** the replies describe changes that are still in the
+local working tree — the branch has not been committed/pushed yet, so the fixes
+won't be visible in the PR diff until pushed. Resolving now was the explicit
+ask; the commit/push is the remaining step.

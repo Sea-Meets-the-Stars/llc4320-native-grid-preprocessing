@@ -71,10 +71,28 @@ test = ["pytest"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"dbof.plotting" = ["*.yaml"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: touches real data stores (network and/or cluster filesystem)",
+    "mit: requires the MIT orcd filesystem (/orcd/data/abodner/003/LLC4320)",
+    "s3_dbof: requires network + NRP S3 credentials for the dbof bucket (s3-west.nrp-nautilus.io)",
+    "osn: requires network access to the public OSN kerchunk store (anonymous)",
+]
+# Integration tests are skipped unless --run-integration is passed;
+# that gating lives in tests/conftest.py (pytest_collection_modifyitems).
+# Show each test's logging.info lines live (asked date -> confirmed store time).
+log_cli = true
+log_cli_level = "INFO"
+log_cli_format = "%(levelname)s  %(message)s"
+
 [project.scripts]
-generate-llc-dataset = "dbof.cli.generate_front_training_data:main"
+generate-llc-dataset = "dbof.cli.generate_cutout_dataset:main"
 generate-global = "dbof.cli.generate_global:main"
 generate-global-grid-zarr = "dbof.cli.generate_grid_global:main"
 zarr-to-netcdf = "dbof.cli.zarr_to_netcdf:main"
 transfer-timestep = "dbof.cli.transfer_llc4320:main"
 run-all-subsets = "dbof.cli.run_all_subsets:main"
+generate-tile = "dbof.cli.generate_tile:main"

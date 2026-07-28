@@ -9,17 +9,16 @@ Pipelines
 ---------
 SURF
     Core ocean variables from OSN kerchunk; forcing variables (oceTAUX,
-    oceTAUY, SIarea) from S3 timestep stores written by
-    ``transfer_llc4320.py`` into the ``LLC4320`` folder.
+    oceTAUY, SIarea, oceQnet) from S3 timestep stores written by
+    ``transfer_llc4320.py`` into ``LLC4320_RAW/SURFACE``.
 
 OSN
     All variables from OSN kerchunk endpoints (surface + wind).  No S3
     timestep stores are used.
 
 DEPTH
-    All variables from S3 timestep stores in ``LLC4320_v1`` (full depth).
-    Grid is read from the ``LLC4320`` folder (original, non-corrupt
-    transfer location).
+    All variables (full depth) and the grid from S3 timestep stores in
+    ``LLC4320_RAW/DEPTH``.
 """
 
 # ---------------------------------------------------------------------------
@@ -39,21 +38,21 @@ OSN_WIND_VARS = {"KPPhbl", "PhiBot", "oceTAUX", "oceTAUY", "SIarea"}
 # LLC timestep stores (on S3)
 # ---------------------------------------------------------------------------
 
-#: LLC_SURF source for the surface-only pipeline (timestep stores).
+#: LLC_SURF source for the surface-only pipeline (timestep stores),
+#: i.e. s3://dbof/LLC4320_RAW/SURFACE/.
 LLC_SURF_SOURCE = {
     "s3_endpoint": "https://s3-west.nrp-nautilus.io",
     "bucket":      "dbof/",
-    "folder":      "LLC4320",
+    "folder":      "LLC4320_RAW/SURFACE",
 }
 
-#: LLC_DEPTH source for the depth-resolved pipeline (full-depth timestep stores).
-#: ``grid_folder`` points to the original transfer location where
-#: ``grid.zarr`` lives (the non-corrupt copy).
+#: LLC_DEPTH source for the depth-resolved pipeline (full-depth timestep
+#: stores), i.e. s3://dbof/LLC4320_RAW/DEPTH/.  ``grid.zarr`` is read from
+#: the same folder
 LLC_DEPTH_SOURCE = {
     "s3_endpoint":  "https://s3-west.nrp-nautilus.io",
     "bucket":       "dbof/",
-    "folder":       "LLC4320_v1",
-    "grid_folder":  "LLC4320",
+    "folder":       "LLC4320_RAW/DEPTH",
 }
 
 

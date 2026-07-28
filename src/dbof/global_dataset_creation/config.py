@@ -3,7 +3,7 @@ Configuration dataclasses for the global LLC4320 dataset generation pipeline.
 
 These are used exclusively by ``generate_global.py`` and related global
 pipeline tooling.  The cutout / training-data pipeline has its own config
-in ``dbof.dataset_creation.config``.
+in ``dbof.cutout_dataset_creation.config``.
 """
 
 from dataclasses import dataclass

@@ -219,14 +219,12 @@ I agree.
 5. Re-read this document.  Implement the 1st item under Modifications
 6. Re-read this document.  Implement the 2nd item under Modifications
 
+7. There is a conflict in variable_selection.py.  Please resolve it.
+
 
 ## Logging
 
 The "Logs" section will record Claude's work.  Please use the following format:
-
-### <Date> (Short summary of the work)
-
-<Detailed description of the work and what you learned>
 
 ### <Date> (Short summary of the work)
 
@@ -477,3 +475,55 @@ Executed the notebook in `ocean14` via `jupyter nbconvert --execute`:
   does) evaluates the shared upstream once and brought it well under the
   timeout. A good reminder that separate `.compute()` calls on a shared
   lazy graph duplicate the upstream work.
+
+### 2026-07-11 (Resolved the variable_selection.py merge conflict)
+
+Executed the 7th prompt: resolved a Git conflict in
+`src/dbof/global_dataset_creation/variable_selection.py`
+(`HEAD` = the `Wstar` branch vs `origin/main`).
+
+**The conflict.** Two rule blocks (the tracer rule and the velocity rule)
+diverged:
+
+- `HEAD` used trailing-underscore stems (`'N2_'`, `'Ri_'`, `'strain_'`,
+  …) and had added `'Wstar_'`.
+- `origin/main` had refactored the matcher to **bare stems** (no trailing
+  `_`; see the updated comment and `tests/test_variable_selection.py`) and
+  added new channels — `'density'`, `'buoyancy'` (tracer rule) and `'U'`,
+  `'V'` (velocity rule, folding in the old native `U_`/`V_` rules).
+
+**Resolution.** Adopted `origin/main`'s bare-stem convention and kept all
+of its new additions, then re-added the `Wstar` entry as bare `'Wstar'`
+(tracer + velocity rules). No conflict markers remain anywhere in the repo.
+
+**Two correctness fixes the merge exposed** (a clean resolution has to
+leave the file *correct*, not just marker-free):
+
+1. **Bare `'W'` swallowed `'Wstar'`.** `origin/main`'s native-vertical-
+   velocity stem was bare `'W'`, and `'Wstar_sfc'.startswith('W')` is
+   `True`, so `Wstar` spuriously pulled the (unneeded) 3D `W` field.
+   Narrowed that stem to `'W_'` — it still matches every real native
+   channel (`W_sfc`/`W_z25m`/`W_mld`/`W_mld_mean`, always suffixed) but no
+   longer matches `Wstar_*`. Verified against the existing
+   `test_exact_mappings` (`W_sfc -> {W}`) and `test_depth_suffixes_*`.
+2. **`R_ib` mapped to nothing.** The merged tree has `R_ib` registered in
+   the `mixing_parameters` subset (from the R_ib work) but `origin/main`'s
+   rules had no `R_ib` stem — `'R_ib_sfc'.startswith('Ri')` is `False`, so
+   `required_model_variables(['R_ib_sfc'])` returned `[]`, failing
+   `test_every_computed_channel_maps_to_raw_vars[DEPTH-mixing_parameters]`.
+   Added the `'R_ib'` stem to the tracer rule (R_ib = N^2 f^2 / |grad_h b|^2
+   needs only `Theta`/`Salt`; no velocities). This is the latent gap I had
+   flagged in the W* Docs log — now fixed.
+
+**Verification.** `Wstar_sfc -> [Theta, Salt, U, V]`, `R_ib_sfc ->
+[Theta, Salt]`, `W_sfc -> [W]`, `W_mld -> [W, Theta, Salt]`. Added a
+`"Wstar_sfc"` case to `test_exact_mappings` to pin the resolution.
+`pytest tests/test_variable_selection.py tests/test_calculated_fields_at_depth.py`
+→ **29 passed** (network test deselected). Affected modules import cleanly.
+
+**What I learned.** The bare-stem matcher is a prefix match
+(`str.startswith(tuple)`), so any new channel whose name shares a prefix
+with an existing stem can collide. `Wstar`/`W` was exactly that. Bare
+stems are terser but demand this collision check on every new field; the
+trailing-`_` convention avoided it at the cost of a rule per depth-suffix
+pattern.

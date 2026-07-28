@@ -1,83 +1,48 @@
 import numpy as np
 
-def weighted_sample_on_grid(points_to_sample, bias, da, mask=None):
+def weighted_sample_on_grid(points_to_sample, bias, field, mask=None):
     """
-    Draw weighted random samples from an LLC grid based on an input field.
+    Draw weighted random samples (without replacement) from a grid.
 
-    This function samples grid points with probability proportional to the
-    values of an input xarray DataArray, optionally masked to exclude invalid
-    regions. Higher field values result in higher sampling likelihood. Returned
-    samples are given as native grid indices.
-
-    This function takes a while.
+    Probability is proportional to ``exp(bias * (value - min))`` over the valid
+    (finite, unmasked) cells.
 
     Parameters
     ----------
     points_to_sample : int
         Number of grid points to sample.
-    bias : float or xarray.DataArray
-        power bias applied to the input field before normalization.
-        Can be a scalar or broadcastable to ``da``.
-    da : xarray.DataArray
-        Input field defined on the LLC grid (e.g., with dimensions
-        ``(face, j, i)``) used to define sampling weights.
-    mask : numpy ndarray or None, optional
-        Boolean mask with the same dimensions as ``da``. Points where
-        ``mask == False`` are excluded from sampling. If None, no masking
-        is applied.
+    bias : float
+        Power bias applied (in log space) to the field before normalization.
+    field : np.ndarray
+        Input field, e.g. the stitched ``(j, i)`` grid. Array-likes (xarray
+        DataArrays) are coerced via ``np.asarray``.
+    mask : np.ndarray of bool or None, optional
+        Same shape as ``field``; cells where ``mask == False`` are excluded.
 
     Returns
     -------
-    indices : list of tuple
-        List of sampled grid indices as tuples of integers corresponding
-        to ``da.dims`` order (e.g., ``(face, j, i)``).
-
-    Notes
-    -----
-    * Sampling is performed without replacement.
-    * Masked or NaN values are excluded prior to normalization.
-    * Coordinates are preserved through stacking to ensure correct index
-      recovery.
+    list of tuple
+        Sampled indices as positional tuples in ``field`` order (``(j, i)``).
     """
+    arr = np.asarray(field)
 
-    if (mask is not None):
-        da_m = da.where(mask)
-    else :
-        da_m = da
+    valid = np.isfinite(arr)
+    if mask is not None:
+        valid &= np.asarray(mask, dtype=bool)
 
-    # exponential 
-    weights = np.exp(bias * (da_m - da_m.min(skipna=True)))
+    flat_valid = np.flatnonzero(valid.ravel())
+    vals = arr.ravel()[flat_valid]
 
-    w_stacked = weights.stack(
-        sample_dim=da_m.dims)  # stacks face j i into one dimension but keeps track of indexes
+    weights = np.exp(bias * (vals - vals.min()))
+    p = weights / weights.sum()
 
-    w_valid = w_stacked.dropna("sample_dim")  # coordinates of xarray are preserved here todo this is causing us to jump into numpy for some reason. This should be changed
-    p = w_valid / w_valid.sum()
+    choice = np.random.choice(flat_valid.size, size=points_to_sample, replace=False, p=p)
+    coords = np.unravel_index(flat_valid[choice], arr.shape)
 
-    p_np = p.values
-    
-    # grab however many samples randomly with higher likelihood for high weights.
-    choice = np.random.choice(
-        p.sample_dim.size,
-        size=points_to_sample,
-        replace=False,
-        p=p_np
-    )
-
-    sampled =  w_valid.isel(sample_dim=choice)
-
-    indices = np.stack(
-        [sampled.coords[dim].values for dim in da_m.dims],
-        axis=1
-    )
-
-    indices = [tuple(row) for row in indices]  # list of tuples containing face j i into our grid
-    indices = [tuple(int(x) for x in t) for t in indices]
-
-    return indices
+    return [tuple(int(c) for c in idx) for idx in zip(*coords)]
 
 # The following is for sampling on a pdf and is not being used currently. Can probably be deleted. ---------------------------------
-# todo we can probably remove all of this stuff. Keeping for now in case we decide to change our sampling pattern.
+# NOTE keping this functionality for now in case we decide to change our sampling pattern.
 # # x must = da.values
 # def sample_linearly_on_pdf(x, points_to_sample, display):
 #     # Calculate pdf

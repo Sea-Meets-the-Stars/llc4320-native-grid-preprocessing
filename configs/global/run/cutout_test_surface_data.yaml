@@ -1,0 +1,48 @@
+# Pipeline: SURF | OSN | DEPTH
+#generate-global --config configs/global/run/cutout_test_surface_data.yaml
+pipeline: "SURF"
+
+run:
+  run_id: "cutout_test_data_v1_2"
+  log_dir: "logs/"
+
+data:
+  date_iterations:
+    - '2012-02-09 12:00:00'
+    - '2012-01-01 12:00:00'
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  folder: "test_data_for_cutouts/"
+
+
+runtime:
+  zarr_async_concurrency: 8
+  dask_scheduler: "distributed"
+  dask_n_workers: 4
+  dask_threads_per_worker: 4
+
+# ---------------------------------------------------------------------------
+# Subset selection
+# ---------------------------------------------------------------------------
+# IMPORTANT: each pipeline supports a specific set of subsets.  Running a
+# subset that does not belong to the chosen pipeline will raise a ValueError.
+#
+# ┌─────────┬────────────────────────────────────────────────────────────────┐
+# │ SURF    │ native_fields, surface_wind, icearea, frontal_structure,      │
+# │         │ kinematic, frontogenesis                                      │
+# │ OSN     │ native_fields, surface_wind, icearea, frontal_structure,      │
+# │         │ kinematic, frontogenesis                                      │
+# │ DEPTH   │ stratification, vertical_shear, mixing_parameters, ertel_pv, │
+# │         │ buoyancy_fluxes, surface_wind, energetics, frontal_structure, │
+# │         │ kinematic, frontogenesis, native_fields, icearea              │
+# └─────────┴────────────────────────────────────────────────────────────────┘
+#
+# Only list subsets valid for the pipeline set above.
+active_subsets:
+  - icearea
+  - native_fields
+  - surface_wind
+  - frontal_structure
+  - kinematic

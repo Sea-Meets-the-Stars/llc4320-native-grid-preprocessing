@@ -68,12 +68,12 @@ A single unified entry point (`generate_global.py`) dispatches on the
 All variants share the same output format: S3 Zarr stores shaped
 `(T, C, 12960, 17280)` with chunk shape `(1, 1, 12960, 17280)`.
 
-Config: `configs/global/run.yaml`. Console command: `generate-global`.
+Config: `configs/global/run/run.yaml`. Console command: `generate-global`.
 
 ```bash
-generate-global --config configs/global/run.yaml
-generate-global --config configs/global/run.yaml --subset kinematic
-generate-global --config configs/global/run.yaml --pipeline OSN
+generate-global --config configs/global/run/run.yaml
+generate-global --config configs/global/run/run.yaml --subset kinematic
+generate-global --config configs/global/run/run.yaml --pipeline OSN
 ```
 
 Flags: `--subset`, `--pipeline`, `--run_id`, `--no-icemask`.
@@ -159,7 +159,7 @@ not its 3D computation machinery.
 Each pipeline supports a specific set of subsets.  Running a subset that
 does not belong to the chosen pipeline will raise a `ValueError`.  The
 canonical reference for valid pipeline × subset combinations is in
-`configs/global/run.yaml`.
+`configs/global/run/run.yaml`.
 
 A **subset** is a named group of related calculated fields/properties that are
 computed and written together as a single Zarr store. Each subset has its own
@@ -169,14 +169,51 @@ config YAML.
 Subsets exist because the full set of derived fields is large — grouping
 related fields together lets you generate and export only what you need.
 
+### Re-running and changing `depth_suffixes`
+
+Re-runs are incremental ("`.nc`-first"): for each subset × date,
+`run-all-subsets` checks the exported `.nc` files first. If all exist the
+subset/date is skipped entirely; if some are missing it checks the Zarr
+store, exports the missing channels when the store is complete, and only
+regenerates the store when it is missing or incomplete (wrong channels, or
+no data written). When a store **is** regenerated, *all* of its channels are
+re-exported (existing `.nc` files overwritten), so every export for a
+subset/date always comes from the same store build. The work plan is logged
+at startup — use `--dry-run` to preview it.
+
+**Changing `depth_suffixes` (or channel definitions) for an existing
+run_id/date is refused by design.** A store's channel axis is fixed at
+creation, so writing a different channel set would corrupt it. You will see:
+
+```
+ValueError: Channel mismatch for existing zarr store at s3://...
+Refusing to write -- this would corrupt the store.
+```
+
+The pipeline never deletes data; to move forward either:
+
+1. **Delete that subset's store manually** and re-run (only the affected
+   subset/date is rebuilt):
+
+   ```bash
+   aws --endpoint-url https://s3-west.nrp-nautilus.io s3 rm --recursive \
+     s3://dbof/{folder}/{run_id}/{date_prefix}/{subset}.zarr
+   ```
+
+2. **Use a new `run_id`**, keeping the old outputs intact.
+
+`run_meta.yaml` (next to the logs, and at
+`s3://{bucket}/{folder}/{run_id}/run_meta.yaml`) records the suffixes and
+channels each subset was actually built with.
+
 ### Surface pipeline subsets (SURF / OSN)
 
 | Subset              | Fields                                                                                      | Requires wind/ice data |
 |---------------------|---------------------------------------------------------------------------------------------|------------------------|
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`                                                      | No                     |
-| `surface_wind`      | `oceTAUX`, `oceTAUY`                                                                       | Yes                    |
+| `surface_wind`      | `oceTAUX`, `oceTAUY`, `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` (+ `oceQnet`, SURF only) | Yes  |
 | `icearea`           | `SIarea`                                                                                    | Yes                    |
-| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`                  | No                     |
+| `frontal_structure` | `gradb2`, `gradsalt2`, `gradtheta2`, `gradeta2`, `gradrho2`, `turner_angle`, `density`, `buoyancy` | No              |
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `coriolis_f`, `rossby_number`, `okubo_weiss` | No |
 | `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`, `Wstar`     | No                     |
 
@@ -200,7 +237,7 @@ MIT first using `transfer_llc4320.py`.
 | `kinematic`         | `relative_vorticity`, `strain_n`, `strain_s`, `strain_mag`, `divergence`, `rossby_number`, `okubo_weiss` | sfc, z25m, mld, mld_mean | `coriolis_f` |
 | `frontogenesis`     | `frontogenesis_tendency`, `frontogenesis_geo`, `frontogenesis_ageo`, `ug`, `vg`, `Wstar` | sfc, z25m, mld, mld_mean |                   |
 | `native_fields`     | `Theta`, `Salt`, `Eta`, `U`, `V`, `W`             | sfc, z25m, mld, mld_mean   |                                         |
-| `surface_wind`      | *(surface_only)* `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model fields `oceTAUX`, `oceTAUY`, `oceQnet` | — | |
+| `surface_wind`      | *(surface_only)* `oceTAUX`, `oceTAUY`, `wind_stress_curl`, `ekman_pumping`, `u_ekman`, `v_ekman` + model field `oceQnet` | — | |
 | `icearea`           | *(surface_only)* model field `SIarea`              | —                           |                                         |
 
 ### Balanced Richardson number (`R_ib`)
@@ -312,40 +349,40 @@ the CLI flag takes precedence.
 ```bash
 # DEPTH pipeline — generate + export all active subsets:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output
 
 # SURF pipeline:
 run-all-subsets --pipeline SURF \
-    --config configs/global/run.yaml --netcdf-base /path/to/output
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output
 
 # OSN pipeline:
 run-all-subsets --pipeline OSN \
-    --config configs/global/run.yaml --netcdf-base /path/to/output
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output
 
 # Only specific subsets (overrides active_subsets in YAML):
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output \
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output \
     --subsets stratification native_fields
 
 # Export only (assumes Zarr stores already exist):
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --export-only
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --export-only
 
 # Generate only (skip NetCDF export):
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --generate-only
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --generate-only
 
 # Override run_id:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --run-id my_run_01
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --run-id my_run_01
 
 # Dry run:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --dry-run
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --dry-run
 
 # With ice masking:
 run-all-subsets --pipeline DEPTH \
-    --config configs/global/run.yaml --netcdf-base /path/to/output --ice-mask
+    --config configs/global/run/run.yaml --netcdf-base /path/to/output --ice-mask
 ```
 
 ### Ice masking
@@ -466,22 +503,58 @@ iteration             = round((date - start) / 25 s)
 ## Python readers
 
 ```python
-from dbof.dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
-from dbof.dataset_creation.zarr_grid_global import GlobalGridZarrReader
-from dbof.utils.filesystems import get_filesystem
+from dbof.global_dataset_creation.zarr_dataset_global import GlobalZarrDatasetReader
+from dbof.global_dataset_creation.zarr_grid_global import GlobalGridZarrReader
+from dbof.io.filesystems import get_filesystem
 
 fs = get_filesystem(s3_endpoint, anon=False)
 
 reader = GlobalZarrDatasetReader(bucket, folder, run_id, dataset_name, fs)
-snap   = reader.get_snapshot(t=0)                          # (C, H, W)
-field  = reader.get_channel_snapshot(t=0, channel="N2_sfc") # (H, W)
-t_idx  = reader.iteration_to_index(iteration=1463616)
+snap = reader.get_snapshot(t=0)  # (C, H, W)
+field = reader.get_channel_snapshot(t=0, channel="N2_sfc")  # (H, W)
+t_idx = reader.iteration_to_index(iteration=1463616)
 
-grid   = GlobalGridZarrReader(bucket, folder, dataset_name="llc4320_grid.zarr", fs=fs)
+grid = GlobalGridZarrReader(bucket, folder, dataset_name="llc4320_grid.zarr", fs=fs)
 lon, lat = grid.lon, grid.lat
 land_mask = grid.land_mask
-ds_grid  = grid.to_dataset()
+ds_grid = grid.to_dataset()
 ```
+
+---
+
+## Vector fields: orientation and history
+
+**In current stores, `U`, `V`, `oceTAUX`, and `oceTAUY` are true
+geographic components** — `U`/`oceTAUX` eastward, `V`/`oceTAUY` northward
+— colocated with the tracers at cell centres. The pipelines interpolate
+the staggered model components to tracer points and rotate them from the
+model (x, y) basis to (east, north) using the grid `CS`/`SN` coefficients
+before the face stitch (canonical explanation: the "Vector-handling
+policy" in `dbof/utils/faces_to_latlon.py`; proof:
+`tests/test_vector_rotation_equivalence.py`, which writes comparison
+figures to `tests/output/`).
+
+**Stores generated before July 2026 have known vector artifacts** and
+should not be mixed with regenerated data:
+
+- *SURF/OSN `native_fields` (U/V) and `surface_wind` (oceTAUX/Y), both
+  pipelines:* the fields were interpolated to tracer points but then
+  passed through xmitgcm's mate/vector face stitch, whose one-pixel
+  shift-and-pad is only correct for staggered input. Result: the
+  **northward** components (V, oceTAUY) are displaced one pixel (~2 km)
+  relative to the land mask and all other channels over the rotated half
+  of the map (source faces 7–12), plus zero-filled seam lines at the
+  rotated facet edges. Eastward components are unaffected.
+- *DEPTH `native_fields` (`U_*`, `V_*`):* worse — these channels were
+  interpolated but **never rotated**, and were stitched as scalars. Over
+  the rotated half of the map U and V are effectively swapped (with a
+  sign), i.e. wrong at full amplitude.
+
+Regenerating the affected subsets fixes both. Note the fix also changed
+the **channel order** in `native_fields` (now `Theta, Salt, Eta, W, U, V`)
+and `surface_wind` (DEPTH: `oceQnet, oceTAUX, oceTAUY, ...`), because
+vector fields moved from model channels to computed channels — always
+index by the store's `channel_names` attribute, not by position.
 
 ---
 

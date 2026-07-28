@@ -105,7 +105,7 @@ Usage — grid
       --mode grid \\
       --s3-endpoint https://s3-west.nrp-nautilus.io \\
       --bucket dbof \\
-      --folder native_grid_dbof_training_data \\
+      --folder LLC4320_GRID_2D \\
       --grid-dataset-name llc4320_grid.zarr \\
       --output-dir /scratch/llc4320_netcdf/
 """
@@ -240,11 +240,10 @@ def zarr_to_netcdf(
         date_prefix=date_prefix,
     )
 
-    n_total = len(reader)
     all_channel_names = reader.channel_names
     H, W = reader.rectangular_shape
     logging.info(
-        f"Store contains {n_total} timestep(s), {len(all_channel_names)} channel(s): "
+        f"Store contains 1 snapshot, {len(all_channel_names)} channel(s): "
         f"{all_channel_names}  |  spatial shape: {H} × {W}"
     )
 
@@ -280,54 +279,50 @@ def zarr_to_netcdf(
         logging.info(f"Writing subset of channels: {channel_names}")
 
     # ------------------------------------------------------------------
-    # 2. Convert each timestep in this date_prefix store
+    # 2. Convert the single snapshot in this date_prefix store
     # ------------------------------------------------------------------
-    for t in range(n_total):
-        date_display = _prefix_to_display(date_prefix)
-        logging.info(
-            f"[{t + 1}/{n_total}] date_prefix={date_prefix} "
-            f"({date_display}), t={t}"
+    date_display = _prefix_to_display(date_prefix)
+    logging.info(f"date_prefix={date_prefix} ({date_display})")
+
+    n_y, n_x = H, W
+    y_coord = np.arange(n_y, dtype=np.int32)
+    x_coord = np.arange(n_x, dtype=np.int32)
+
+    data_vars = {}
+    for ch in channel_names:
+        arr = reader.get_channel_snapshot(ch).astype(np.float32)
+        if ice_mask is not None:
+            arr = apply_ice_mask(arr, ice_mask)
+        data_vars[ch] = xr.DataArray(
+            arr, dims=['y', 'x'],
+            coords={'y': y_coord, 'x': x_coord},
         )
 
-        n_y, n_x = H, W
-        y_coord = np.arange(n_y, dtype=np.int32)
-        x_coord = np.arange(n_x, dtype=np.int32)
+    ds = xr.Dataset(
+        data_vars,
+        attrs={
+            'date_prefix':       date_prefix,
+            'model_time_utc':    date_display,
+            'run_id':            run_id,
+            'channel_names':     channel_names,
+            'spatial_shape':     f'({n_y}, {n_x})',
+            'source_zarr':       store_path,
+            'description': (
+                'LLC4320 global snapshot in rectangular lat/lon format '
+                f'({n_y} × {n_x}). Produced by zarr_to_netcdf.py. '
+                'Load companion llc4320_grid.nc for XC/YC/Depth/etc.'
+            ),
+        },
+    )
 
-        data_vars = {}
-        for ch in channel_names:
-            arr = reader.get_channel_snapshot(t, ch).astype(np.float32)
-            if ice_mask is not None:
-                arr = apply_ice_mask(arr, ice_mask)
-            data_vars[ch] = xr.DataArray(
-                arr, dims=['y', 'x'],
-                coords={'y': y_coord, 'x': x_coord},
-            )
+    if output_filename is not None:
+        nc_filename = out_path / output_filename
+    else:
+        nc_filename = out_path / f"{run_id}_{date_prefix}.nc"
+    ds.to_netcdf(nc_filename)
+    logging.info(f"  → written: {nc_filename}")
 
-        ds = xr.Dataset(
-            data_vars,
-            attrs={
-                'date_prefix':       date_prefix,
-                'model_time_utc':    date_display,
-                'run_id':            run_id,
-                'channel_names':     channel_names,
-                'spatial_shape':     f'({n_y}, {n_x})',
-                'source_zarr':       store_path,
-                'description': (
-                    'LLC4320 global snapshot in rectangular lat/lon format '
-                    f'({n_y} × {n_x}). Produced by zarr_to_netcdf.py. '
-                    'Load companion llc4320_grid.nc for XC/YC/Depth/etc.'
-                ),
-            },
-        )
-
-        if output_filename is not None:
-            nc_filename = out_path / output_filename
-        else:
-            nc_filename = out_path / f"{run_id}_{date_prefix}.nc"
-        ds.to_netcdf(nc_filename)
-        logging.info(f"  → written: {nc_filename}")
-
-    logging.info(f"Done. {n_total} file(s) written to {out_path}")
+    logging.info(f"Done. 1 file written to {out_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -352,7 +347,7 @@ def grid_zarr_to_netcdf(
     bucket : str
         S3 bucket name, e.g. 'dbof'.
     folder : str
-        S3 folder path, e.g. 'native_grid_dbof_training_data'.
+        S3 folder path, e.g. 'LLC4320_GRID_2D'.
     grid_dataset_name : str
         Zarr store name within ``folder`` (default: ``llc4320_grid.zarr``).
     output_dir : str
@@ -441,7 +436,7 @@ def main(
     bucket: str = 'dbof',
     folder: str = None,
     run_id: str = None,
-    dataset_name: str = 'dataset_creation.zarr',
+    dataset_name: str = 'dataset.zarr',
     dates: list = None,
     channels: list = None,
     grid_dataset_name: str = 'llc4320_grid.zarr',
@@ -467,7 +462,7 @@ def main(
     run_id : str
         [snapshots] run_id used when writing the Zarr store.
     dataset_name : str
-        [snapshots] Zarr dataset name (default: 'dataset_creation.zarr').
+        [snapshots] Zarr dataset name (default: 'dataset.zarr').
     dates : list of str, optional
         [snapshots] Model dates in 'YYYY-MM-DD HH:MM:SS' format.
         Each date is converted to a date_prefix and the corresponding

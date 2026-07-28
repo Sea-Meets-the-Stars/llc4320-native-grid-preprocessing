@@ -1,18 +1,58 @@
 """
-LLC face-grid utilities: staggered→tracer interpolation, vector-pair
-metadata, face→lat-lon stitching, and masked ``(C, H, W)`` assembly.
+LLC face-grid utilities: face→lat-lon stitching and masked ``(C, H, W)``
+assembly, plus legacy staggered→tracer / vector-pair helpers.
 
 The low-level stitch (``faces_dataset_to_latlon``) wraps xmitgcm with an
-xarray-compatibility fix.  The higher-level helpers
-(``interp_staggered_to_tracer``, ``set_vector_pair_attrs``,
-``stitch_and_mask``) are used by the pipeline ``process_snapshot`` functions
-to prepare fields before and after the stitch.
+xarray-compatibility fix.  ``stitch_and_mask`` is the entry point used by
+the pipeline ``process_snapshot`` functions.
+
+Vector-handling policy (canonical explanation — other modules point here)
+--------------------------------------------------------------------------
+Horizontal vector fields (``U``/``V``, ``oceTAUX``/``oceTAUY``) live on the
+staggered C-grid (u on the west cell face / ``i_g``, v on the south face /
+``j_g``) and on model-relative axes that are rotated ~90° relative to
+east/north on LLC faces 7-12.  There are exactly two self-consistent ways
+to get them onto the stitched lat-lon rectangle:
+
+1. **Raw staggered → mate/vector stitch** (xmitgcm's intended use).
+   Tag the pair with ``mate`` attrs and let ``faces_dataset_to_latlon``
+   swap components on the rotated faces.  The swap includes a one-pixel
+   shift-and-pad (``transform_u_to_v``) that re-registers *staggered*
+   points onto the rotated C-grid.  Output stays registered to the
+   staggered points.
+
+2. **Interp to tracer points + CS/SN rotation → scalar stitch** (what
+   this codebase does — ``rotate_vector_to_geographic`` in
+   ``dbof.utils.native_gradient``).  Once components are geographic
+   (east/north) at cell centres, each is an ordinary per-cell scalar and
+   the scalar stitch places it exactly like Theta and the land mask.
+
+Mixing the two — interpolating to tracer points and *then* using the
+mate/vector stitch — is an error: the staggered-grid shift is applied to
+cell-centred data, displacing the northward component by one pixel
+relative to every other channel over the rotated half of the map and
+injecting zero-filled seam lines.  (The pipelines did this before
+July 2026; see ``tests/test_vector_rotation_equivalence.py`` for the
+measured proof, and ``docs/Global_Maps.md`` for the impact on old stores.)
+
+1 re-tiles model-basis vectors; 2 produces geographic ones — 
+the legacy bug was using 1's output as if it were 2's.
+
+Consequently the production rule is: **every channel reaching
+``stitch_and_mask`` must be a tracer-point scalar or geographic vector
+component, and is stitched through the scalar path.**  ``stitch_and_mask``
+strips stray ``mate`` attrs to enforce this, and the processors reject
+model channels on staggered dims.  Vector channels are produced by the
+subset compute functions (``geographic_velocity``,
+``geographic_wind_stress`` and 3D variants).
 """
 
+import contextlib
 import logging
 
 import numpy as np
 import xarray as xr
+from dask.diagnostics import ProgressBar
 from xmitgcm.llcreader import llcmodel
 from xmitgcm.llcreader.llcmodel import (
     _faces_coords_to_latlon,
@@ -25,6 +65,7 @@ def faces_dataset_to_latlon(ds, metric_vector_pairs):
     """
     This function is based on xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon
     but has been updated to be compatible with all xarray versions.
+    https://xmitgcm.readthedocs.io/en/latest/_modules/xmitgcm/llcreader/llcmodel.html
 
     xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon() stitches the 13 LLC
     faces into a single coherent 2D rectangular image. This is NOT interpolation
@@ -109,7 +150,9 @@ def faces_dataset_to_latlon(ds, metric_vector_pairs):
 
 
 # ---------------------------------------------------------------------------
-# Staggered → tracer interpolation
+# Staggered → tracer interpolation (LEGACY — kept for tests/reference only;
+# not used by production processors.  See the vector-handling policy in the
+# module docstring above.)
 # ---------------------------------------------------------------------------
 
 #: Maps staggered variable names to the xgcm axis along which they must be
@@ -148,7 +191,7 @@ def interp_staggered_to_tracer(fields, grid, stagger_map=None):
 
 
 # ---------------------------------------------------------------------------
-# Vector-pair metadata
+# Vector-pair metadata (LEGACY — see note above)
 # ---------------------------------------------------------------------------
 
 #: Default vector pairs: ``(x_component, y_component)``.
@@ -198,8 +241,9 @@ def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
     Parameters
     ----------
     ds_to_convert : xr.Dataset
-        Face-gridded dataset containing all *channels* (already on the tracer
-        grid with vector-pair attrs set).
+        Face-gridded dataset containing all *channels*, already on the tracer
+        grid (vector fields rotated to geographic components upstream).  Any
+        'mate' attrs are stripped so all channels use the scalar stitch path.
     channels : list[str]
         Ordered channel names to include in the output array.
     mask_dict : dict[str, DataArray]
@@ -220,6 +264,12 @@ def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
     ds_to_convert = ds_to_convert.assign(mask_dict)
     all_vars = channels + mask_names
 
+    # Strip stray 'mate' attrs (xmitgcm's llcreader sets them on raw
+    # variables) so every channel uses the SCALAR stitch path — see the
+    # vector-handling policy in the module docstring.
+    for vname in ds_to_convert.variables:
+        ds_to_convert[vname].attrs.pop('mate', None)
+
     # Face → lat-lon stitch.
     logging.info("Converting LLC faces -> rectangular lat/lon")
     ds_rect = faces_dataset_to_latlon(
@@ -227,16 +277,20 @@ def stitch_and_mask(ds_to_convert, channels, mask_dict, progress_bar=False):
         metric_vector_pairs=[],
     )
 
-    # Materialise.
+    # Materialise ALL channels + masks in ONE dask.compute.  Computing each
+    # channel separately (.values per channel) submits a separate update_graph;
+    # channels that share a lazy lineage (e.g. surface_wind's oceTAUX/oceTAUY
+    # stitch, which wind_stress_curl/ekman_* all derive from) get their shared
+    # keys re-optimized differently on each call, which the scheduler flags as
+    # "Detected different run_spec" and can deadlock.  A single compute submits
+    # the shared sub-graph once (also faster: it is computed once, not per
+    # derived channel).
     logging.info("Materialising stitched arrays")
-    if progress_bar:
-        from dask.diagnostics import ProgressBar
-        with ProgressBar():
-            mask_arrays = [ds_rect[m].values.astype(bool) for m in mask_names]
-            channel_arrays = [ds_rect[ch].values for ch in channels]
-    else:
-        mask_arrays = [ds_rect[m].values.astype(bool) for m in mask_names]
-        channel_arrays = [ds_rect[ch].values for ch in channels]
+    with ProgressBar() if progress_bar else contextlib.nullcontext():
+        computed = ds_rect[channels + mask_names].compute()
+
+    mask_arrays = [computed[m].values.astype(bool) for m in mask_names]
+    channel_arrays = [computed[ch].values for ch in channels]
 
     # Combine all masks with OR.
     combined_mask = mask_arrays[0]

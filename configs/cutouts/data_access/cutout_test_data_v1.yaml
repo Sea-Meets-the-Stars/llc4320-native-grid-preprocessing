@@ -1,0 +1,10 @@
+# Data-access config: locates the generated cutout dataset (zarr + metadata)
+# produced by the run config with run_id "cutout_test_data_v1".
+# Resolves to s3://<bucket>/<folder>/<run_id>/<dataset_name> (metadata under .../metadata/).
+# Channel order is read from the store's channel_names attr -- not listed here.
+data_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "cutouts_dataset_v2_TESTING"
+  run_id: "cutout_test_data_v1"
+  dataset_name: "cutout_dataset_creation.zarr"

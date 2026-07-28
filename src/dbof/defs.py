@@ -8,11 +8,11 @@ import pandas
 fields_dmodel = {
     "gradb2": {
         "desc": "gradb2 (gradient of buoyancy, squared)",
-        "units": "(s^4)",
+        "units": "(s^-4)",
     },
     "log_gradb": {
         "desc": "log_gradb (log10 of gradient of buoyancy, squared)",
-        "units": "log10(s^4)",
+        "units": "log10(s^-4)",
     },
     "R_ib": {
         "desc": ("R_ib (balanced Richardson number, "

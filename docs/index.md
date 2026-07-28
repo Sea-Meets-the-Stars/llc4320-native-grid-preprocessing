@@ -18,9 +18,12 @@ This project provides tools for:
 :caption: Documentation
 
 Accessing_Raw_LLC4320_Data
+Data_Organization
+Global_Maps.md
 Preprocess_LLC_Data
 Global_Maps
 Tiles
+mermaid_diagrams
 Weighted_Sampling
 Sampling_With_GradB2
 Halo_Masking
@@ -45,6 +48,7 @@ pip install -e .
 - J. Xavier Prochaska (jxp@ucsc.edu)
 - P. Cornillon
 - J. Tallman (jttallman@ucdavis.edu)
+- L. Hoffman (lhoffma2@ucsc.edu)
 
 ## License
 
