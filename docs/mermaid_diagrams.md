@@ -173,7 +173,7 @@ full provenance. No global store required.
 flowchart TD
     subgraph IN["Inputs (raw LLC4320 depth store)"]
         TS["S3 dbof/LLC4320_RAW/DEPTH/<br/>{date}.zarr (Theta, Salt, ...)"]
-        GRIDT["S3 dbof/LLC4320/grid.zarr"]
+        GRIDT["S3 dbof/LLC4320_RAW/DEPTH/grid.zarr"]
     end
 
     CLI["generate_tile.main<br/>(--i/--j or --lon/--lat, --timestamp, --property)"] --> RUN["tile_utils.run"]

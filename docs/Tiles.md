@@ -229,8 +229,8 @@ full-depth timestep stores the [DEPTH global pipeline](Global_Maps.md) uses:
 |-----|-------|
 | `s3_endpoint` | `https://s3-west.nrp-nautilus.io` |
 | `bucket` | `dbof/` |
-| `folder` | `LLC4320_v1` (per-timestep `{YYYYMMDDTHH}.zarr` stores) |
-| `grid_folder` | `LLC4320` (`grid.zarr`) |
+| `folder` | `LLC4320_RAW/DEPTH` (per-timestep `{YYYYMMDDTHH}.zarr` stores) |
+| `grid_folder` | defaults to `folder` (`grid.zarr` in `LLC4320_RAW/DEPTH`) |
 
 These stores must already have been transferred from MIT via
 `transfer_llc4320.py` — see

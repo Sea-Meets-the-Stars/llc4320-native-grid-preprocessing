@@ -120,8 +120,8 @@ def _resolve_s3_source(config_path: Path | None) -> dict:
     config_path : Path or None
         Optional legacy override.  When ``None`` (the default), the canonical
         LLC_DEPTH source is taken from ``data_sources.get_data_source("DEPTH")``
-        -- full-depth timestep stores in ``LLC4320_v1`` plus ``grid.zarr`` in
-        ``LLC4320``.  When supplied, the YAML's ``s3_source`` block is loaded
+        -- full-depth timestep stores and ``grid.zarr`` in
+        ``LLC4320_RAW/DEPTH``.  When supplied, the YAML's ``s3_source`` block is loaded
         instead (see :func:`_load_s3_config`).
 
     Returns

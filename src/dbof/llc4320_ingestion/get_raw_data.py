@@ -379,7 +379,7 @@ def get_llc_timestep_data(
     bucket : str
         S3 bucket (e.g. ``'dbof/'``).
     folder : str
-        S3 folder within the bucket (e.g. ``'LLC4320_v1'``).
+        S3 folder within the bucket (e.g. ``'LLC4320_RAW/DEPTH'``).
     date_str : str
         Date in 'YYYY-MM-DD HH:MM:SS' format.
     face_range : iterable of int or None
