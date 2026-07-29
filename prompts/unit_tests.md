@@ -832,3 +832,114 @@ re-execution via nbconvert; (4) PR rename + a reply comment on PR #26
 mapping each review bullet to the commit that addresses it.
 
 No files other than this prompt document were modified.
+
+### 2026-07-28 (Implemented the PR #26 review plan — code + notebooks)
+
+Implemented the 2nd task under PR (as Claude Fable 5), following the
+Q&A answers above. Everything below is done and verified; nothing is
+committed/pushed yet (that is left to you, as usual).
+
+#### Environment note (important)
+
+The `ocean14` env no longer has `xgcm` or the `dbof` package — all runs
+now use the **`dbof` conda env** (`conda run -n dbof`), which imports
+`dbof` from this repo's `src/`. `nbformat`/`nbclient`/`ipykernel` were
+pip-installed into it to execute notebooks. The `/tmp` test caches had
+been wiped; all four were re-downloaded (grid now 6.4 GB **including
+XC/YC**, per Q&A #6).
+
+#### New/changed tests (all in `tests/`)
+
+- **Anisotropy (Q&A #7).** `make_synthetic_grid`/`add_linear_velocity`/
+  `add_linear_tracer` gained a `dy` parameter;
+  `test_jacobian_anisotropic_grid_metrics` and
+  `test_tracer_anisotropic_grid_metrics` (each parametrized over 0° and
+  30°) use `dyC = 2.4 dxC`, so a dxC/dyC swap would be 2.4x off.
+- **Face consistency (Q&A #6).**
+  `test_tracer_real_grid_face_consistency_analytic_field`, parametrized
+  over two analytic tracers built from XC/YC: `s = sin(phi)` (zonal
+  grad 0, meridional `cos(phi)/R`) and `s = sin(lambda)cos(phi)`
+  (smooth across dateline/poles; both components non-zero). Asserted
+  **per face** with errors normalised by `1/R`.
+  - *Debug finding:* the first version failed because it included land,
+    where the grid stores fill `CS = SN = 0` (80% of land points), so
+    the rotated gradient is identically zero there. With the ocean mask
+    (`hFacC > 0`) every face has median error ~1e-4 (the float32 XC/YC
+    quantisation floor) and p95 ~5e-4. Thresholds: median < 1e-3,
+    p95 < 5e-3 (10x margin, but far below any O(1) staggering error).
+  - `load_real_llc_grid` now fetches/caches XC, YC too and
+    auto-refreshes a stale (pre-XC/YC) cache.
+- **Tracer slope rename.** `p, q` -> `slope_x, slope_y` everywhere in
+  `test_native_gradient_tracer.py` (reviewer: "is p pressure?").
+- **Depth-flip warning (Q&A #3).** `_get_depth_coord` in
+  `src/dbof/preprocessing/vertical_helpers.py` now emits a loud
+  `UserWarning` whenever it flips native negative-up `Z` to
+  positive-down depth (docstring warning added; **no CF attribute**,
+  per your answer). New `test_depth_coord_flip_emits_warning` asserts
+  the warning fires on a flip and does NOT fire on already-positive
+  input. This is the only production-code change (Q&A #4 kept
+  `native_gradient.py` untouched).
+- **Cell-centre targeting.** `test_select_at_depth_targets_cell_centres`
+  uses non-uniform cells (2/4/8/16/32 m): dead-centre targets return
+  their own cell for every cell; documents the nearest-CENTRE caveat
+  (a target at 15 m, inside the 14-30 m cell, resolves to the 10 m
+  centre of the thin cell above).
+
+#### New shared helper
+
+`tests/cgrid_schematic.py::draw_cgrid_schematic` — annotated Arakawa
+C-grid schematic with ECCO naming (tracer `(j,i)`, U `(j,i_g)` west
+face + `dxC`, V `(j_g,i)` south face + `dyC`, corner `(j_g,i_g)`) and
+the diff -> /metric -> interp -> rotate path. Used by the tracer
+notebook; addresses the "where on a gridcell do operations go" review
+point.
+
+#### Notebook rewrites (both executed end-to-end, 0 errors)
+
+`notebooks/notebooks_tests/native_gradient_tracer_tests.ipynb`
+(10 figures): conventions header defining λ=longitude/φ=latitude
+(keep-and-define per Q&A #2), both-components-returned, outputs at
+tracer centres, constant tracer = one number everywhere,
+slope_x/slope_y definitions; C-grid schematic; synthetic-grid + edge
+explanation (halo seams wrong by construction -> EDGE_MARGIN box);
+45° linear-tracer component+error maps; angle sweep; anisotropy demo
+(with markers showing what swapped metrics would give); Theta metadata
+printed from the store (`long_name: Potential Temperature`,
+`units: degC` — "SST gradients" wording, no "fronts"); **full native
+1/48° resolution regional figures** for the three issue #24 regions
+(zonal + meridional signed components + log magnitude; the ±5°
+Eastern Pacific panel shows the equatorial symmetry of ∂SST/∂y);
+per-face error bars for both analytic tracers + computed-vs-analytic
+maps on the Arctic cap face; magnitude-invariance section relabelled
+**geographic vs MODEL frame** (the old "analytic" label was wrong);
+ends by running all offline + online tests ("passed").
+
+`notebooks/notebooks_tests/vertical_helpers_tests.ipynb` (6 figures):
+top-of-notebook ⚠️ banner on the positive-down flip + UserWarning
+(printed live in Section 2); prominent statement that the DBOF store
+is the **upper-ocean 51-level / 968.6 m domain** (Q&A #5 — the "800 m"
+comment was the real domain, now labelled); definitions table for
+Z/Zl/Zp1/drF with units and "linear profile" defined; real vertical
+structure moved to Section 1 (depth profile first, per review); every
+profile figure has depth on the y-axis increasing downward; ML-mean
+section now prints the full hand computation; new cell-centre
+targeting figure (real 51 levels + the non-uniform caveat panel);
+ends by running 17 offline + 3 online tests ("passed").
+
+#### PR actions
+
+- PR #26 renamed to "Unit tests + validation notebooks for native
+  gradients (Jacobian, tracer) and vertical helpers" (Q&A #1; done via
+  REST API — `gh pr edit` hits a Projects-classic GraphQL bug).
+- A point-by-point reply to the reviewer is drafted in
+  `prompts/pr26_reply_draft.md` — **not posted yet**, since the
+  changes are not pushed; post it (or ask me to) after pushing.
+
+#### Verification
+
+- Offline: `pytest tests/test_jacobian.py tests/test_native_gradient_tracer.py
+  tests/test_vertical_helpers.py` -> **39 passed, 9 skipped**.
+- Full: `RUN_LLC_NETWORK_TESTS=1 pytest <same>` -> **48 passed**
+  (7 min; caches warm).
+- Both notebooks executed via nbclient with 0 errors and their final
+  cells running the actual test functions.
