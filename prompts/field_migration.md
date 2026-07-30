@@ -427,7 +427,57 @@ focused).
    test_mld, test_jacobian pass offline (network test + xmitgcm-dependent
    module unavailable in the validation sandbox — rerun in llcngp).
 
-**Known value changes (intentional):** buoyancy-based dimensional fields
+### Phase 2 — COMPLETE (2026-07-29)
+
+User amendments folded in: (a) ``physical_constants.py`` now has a single
+``RHO0_REFERENCE = 1000`` replacing both ``RHO0_BOUSSINESQ`` and
+``SIGMA0_REFERENCE_DENSITY`` (all downstream users updated); the G
+docstring legacy note was trimmed.  (b) New
+``calculate_fields.potential_density_anomaly`` (sigma0 = rho_theta −
+RHO0_REFERENCE); ``buoyancy_of_field`` is now built on the ANOMALY
+(b = G·sigma0/RHO0 — order 0.1 m/s², gradients unchanged), and the SURF
+``density`` output channel now carries sigma0, not sigma0 + 1000.
+
+Core Phase 2 work:
+
+1. ``calculate_additional_fields.py`` → ``calculate_fields.py``
+   (git mv; all imports across src/ and tests/ cut over directly, no
+   aliases).
+2. Deep copies removed from ``compute_velocity_jacobian`` and the
+   ``grad_*`` functions.
+3. Moved into ``calculate_fields.py`` (deleted from the depth module):
+   ``wind_stress_curl``, ``ekman_pumping``, ``ekman_transport`` (now
+   calling the single public ``geographic_wind_stress``;
+   ``_wind_stress_geographic`` and the duplicate depth-module
+   ``geographic_wind_stress`` deleted), and ``modified_okubo_weiss``
+   (suffix dropped; buoyancy gradient now from
+   ``compute_buoyancy_gradients`` — the private phys helpers are
+   redundant and slated for Phase 3 deletion).
+   ``potential_density_anomaly_3d`` deleted; ``mixed_layer_depth`` and
+   ``tile_utils`` use ``calculate_fields.potential_density_anomaly``.
+4. Consumers updated: ``depth_subsets`` (imports split across the two
+   modules; ``modified_okubo_weiss`` call site), ``surface_subsets``
+   (ekman imports; density channel → anomaly), ``tile_utils``,
+   ``tests/test_generate_tile.py``, ``tests/test_calculated_fields_at_depth.py``
+   (W* tests → ``calculate_fields.modified_okubo_weiss``), all
+   ``tests/field_migration`` files (wind-duplicate equivalence tests
+   replaced by single-copy assertions; moved functions re-homed in the
+   laziness lists).  ``docs/Fields.md`` refreshed (density channel
+   semantics, function renames).
+5. Validation (sandbox): all field_migration suites pass (59 laziness,
+   34 equivalence, golden machinery verified then baseline removed so
+   the authoritative post-Phase-2 baseline is generated locally);
+   offline portions of test_calculated_fields_at_depth, test_mld,
+   test_jacobian, test_generate_tile (19 offline), test_variable_selection
+   all pass.  Network/S3 tests must be rerun on the server.
+
+**Additional intentional value changes at Phase 2:** the ``density``
+channel is now the sigma0 anomaly (−1000 offset vs before); the
+``buoyancy`` channel is anomaly-based (−G offset vs Phase 1, ~−9.81
+m s⁻²).  All gradient/derivative-based fields are unaffected by these
+constant offsets.
+
+**Known value changes (intentional, from Phase 1):** buoyancy-based dimensional fields
 (buoyancy channel, gradb2, frontogenesis, uB/vB/wB, ertel PV terms)
 rescaled by (9.81/1000)/(9.8/1025) ≈ ×1.0260 per power of b (gradb2 and
 frontogenesis scale by its square); turner_angle shifted slightly

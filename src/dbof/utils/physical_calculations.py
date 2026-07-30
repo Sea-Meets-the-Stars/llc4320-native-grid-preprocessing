@@ -11,8 +11,8 @@ from dbof.utils.native_gradient import grad_squared  # noqa: F401
 def buoyancy_of_field(ds):
     """LEGACY — superseded; do not use in new code.
 
-    Superseded by ``calculate_additional_fields.buoyancy_of_field`` (lazy,
-    b = G rho / RHO0_BOUSSINESQ).  This version persists intermediates
+    Superseded by ``calculate_fields.buoyancy_of_field`` (lazy,
+    b = G rho / RHO0_REFERENCE).  This version persists intermediates
     into memory and uses g = 9.8, rho_ref = 1025; kept only for
     reference during the field migration (prompts/field_migration.md).
     Nothing in src/ calls it anymore.
@@ -60,7 +60,7 @@ def buoyancy_of_field(ds):
 def density_of_field(ds):
     """LEGACY — superseded; do not use in new code.
 
-    Superseded by ``calculate_additional_fields.potential_density`` (lazy).
+    Superseded by ``calculate_fields.potential_density`` (lazy).
     This version persists the result into memory.  Note the output is
     surface-referenced POTENTIAL density (JMD95 at p=0), despite the
     historical wording below.  Kept only for reference during the field

@@ -6,15 +6,15 @@ in `Global_Maps.md`; this document is the field-level reference and the
 checklist for the per-subset verification notebooks (planned; one notebook
 per subset).
 
-Function names refer to their current homes
-(`preprocessing/calculate_additional_fields.py`,
-`preprocessing/calculated_fields_at_depth.py`,
-`utils/physical_calculations.py`, and inline in the subset dispatchers).
-See `prompts/field_migration.md` for the planned consolidation into
-`calculate_fields.py` / `calculate_fields_at_depth.py` — channel names do
-not change under that migration, but buoyancy-based dimensional fields
-will rescale uniformly (~2.6%) when the single reference density
-RHO0 = 1000 kg/m³ and g = 9.81 m/s² are adopted.
+Function names refer to `preprocessing/calculate_fields.py` (single
+lazy, dimension-agnostic implementations),
+`preprocessing/calculated_fields_at_depth.py` (vertical-structure
+fields; rename to calculate_fields_at_depth.py pending in Phase 3 of
+`prompts/field_migration.md`), and inline in the subset dispatchers.
+As of Phase 2: the single reference density RHO0_REFERENCE = 1000
+kg/m³ and g = 9.81 m/s² apply throughout; buoyancy is anomaly-based
+(b = g·σ₀/ρ₀); the `density` channel is the potential density
+ANOMALY σ₀ (not σ₀ + 1000).
 
 ## Conventions
 
@@ -23,9 +23,9 @@ RHO0 = 1000 kg/m³ and g = 9.81 m/s² are adopted.
   coefficients.
 - Density is potential density: JMD95 evaluated at p = 0 with potential
   temperature (surface-referenced; equals in-situ density at the surface
-  only).
-- Buoyancy is b = g·ρ/ρ₀ (no anomaly subtraction; constant offsets vanish
-  under the gradients/derivatives that consume it).
+  only).  The output channel carries the anomaly σ₀ = ρ_θ − 1000.
+- Buoyancy is b = g·σ₀/ρ₀ (anomaly-based; constant offsets vanish under
+  the gradients/derivatives that consume it).
 - In the DEPTH pipeline, each base field is expanded across the active
   depth suffixes (`sfc`, `z25m`, `mld`, `mld_mean` by default). Bases in
   `SURFACE_ONLY_BASES` (`Eta`, `gradeta2`, `ug`, `vg`) only ever emit
@@ -76,8 +76,8 @@ All surface subsets are 2D (k = 0 input data, no depth suffixes).
 | `gradeta2` | `grad_eta2` | \|∇η\|² | (m m⁻¹)² |
 | `gradrho2` | `grad_rho2` | \|∇ρ\|² (potential density) | (kg m⁻⁴)² |
 | `turner_angle` | `turner_angle` | Tu_h = arctan(ρ₀(β²\|∇S\|² − α²\|∇θ\|²) / (−\|∇ρ\|²/ρ₀)); NaN where \|∇ρ\|² = 0 | degrees |
-| `density` | `density_of_field` → `potential_density` | Potential density, JMD95 at p = 0 | kg m⁻³ |
-| `buoyancy` | `buoyancy_of_field` | b = g·ρ/ρ₀ | m s⁻² |
+| `density` | `potential_density_anomaly` | Potential density anomaly σ₀ = ρ_θ(p=0) − 1000 | kg m⁻³ |
+| `buoyancy` | `buoyancy_of_field` | b = g·σ₀/ρ₀ | m s⁻² |
 
 ### `kinematic` (kinematic.zarr)
 
@@ -103,7 +103,7 @@ All velocity-gradient fields share one Jacobian computed per subset run.
 | `vg` | `geostrophic_velocity` | vg = (g/f)·∂η/∂x | m s⁻¹ |
 | `frontogenesis_geo` | `frontogenesis_geo` | F(ug, vg) — same formula with geostrophic velocities | s⁻⁵ |
 | `frontogenesis_ageo` | subset dispatcher (inline) | F(u, v) − F(ug, vg) | s⁻⁵ |
-| `Wstar` | `modified_okubo_weiss_3d` | Modified Okubo-Weiss W* = 4·sgn(l₂)·√(l₁² + l₂²) (Bachman 2021); QG Q-vector sensitive; NaN at the equator | s⁻² |
+| `Wstar` | `modified_okubo_weiss` | Modified Okubo-Weiss W* = 4·sgn(l₂)·√(l₁² + l₂²) (Bachman 2021); QG Q-vector sensitive; NaN at the equator | s⁻² |
 
 ---
 
@@ -201,7 +201,7 @@ Same definitions as the surface subset; `ug`/`vg` are surface-only bases
 | `frontogenesis_geo_{sfx}` | `frontogenesis_geo_3d` |
 | `frontogenesis_ageo_{sfx}` | subset dispatcher (inline) |
 | `ug_sfc`, `vg_sfc` | `geostrophic_velocity_3d` |
-| `Wstar_{sfx}` | `modified_okubo_weiss_3d` |
+| `Wstar_{sfx}` | `modified_okubo_weiss` |
 
 ### `native_fields` (native_fields.zarr)
 

@@ -33,7 +33,7 @@ import contextlib
 import dask
 import pytest
 
-import dbof.preprocessing.calculate_additional_fields as caf
+import dbof.preprocessing.calculate_fields as caf
 import dbof.preprocessing.calculated_fields_at_depth as cfad
 import dbof.utils.physical_calculations as pc
 
@@ -61,8 +61,7 @@ def no_compute_allowed():
 
 LAZY_FNS = [
     ("_density_lazy", lambda ds, g: cfad._density_lazy(ds)),
-    ("potential_density_anomaly_3d",
-     lambda ds, g: cfad.potential_density_anomaly_3d(ds)),
+
     ("buoyancy_field_3d", lambda ds, g: cfad.buoyancy_field_3d(ds)),
     ("buoyancy_frequency_squared_3d",
      lambda ds, g: cfad.buoyancy_frequency_squared_3d(ds)),
@@ -72,8 +71,6 @@ LAZY_FNS = [
      lambda ds, g: cfad.mixed_layer_heat_content(ds)),
     ("geographic_velocity_3d",
      lambda ds, g: cfad.geographic_velocity_3d(ds, g)),
-    ("geographic_wind_stress",
-     lambda ds, g: cfad.geographic_wind_stress(ds, g)),
     ("vertical_shear_magnitude_3d",
      lambda ds, g: cfad.vertical_shear_magnitude_3d(ds, g)),
     ("richardson_number_3d", lambda ds, g: cfad.richardson_number_3d(ds, g)),
@@ -82,9 +79,6 @@ LAZY_FNS = [
     ("burger_number_3d", lambda ds, g: cfad.burger_number_3d(ds, g)),
     ("balanced_richardson_number_3d",
      lambda ds, g: cfad.balanced_richardson_number_3d(ds, g)),
-    ("wind_stress_curl", lambda ds, g: cfad.wind_stress_curl(ds, g)),
-    ("ekman_pumping", lambda ds, g: cfad.ekman_pumping(ds, g)),
-    ("ekman_transport", lambda ds, g: cfad.ekman_transport(ds, g)),
     ("advective_buoyancy_fluxes_3d",
      lambda ds, g: cfad.advective_buoyancy_fluxes_3d(ds, g)),
     ("ertel_pv_terms_3d", lambda ds, g: cfad.ertel_pv_terms_3d(ds, g)),
@@ -101,8 +95,6 @@ LAZY_FNS = [
     ("strain_3d", lambda ds, g: cfad.strain_3d(ds, g)),
     ("divergence_3d", lambda ds, g: cfad.divergence_3d(ds, g)),
     ("okubo_weiss_3d", lambda ds, g: cfad.okubo_weiss_3d(ds, g)),
-    ("modified_okubo_weiss_3d",
-     lambda ds, g: cfad.modified_okubo_weiss_3d(ds, g)),
     ("compute_buoyancy_gradients_3d",
      lambda ds, g: cfad.compute_buoyancy_gradients_3d(ds, g)),
     ("frontogenesis_tendency_3d",
@@ -116,6 +108,8 @@ LAZY_FNS = [
 # Surface-module functions that must be lazy.
 LAZY_SURFACE_FNS = [
     ("potential_density", lambda ds, g: caf.potential_density(ds)),
+    ("potential_density_anomaly",
+     lambda ds, g: caf.potential_density_anomaly(ds)),
     ("buoyancy_of_field", lambda ds, g: caf.buoyancy_of_field(ds)),
     ("grad_rho2", lambda ds, g: caf.grad_rho2(ds, g)),
     ("grad_b2", lambda ds, g: caf.grad_b2(ds, g)),
@@ -143,6 +137,11 @@ LAZY_SURFACE_FNS = [
      lambda ds, g: caf.geographic_wind_stress(ds, g)),
     ("geostrophic_velocity",
      lambda ds, g: caf.geostrophic_velocity(ds, g)),
+    ("wind_stress_curl", lambda ds, g: caf.wind_stress_curl(ds, g)),
+    ("ekman_pumping", lambda ds, g: caf.ekman_pumping(ds, g)),
+    ("ekman_transport", lambda ds, g: caf.ekman_transport(ds, g)),
+    ("modified_okubo_weiss",
+     lambda ds, g: caf.modified_okubo_weiss(ds, g)),
 ]
 
 

@@ -32,6 +32,7 @@ import xarray as xr
 
 # code under test
 import dbof.preprocessing.calculated_fields_at_depth as cfad
+import dbof.preprocessing.calculate_fields as cf
 from dbof.preprocessing.physical_constants import OMEGA_EARTH
 
 
@@ -210,7 +211,7 @@ def _wstar_closed_form(okubo_weiss, q_squared, lat):
     """Reference W* from the closed-form eigenvalue combination.
 
     Independent NumPy re-implementation used to check the production
-    formula in :func:`cfad.modified_okubo_weiss_3d`.
+    formula in :func:`calculate_fields.modified_okubo_weiss`.
 
     Parameters
     ----------
@@ -242,7 +243,7 @@ def test_modified_okubo_weiss_formula_and_laziness():
     okubo_weiss = _dask_const(w_val)
     q_squared = _dask_const(qsq_val)
 
-    wstar = cfad.modified_okubo_weiss_3d(
+    wstar = cf.modified_okubo_weiss(
         ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
     )
 
@@ -272,7 +273,7 @@ def test_modified_okubo_weiss_sign_follows_okubo_weiss():
         da.from_array(w_np, chunks=w_np.shape), dims=("face", "j", "i"),
     )
 
-    wstar = cfad.modified_okubo_weiss_3d(
+    wstar = cf.modified_okubo_weiss(
         ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
     ).values
 
@@ -287,7 +288,7 @@ def test_modified_okubo_weiss_nan_at_equator():
     okubo_weiss = _dask_const(4.0e-9)
     q_squared = _dask_const(1.0e-26)
 
-    wstar = cfad.modified_okubo_weiss_3d(
+    wstar = cf.modified_okubo_weiss(
         ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
     ).values
 
@@ -307,7 +308,7 @@ def test_modified_okubo_weiss_reduces_to_okubo_weiss_when_q_zero():
     okubo_weiss = _dask_const(w_val)
     q_squared = _dask_const(0.0)
 
-    wstar = cfad.modified_okubo_weiss_3d(
+    wstar = cf.modified_okubo_weiss(
         ds_merge, grid=None, okubo_weiss=okubo_weiss, q_squared=q_squared,
     ).values
 

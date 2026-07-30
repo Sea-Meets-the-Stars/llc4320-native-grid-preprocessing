@@ -42,7 +42,7 @@ import pytest
 import dbof.preprocessing.calculated_fields_at_depth as cfad
 from dbof.preprocessing.physical_constants import (
     G,
-    RHO0_BOUSSINESQ,
+    RHO0_REFERENCE,
     MLD_INTEGRATION_DEPTH_M,
 )
 from dbof.preprocessing.vertical_helpers import _vertical_derivative
@@ -285,7 +285,7 @@ def test_mld_di_on_real_density_tile():
         # ρ from σ₀, then N² = (g/ρ₀) dρ/dz on the model levels.
         rho = ds["sigma0"] + 1000.0
         drho_dz = _vertical_derivative(rho, ds)
-        n2 = (G / RHO0_BOUSSINESQ) * drho_dz
+        n2 = (G / RHO0_REFERENCE) * drho_dz
 
         mld = cfad.mixed_layer_depth_DI(ds, n2=n2).compute()
 

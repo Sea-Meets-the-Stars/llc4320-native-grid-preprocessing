@@ -33,11 +33,6 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     balanced_richardson_number_3d,
     # -- geographic vectors --
     geographic_velocity_3d,
-    geographic_wind_stress,
-    # -- wind --
-    wind_stress_curl,
-    ekman_pumping,
-    ekman_transport,
     # -- fluxes --
     advective_buoyancy_fluxes_3d,
     # -- PV --
@@ -60,10 +55,16 @@ from dbof.preprocessing.calculated_fields_at_depth import (
     frontogenesis_tendency_3d,
     geostrophic_velocity_3d,
     frontogenesis_geo_3d,
-    modified_okubo_weiss_3d,
 )
 import dbof.utils.native_gradient as ng
-from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
+from dbof.preprocessing.calculate_fields import (
+    coriolis_parameter,
+    geographic_wind_stress,
+    wind_stress_curl,
+    ekman_pumping,
+    ekman_transport,
+    modified_okubo_weiss,
+)
 from dbof.preprocessing.vertical_helpers import _interp_w_to_tracer_levels
 
 
@@ -587,10 +588,10 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
 
     # Modified Okubo-Weiss W* — reuses the shared Jacobian.  Its buoyancy
     # gradient is the physically consistent (unscaled) one built inside
-    # modified_okubo_weiss_3d, so it is NOT the ×-scaled ``bg`` above.
+    # modified_okubo_weiss, so it is NOT the ×-scaled ``bg`` above.
     if need_wstar:
         results.update(apply_depth_strategies(
-            modified_okubo_weiss_3d(ds_merge, grid, jacobian=jac),
+            modified_okubo_weiss(ds_merge, grid, jacobian=jac),
             "Wstar", ds_merge, mld=mld, requested=requested))
 
     # Full frontogenesis tendency F(u, v)

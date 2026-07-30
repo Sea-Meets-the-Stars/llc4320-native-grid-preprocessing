@@ -322,21 +322,21 @@ def test_density_uses_canonical_compute_fn():
 
     The whole point of the PR-10 fix is that tile properties are *not* computed
     by bespoke functions in ``tile_utils``; density must be the canonical
-    ``calculated_fields_at_depth.potential_density_anomaly_3d``.
+    ``calculate_fields.potential_density_anomaly``.
     """
-    import dbof.preprocessing.calculated_fields_at_depth as cfd
+    import dbof.preprocessing.calculate_fields as cfd
 
-    assert tu.TILE_PROPERTIES["density"].compute is cfd.potential_density_anomaly_3d
+    assert tu.TILE_PROPERTIES["density"].compute is cfd.potential_density_anomaly
     # And no property-calculation helper leaked back into tile_utils.
     assert not hasattr(tu, "_compute_sigma0")
-    assert not hasattr(tu, "SIGMA0_REFERENCE_DENSITY")
+    assert not hasattr(tu, "RHO0_REFERENCE")
 
 
-def test_potential_density_anomaly_3d_value():
+def test_potential_density_anomaly_value():
     """The canonical σ₀ routine returns jmd95(S, Θ, 0) − 1000 on a tiny tile."""
-    import dbof.preprocessing.calculated_fields_at_depth as cfd
+    import dbof.preprocessing.calculate_fields as cfd
     import dbof.utils.jmd95_xgcm_implementation as jmd95
-    from dbof.preprocessing.physical_constants import SIGMA0_REFERENCE_DENSITY
+    from dbof.preprocessing.physical_constants import RHO0_REFERENCE
 
     theta = np.full((1, 2, 2, 2), 3.0, dtype=np.float32)
     salt = np.full((1, 2, 2, 2), 35.5, dtype=np.float32)
@@ -347,8 +347,8 @@ def test_potential_density_anomaly_3d_value():
         },
         coords={"face": [0], "k": np.arange(2)},
     )
-    sigma0 = cfd.potential_density_anomaly_3d(ds).compute()
-    expected = float(jmd95.jmd95(35.5, 3.0, 0.0)) - SIGMA0_REFERENCE_DENSITY
+    sigma0 = cfd.potential_density_anomaly(ds).compute()
+    expected = float(jmd95.jmd95(35.5, 3.0, 0.0)) - RHO0_REFERENCE
     assert sigma0.name == "sigma0"
     np.testing.assert_allclose(sigma0.values, expected, atol=1e-4)
 
