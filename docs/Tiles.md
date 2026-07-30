@@ -84,10 +84,10 @@ the tracer variables it needs, a compute callback returning a lazy
 | `salinity` | `Salt` | `psu` | `Salt` | passthrough |
 
 `density`'s `compute` callback **is** the canonical
-`preprocessing.calculated_fields_at_depth.potential_density_anomaly_3d` — the
+`preprocessing.calculate_fields.potential_density_anomaly` — the
 one σ₀ routine shared with the global depth pipeline (JMD95 with `p = 0` at
 every level, i.e. **potential density referenced to the surface**, minus
-`physical_constants.SIGMA0_REFERENCE_DENSITY` = 1000 kg m⁻³). No property
+`physical_constants.RHO0_REFERENCE` = 1000 kg m⁻³). No property
 *calculation* lives in `tile_utils` — the registry points `compute` at the
 single canonical function for each field; only trivial native-variable
 selection (temperature/salinity) stays in `tile_utils`. See the
@@ -249,9 +249,9 @@ re-implementing it:
 - `get_raw_data.get_llc_depth_gridfile` / `get_llc_timestep_data` — S3 readers
   (with the depth chunking and cache-disabled storage options).
 - `preprocessing.preproc_llc_core_data.process_llc4320_3d_grid` — grid extraction.
-- `preprocessing.calculated_fields_at_depth.potential_density_anomaly_3d` — the
+- `preprocessing.calculate_fields.potential_density_anomaly` — the
   single canonical σ₀ routine shared with the global depth pipeline (wraps the
-  JMD95 `_density_lazy` helper and subtracts `SIGMA0_REFERENCE_DENSITY`).
+  JMD95 `potential_density` function and subtracts `RHO0_REFERENCE`).
 - `utils.faces_to_latlon.faces_dataset_to_latlon` — face stitching (for both the
   tile→face lookup and the geographic `(lon, lat)`→`(i, j)` resolver).
 - `global_dataset_creation.iterations.mit_date_to_iteration` / `DATE_FMT` —
@@ -288,12 +288,12 @@ conda run -n ocean14 python -m pytest tests/test_generate_tile.py \
 - Materialisation happens in a single `.compute()` (wrapped in a `ProgressBar`),
   matching the one-compute pattern used by the global depth pipeline.
 - **Compute unification.** Every property calculation has exactly one
-  implementation, in `preprocessing.calculated_fields_at_depth`; the tile
+  implementation, in `preprocessing.calculate_fields`; the tile
   registry's `compute` callbacks point straight at those canonical functions
   (density → `potential_density_anomaly_3d`), and `tile_utils` holds no field
   math of its own. `mixed_layer_depth` was refactored to call the same
   `potential_density_anomaly_3d`, so the `ρ − 1000` offset is defined once
-  (`physical_constants.SIGMA0_REFERENCE_DENSITY`). The remaining generalization
+  (`physical_constants.RHO0_REFERENCE`). The remaining generalization
   — organizing all calculated fields (tracers *and* vectors) behind a per-field
   class and driving both pipelines through one dispatch — is the follow-up
   `tile_fields` work.

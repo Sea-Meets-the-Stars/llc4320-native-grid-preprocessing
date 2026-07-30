@@ -1,18 +1,12 @@
 """
-Equivalence tests: scalar gradient fields (surface vs _3d implementations).
+Equivalence tests: scalar gradient fields (2D vs 3D input).
 
-MIGRATION SCAFFOLDING — see ``prompts/field_migration.md`` (Phase 0).
-Asserts each ``grad_*2`` surface function equals the k=0 slice of its
-``_3d`` counterpart, and that the two grad-squared implementations
-(``physical_calculations.grad_squared`` on components vs the depth
-module's field-level ``_grad_squared_3d``) are numerically identical —
-certifying the consolidation to ONE ``ng.calculate_native_gradient_tracer``
-+ ONE ``ng.grad_squared`` (Phase 1.3/1.4).
-
-``grad_rho2`` and ``grad_b2`` also certify that the eager
-(``physical_calculations``, ``.persist()``-based) and lazy
-(``_density_lazy``-based) density/buoyancy routes agree numerically, so
-removing ``.persist()`` cannot change values.
+MIGRATION SCAFFOLDING — see ``prompts/field_migration.md``.
+Since Phase 3 there is ONE implementation per gradient field; these
+tests certify it is dimension-agnostic — ``fn(ds2d)`` equals the k=0
+slice of ``fn(ds3d)`` — and that the single
+``ng.calculate_native_gradient_tracer`` + ``ng.grad_squared`` two-step
+workflow underpins every grad_*2 field.
 
 Running (local machine — synthetic data only, no network)::
 
@@ -47,7 +41,7 @@ def test_grad_salt2_equivalence(ds2d, grid2d, ds3d, grid3d):
 
 
 def test_grad_eta2_equivalence(ds2d, grid2d, ds3d, grid3d):
-    """grad_eta2 is defined verbatim in BOTH modules — must agree."""
+    """grad_eta2 (inherently 2D inputs) identical on 2D and 3D datasets."""
     assert_k0_equal(
         caf.grad_eta2(ds2d, grid2d),
         caf.grad_eta2(ds3d, grid3d),
@@ -55,7 +49,7 @@ def test_grad_eta2_equivalence(ds2d, grid2d, ds3d, grid3d):
 
 
 def test_grad_rho2_equivalence(ds2d, grid2d, ds3d, grid3d):
-    """Eager (persist) vs lazy density routes give identical |grad rho|^2."""
+    """Single grad_rho2 on 2D vs 3D input (k=0 match)."""
     assert_k0_equal(
         caf.grad_rho2(ds2d, grid2d),
         caf.grad_rho2(ds3d, grid3d),
@@ -63,12 +57,7 @@ def test_grad_rho2_equivalence(ds2d, grid2d, ds3d, grid3d):
 
 
 def test_grad_b2_equivalence(ds2d, grid2d, ds3d, grid3d):
-    """Surface (buoyancy_of_field*1e3) vs depth (buoyancy_field_3d) agree.
-
-    Both legacy scaled-buoyancy routes reduce to b = 9.8*rho/1025, so
-    |grad b|^2 must match exactly.  (The migration replaces both with
-    b = 9.81*rho/1000; the golden-regression test pins that rescaling.)
-    """
+    """Single grad_b2 on 2D vs 3D input (k=0 match)."""
     assert_k0_equal(
         caf.grad_b2(ds2d, grid2d),
         caf.grad_b2(ds3d, grid3d),

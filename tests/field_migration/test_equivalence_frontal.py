@@ -1,5 +1,5 @@
 """
-Equivalence tests: frontal structure & frontogenesis (surface vs _3d).
+Equivalence tests: frontal structure & frontogenesis (2D vs 3D input).
 
 MIGRATION SCAFFOLDING — see ``prompts/field_migration.md`` (Phase 0).
 Covers turner_angle, buoyancy gradients, frontogenesis (kinematic and
@@ -8,9 +8,8 @@ geostrophic), and geostrophic velocity.
 Phase 1 note: the pinned-ratio test that documented the legacy
 two-buoyancy inconsistency (phys b = 9.81*rho/1000 vs scaled
 b = 9.8*rho/1025, constant factor 1.02566) was deleted when Phase 1
-unified both routes onto b = G*rho/RHO0_REFERENCE — its replacement
-``test_phys_route_now_matches_scaled_route`` asserts the two routes are
-now IDENTICAL.
+unified both routes onto the single buoyancy definition; Phase 3 then
+deleted the phys helpers outright (see ``test_phys_helpers_deleted``).
 
 Running (local machine — synthetic data only, no network)::
 
@@ -31,9 +30,7 @@ from conftest import assert_k0_equal
 def test_turner_angle_equivalence(ds2d, grid2d, ds3d, grid3d):
     """Turner angle values match at k=0.
 
-    The surface version uses np.where (drops xr coords), the 3D version
-    xr.where — values must nonetheless be identical.  The migration keeps
-    the xr.where (lazy, coord-preserving) form.
+    Single implementation (lazy xr.where form) on 2D vs 3D input.
     """
     assert_k0_equal(
         caf.turner_angle(ds2d, grid2d),
@@ -54,11 +51,7 @@ def test_turner_angle_injection_consistent(ds2d, grid2d):
 
 
 def test_buoyancy_gradients_equivalence(ds2d, grid2d, ds3d, grid3d):
-    """compute_buoyancy_gradients vs compute_buoyancy_gradients_3d.
-
-    Both legacy scaled routes are b = 9.8*rho/1025; components must match
-    at k=0 (zonal and meridional).
-    """
+    """Single compute_buoyancy_gradients on 2D vs 3D input (k=0 match)."""
     bg2 = caf.compute_buoyancy_gradients(ds2d, grid2d)
     bg3 = caf.compute_buoyancy_gradients(ds3d, grid3d)
     assert_k0_equal(bg2.zonal, bg3.zonal, name="buoyancy_gradients.zonal")

@@ -523,6 +523,33 @@ and the _density_lazy / buoyancy_field_3d wrappers — ALL identical
    (post-Phase-3 values == post-Phase-2 values; nothing numerical changed
    in this phase, by construction and by the verification above).
 
+### Phase 4 — COMPLETE (2026-07-29)
+
+Consumer sweep (most consumers were cut over live during Phases 2–3, so
+this phase was the final grep-and-fix across everything else):
+
+1. **Notebooks** (``notebooks/notebooks_dev/``): ``Rib_field.ipynb``,
+   ``Wstar_field.ipynb``, ``mld_depth.ipynb`` updated — module renames,
+   suffix-free function names, functions that moved modules
+   (``modified_okubo_weiss``, ``okubo_weiss_parameter`` now via a
+   ``calculate_fields as caf`` import added next to the ``cfad`` import),
+   and ``RHO0_REFERENCE``.  JSON validated after editing.  NOTE: the
+   notebooks were text-updated, not re-executed (they need real data);
+   stored outputs still reflect legacy constants — re-run when convenient.
+2. **Docs**: ``mermaid_diagrams.md``, ``Sampling_With_GradB2.md``,
+   ``Tiles.md`` (module/function/constant references).
+3. **Migration-test docstrings** refreshed to describe the
+   single-implementation world (the tests themselves were already
+   re-pointed in Phase 3).
+4. Stale ``__pycache__`` artifacts removed.  ``slurm/``, ``configs/``,
+   ``dev/`` sources verified clean.  ``src/*.egg-info/SOURCES.txt`` left
+   (build artifact; regenerates on next install).  Historical
+   ``prompts/*.md`` task documents intentionally left untouched as
+   project history.
+5. Validation: full field_migration suite green (84 tests).  Remaining
+   server-side items: full suite in llcngp, S3/network tests, golden
+   baseline generation + commit.
+
 **Known value changes (intentional, from Phase 1):** buoyancy-based dimensional fields
 (buoyancy channel, gradb2, frontogenesis, uB/vB/wB, ertel PV terms)
 rescaled by (9.81/1000)/(9.8/1025) ≈ ×1.0260 per power of b (gradb2 and

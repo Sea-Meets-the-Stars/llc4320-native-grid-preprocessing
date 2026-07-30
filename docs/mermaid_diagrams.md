@@ -188,7 +188,7 @@ flowchart TD
     GRIDT --> LOADG
     TS --> LOADT
 
-    LOADT --> COMPUTE["compute_tile_property<br/>TILE_PROPERTIES[prop].compute(...)<br/>e.g. calculated_fields_at_depth.<br/>potential_density_anomaly_3d<br/>→ single .compute()"]
+    LOADT --> COMPUTE["compute_tile_property<br/>TILE_PROPERTIES[prop].compute(...)<br/>e.g. calculate_fields.<br/>potential_density_anomaly<br/>→ single .compute()"]
 
     COMPUTE --> BUILD["_build_output_dataset<br/>field + XC/YC/Z coords +<br/>provenance attrs (timestamp,<br/>iteration, tile_index, face_index,<br/>property, git_commit)"]
     LOADG --> BUILD

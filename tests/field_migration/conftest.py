@@ -2,9 +2,12 @@
 Shared fixtures for the field-migration safety-net tests.
 
 MIGRATION SCAFFOLDING — see ``prompts/field_migration.md`` (Phase 0).
-These tests verify that consolidating ``calculate_fields.py``
-and ``calculate_fields_at_depth.py`` into ``calculate_fields.py`` /
-``calculate_fields_at_depth.py`` is faithful.  They are not long-term
+These tests verify the consolidation of the legacy
+``calculate_additional_fields.py`` / ``calculated_fields_at_depth.py``
+pair into ``calculate_fields.py`` (dimension-agnostic) +
+``calculate_fields_at_depth.py`` (vertical structure) is faithful, and
+that the single implementations are dimension-agnostic and lazy.
+They are not long-term
 tests; the ``tests/field_migration/`` directory is deleted (or selectively
 promoted) at Phase 5.
 
@@ -32,7 +35,7 @@ provided:
 The k=0 level of every 3D variable equals the corresponding 2D variable
 EXACTLY, so equivalence tests can assert::
 
-    surface_fn(ds2d, grid2d) == fn_3d(ds3d, grid3d).isel(k=0)
+    fn(ds2d, grid2d) == fn(ds3d, grid3d).isel(k=0)
 
 Theta decreases and Salt increases with depth, giving a stable, stably
 stratified water column (sigma0 increasing with depth) so MLD/N²-based
