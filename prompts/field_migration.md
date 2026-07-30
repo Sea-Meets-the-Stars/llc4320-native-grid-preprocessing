@@ -587,10 +587,17 @@ this phase was the final grep-and-fix across everything else):
       ``RUN_LLC_NETWORK_TESTS=1`` where applicable, incl.
       ``test_balanced_richardson_against_real_tile`` and the
       ``test_generate_tile`` S3 round-trips
-- [ ] One real production tile through BOTH pipelines (SURF + DEPTH)
-      as the final spot-check; expect the documented value changes
-      (buoyancy-family rescale; density channel now sigma0; buoyancy
-      channel anomaly-based) and nothing else
+- [ ] One real date through BOTH pipelines (SURF + DEPTH) as the final
+      spot-check — use ``dev/verify_subsets_real_data.py``::
+
+          python dev/verify_subsets_real_data.py \\
+              --date "2012-01-15 12:00:00" --save-preview
+
+      It runs the exact production path (grid setup, S3/OSN load,
+      compute fns, stitch, land mask) and reports per-channel stats +
+      the production validity guard, without writing zarr.  Expect the
+      documented value changes (buoyancy-family rescale; density channel
+      now sigma0; buoyancy channel anomaly-based) and nothing else.
 - [ ] Re-execute the three dev notebooks (Rib_field, Wstar_field,
       mld_depth) so stored outputs reflect the unified constants
 
