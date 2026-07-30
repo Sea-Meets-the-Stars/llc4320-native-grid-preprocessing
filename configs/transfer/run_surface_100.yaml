@@ -8,8 +8,10 @@
 #   dbof/LLC4320_RAW/SURFACE/grid.zarr          — static grid variables (once)
 #   dbof/LLC4320_RAW/SURFACE/{YYYYMMDDTHH}.zarr — time-varying fields (per-date)
 #
+# Transfer 100 timesteps from MIT to our S3 bucket. RUN DATE: 29 JUL 2026
+#
 # Usage:
-#   transfer-timestep --config configs/transfer/run_surface.yaml --init-store
+#   transfer-timestep --config configs/transfer/run_surface_100.yaml --init-store
 # ---------------------------------------------------------------------------
 
 run:
