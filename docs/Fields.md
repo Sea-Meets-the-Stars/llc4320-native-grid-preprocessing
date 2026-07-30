@@ -7,15 +7,15 @@ checklist for the per-subset verification notebooks (planned; one notebook
 per subset).
 
 Function names refer to `preprocessing/calculate_fields.py` (single
-lazy, dimension-agnostic implementations),
-`preprocessing/calculate_fields_at_depth.py` (vertical-structure
-fields only), and inline in the subset dispatchers.  As of Phase 3 there
-is exactly ONE implementation per field — the `_3d` suffixes are gone;
-the same `calculate_fields` functions serve 2D and 3D inputs.
-As of Phase 2: the single reference density RHO0_REFERENCE = 1000
-kg/m³ and g = 9.81 m/s² apply throughout; buoyancy is anomaly-based
-(b = g·σ₀/ρ₀); the `density` channel is the potential density
-ANOMALY σ₀ (not σ₀ + 1000).
+lazy, dimension-agnostic implementations — the same functions serve 2D
+and 3D inputs), `preprocessing/calculate_fields_at_depth.py`
+(vertical-structure fields only), and inline in the subset dispatchers.
+There is exactly ONE implementation per field (field migration,
+`prompts/field_migration.md` — complete).  Conventions: the single
+reference density RHO0_REFERENCE = 1000 kg/m³ and g = 9.81 m/s² apply
+throughout; buoyancy is anomaly-based (b = g·σ₀/ρ₀); the `density`
+channel is the potential density ANOMALY σ₀ (not σ₀ + 1000).  These
+invariants are pinned by `tests/test_calculate_fields.py`.
 
 ## Conventions
 

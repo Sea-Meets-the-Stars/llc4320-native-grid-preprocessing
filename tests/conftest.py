@@ -51,3 +51,44 @@ def zarr_reader():
     except Exception as exc:
         pytest.skip(f"cutout store unreachable (s3://{bucket}/{folder}/{run_id}): {exc}")
     return reader
+
+
+# ---------------------------------------------------------------------------
+# Synthetic LLC fixtures (see tests/synthetic_llc.py)
+# ---------------------------------------------------------------------------
+# Deterministic dask-backed 2D/3D datasets on the full 13-face topology,
+# with k=0 of the 3D dataset equal to the 2D dataset exactly.  Used by
+# tests/test_calculate_fields.py (dimension-agnosticism + laziness) and
+# available to any future field test.
+
+# Non-trivial grid rotation angle (~26.6 deg); cs^2 + sn^2 = 1.
+_SYNTH_CS = 0.8944271909999159
+_SYNTH_SN = 0.4472135954999579
+
+
+@pytest.fixture(scope="session")
+def ds2d():
+    """Dask-backed surface-style synthetic ds_merge."""
+    import synthetic_llc
+    return synthetic_llc.build_ds2d(cs=_SYNTH_CS, sn=_SYNTH_SN)
+
+
+@pytest.fixture(scope="session")
+def ds3d():
+    """Dask-backed depth-style synthetic ds_merge; k=0 equals ds2d."""
+    import synthetic_llc
+    return synthetic_llc.build_ds3d(cs=_SYNTH_CS, sn=_SYNTH_SN)
+
+
+@pytest.fixture(scope="session")
+def grid2d(ds2d):
+    """Production xgcm grid (LLC face connections) for ds2d."""
+    from dbof.llc4320_ingestion.grid import set_xgcm_grid
+    return set_xgcm_grid(ds2d, use_connections=True)
+
+
+@pytest.fixture(scope="session")
+def grid3d(ds3d):
+    """Production xgcm grid (LLC face connections) for ds3d."""
+    from dbof.llc4320_ingestion.grid import set_xgcm_grid
+    return set_xgcm_grid(ds3d, use_connections=True)

@@ -550,6 +550,50 @@ this phase was the final grep-and-fix across everything else):
    server-side items: full suite in llcngp, S3/network tests, golden
    baseline generation + commit.
 
+### Phase 5 — COMPLETE (2026-07-29)
+
+1. **Promoted to the permanent suite** (the lasting value of the
+   migration scaffolding):
+   - ``tests/synthetic_llc.py`` — the reusable synthetic 13-face LLC
+     builders (``build_ds2d`` / ``build_ds3d`` with the k=0 == 2D
+     contract, plus ``assert_k0_equal``), with the hard-won fixture
+     subtleties documented (numpy coords, nk+1 interface levels).
+   - Session fixtures ``ds2d``/``ds3d``/``grid2d``/``grid3d`` in
+     ``tests/conftest.py``.
+   - ``tests/test_calculate_fields.py`` — 68 tests pinning the two
+     architectural invariants: dimension-agnosticism (every
+     ``calculate_fields`` function: ``fn(ds2d) == fn(ds3d).isel(k=0)``)
+     and laziness (zero task execution during graph construction, both
+     modules), plus injection-kwarg inertness and the single
+     grad-squared implementation.
+2. **Deleted** ``tests/field_migration/`` (equivalence/laziness coverage
+   superseded by the promoted suite; the golden-regression harness had
+   served its cross-phase purpose; recoverable from git history).
+3. Old module paths were already gone (git mv in Phases 2–3; no aliases
+   ever existed).  The legacy ``physical_calculations.density_of_field``
+   / ``buoyancy_of_field`` are KEPT per the Phase 1 decision (marked
+   LEGACY, unused by src/).
+4. Docs finalised (Fields.md intro now describes the completed state and
+   points at the permanent contract tests).
+5. Validation (sandbox): tests/test_calculate_fields.py 68 passed;
+   test_calculate_fields_at_depth + test_mld + test_jacobian offline
+   23 passed.
+
+### Server-side handoff checklist (the only remaining items)
+
+- [ ] Full suite in the project env: ``conda activate llcngp``,
+      ``python -m pytest tests/``
+- [ ] Network tests: ``pytest --run-integration`` /
+      ``RUN_LLC_NETWORK_TESTS=1`` where applicable, incl.
+      ``test_balanced_richardson_against_real_tile`` and the
+      ``test_generate_tile`` S3 round-trips
+- [ ] One real production tile through BOTH pipelines (SURF + DEPTH)
+      as the final spot-check; expect the documented value changes
+      (buoyancy-family rescale; density channel now sigma0; buoyancy
+      channel anomaly-based) and nothing else
+- [ ] Re-execute the three dev notebooks (Rib_field, Wstar_field,
+      mld_depth) so stored outputs reflect the unified constants
+
 **Known value changes (intentional, from Phase 1):** buoyancy-based dimensional fields
 (buoyancy channel, gradb2, frontogenesis, uB/vB/wB, ertel PV terms)
 rescaled by (9.81/1000)/(9.8/1025) ≈ ×1.0260 per power of b (gradb2 and
