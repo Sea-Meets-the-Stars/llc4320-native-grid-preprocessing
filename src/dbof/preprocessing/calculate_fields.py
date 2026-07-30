@@ -784,7 +784,7 @@ def frontogenesis_geo(ds_merge, grid, *, ug=None, vg=None,
 def wind_stress_curl(ds_merge, grid):
     """Lazy wind stress curl.
 
-    Moved from ``calculated_fields_at_depth`` during the field migration —
+    Moved from ``calculate_fields_at_depth`` during the field migration —
     inherently 2D inputs, dimension-agnostic code.
 
     Parameters
@@ -811,7 +811,7 @@ def wind_stress_curl(ds_merge, grid):
 def ekman_pumping(ds_merge, grid, rho0=RHO0_REFERENCE):
     """Lazy Ekman pumping w_E = curl(tau) / (rho0 f).
 
-    Moved from ``calculated_fields_at_depth`` during the field migration.
+    Moved from ``calculate_fields_at_depth`` during the field migration.
 
     Parameters
     ----------
@@ -838,7 +838,7 @@ def ekman_pumping(ds_merge, grid, rho0=RHO0_REFERENCE):
 def ekman_transport(ds_merge, grid, rho0=RHO0_REFERENCE):
     """Lazy Ekman transport (u_E, v_E) — depth-integrated tau / (rho0 f).
 
-    Moved from ``calculated_fields_at_depth`` during the field migration;
+    Moved from ``calculate_fields_at_depth`` during the field migration;
     now uses the single public :func:`geographic_wind_stress` (the private
     ``_wind_stress_geographic`` duplicate was deleted).
     https://sam.ucsd.edu/ltalley/sio210/dynamics_ekman/index.html
@@ -888,7 +888,7 @@ def modified_okubo_weiss(ds_merge, grid, *, jacobian=None,
         Q1 = -(du/dx db/dx + dv/dx db/dy)
         Q2 = -(du/dy db/dx + dv/dy db/dy),   |Q|^2 = Q1^2 + Q2^2.
 
-    Moved (suffix-free) from ``calculated_fields_at_depth`` during the
+    Moved (suffix-free) from ``calculate_fields_at_depth`` during the
     field migration: horizontal math only, so dimension-agnostic.  The
     buoyancy gradient now comes from the single
     :func:`compute_buoyancy_gradients` (the private phys-gradient helper

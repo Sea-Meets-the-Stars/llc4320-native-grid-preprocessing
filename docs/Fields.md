@@ -8,9 +8,10 @@ per subset).
 
 Function names refer to `preprocessing/calculate_fields.py` (single
 lazy, dimension-agnostic implementations),
-`preprocessing/calculated_fields_at_depth.py` (vertical-structure
-fields; rename to calculate_fields_at_depth.py pending in Phase 3 of
-`prompts/field_migration.md`), and inline in the subset dispatchers.
+`preprocessing/calculate_fields_at_depth.py` (vertical-structure
+fields only), and inline in the subset dispatchers.  As of Phase 3 there
+is exactly ONE implementation per field — the `_3d` suffixes are gone;
+the same `calculate_fields` functions serve 2D and 3D inputs.
 As of Phase 2: the single reference density RHO0_REFERENCE = 1000
 kg/m³ and g = 9.81 m/s² apply throughout; buoyancy is anomaly-based
 (b = g·σ₀/ρ₀); the `density` channel is the potential density
@@ -116,7 +117,7 @@ Base fields expand across depth suffixes (default: `_sfc`, `_z25m`,
 
 | Channel | Source / function | Definition | Units |
 |---|---|---|---|
-| `N2_{sfx}` | `buoyancy_frequency_squared_3d` | N² = (g/ρ₀)·∂ρ/∂z (positive-down z convention) | s⁻² |
+| `N2_{sfx}` | `buoyancy_frequency_squared` | N² = (g/ρ₀)·∂ρ/∂z (positive-down z convention) | s⁻² |
 | `mixed_layer_depth` (extra) | `mixed_layer_depth` | Threshold MLD: deepest z where σ₀ − σ₀(10 m) ≤ 0.03 kg m⁻³ (Bodner et al.); positive metres | m |
 | `ml_heat_content` (extra) | `mixed_layer_heat_content` | Q_ml = ∫₀^MLD cp·ρ₀·θ dz | J m⁻² |
 
@@ -127,33 +128,33 @@ exists as a function but is not currently an output channel.
 
 | Channel | Source / function | Definition | Units |
 |---|---|---|---|
-| `vertical_shear_{sfx}` | `vertical_shear_magnitude_3d` | \|S\| = √(uz² + vz²), geographic components | s⁻¹ |
-| `Ri_{sfx}` | `richardson_number_3d` | Ri = N²/(uz² + vz²); N² floored at 0; NaN where shear² = 0 | — |
+| `vertical_shear_{sfx}` | `vertical_shear_magnitude` | \|S\| = √(uz² + vz²), geographic components | s⁻¹ |
+| `Ri_{sfx}` | `richardson_number` | Ri = N²/(uz² + vz²); N² floored at 0; NaN where shear² = 0 | — |
 
 ### `mixing_parameters` (mixing_parameters.zarr)
 
 | Channel | Source / function | Definition | Units |
 |---|---|---|---|
-| `Fr_{sfx}` | `froude_number_3d` | Fr = speed/(N·MLD); NaN where N·MLD ≤ 0 | — |
-| `Ro_{sfx}` | `rossby_number_3d` | Ro = ζ/f | — |
-| `Bu_{sfx}` | `burger_number_3d` | Bu = (Ro/Fr)²; NaN where Fr = 0 | — |
-| `R_ib_{sfx}` | `balanced_richardson_number_3d` | R_ib = N²f²/\|∇_h b\|² (Thomas, Tandon & Mahadevan 2013); N² floored at 0; NaN where \|∇_h b\|² = 0 | — |
+| `Fr_{sfx}` | `froude_number` | Fr = speed/(N·MLD); NaN where N·MLD ≤ 0 | — |
+| `Ro_{sfx}` | `rossby_number` | Ro = ζ/f | — |
+| `Bu_{sfx}` | `burger_number` | Bu = (Ro/Fr)²; NaN where Fr = 0 | — |
+| `R_ib_{sfx}` | `balanced_richardson_number` | R_ib = N²f²/\|∇_h b\|² (Thomas, Tandon & Mahadevan 2013); N² floored at 0; NaN where \|∇_h b\|² = 0 | — |
 
 ### `ertel_pv` (ertel_pv.zarr)
 
 | Channel | Source / function | Definition | Units |
 |---|---|---|---|
-| `ertel_pv_{sfx}` | `ertel_pv_terms_3d` | q = (ζ + f)·b_z + (w_y − v_z)·b_x + (u_z − w_x)·b_y | s⁻³ |
-| `ertel_pv_vertical_{sfx}` | `ertel_pv_terms_3d` | q_vert = (ζ + f)·b_z | s⁻³ |
-| `ertel_pv_tilt_{sfx}` | `ertel_pv_terms_3d` | q_tilt = (w_y − v_z)·b_x + (u_z − w_x)·b_y | s⁻³ |
+| `ertel_pv_{sfx}` | `ertel_pv_terms` | q = (ζ + f)·b_z + (w_y − v_z)·b_x + (u_z − w_x)·b_y | s⁻³ |
+| `ertel_pv_vertical_{sfx}` | `ertel_pv_terms` | q_vert = (ζ + f)·b_z | s⁻³ |
+| `ertel_pv_tilt_{sfx}` | `ertel_pv_terms` | q_tilt = (w_y − v_z)·b_x + (u_z − w_x)·b_y | s⁻³ |
 
 ### `buoyancy_fluxes` (buoyancy_fluxes.zarr)
 
 | Channel | Source / function | Definition | Units |
 |---|---|---|---|
-| `uB_{sfx}` | `advective_buoyancy_fluxes_3d` | u·b (geographic u, W interpolated to tracer levels for wB) | m² s⁻³ |
-| `vB_{sfx}` | `advective_buoyancy_fluxes_3d` | v·b | m² s⁻³ |
-| `wB_{sfx}` | `advective_buoyancy_fluxes_3d` | w·b | m² s⁻³ |
+| `uB_{sfx}` | `advective_buoyancy_fluxes` | u·b (geographic u, W interpolated to tracer levels for wB) | m² s⁻³ |
+| `vB_{sfx}` | `advective_buoyancy_fluxes` | v·b | m² s⁻³ |
+| `wB_{sfx}` | `advective_buoyancy_fluxes` | w·b | m² s⁻³ |
 
 ### `energetics` (energetics.zarr)
 
@@ -169,12 +170,12 @@ DEPTH variant has no `density`/`buoyancy` output channels.
 
 | Channel | Source / function |
 |---|---|
-| `gradb2_{sfx}` | `grad_b2_3d` |
-| `gradtheta2_{sfx}` | `grad_theta2_3d` |
-| `gradsalt2_{sfx}` | `grad_salt2_3d` |
-| `gradrho2_{sfx}` | `grad_rho2_3d` |
+| `gradb2_{sfx}` | `grad_b2` |
+| `gradtheta2_{sfx}` | `grad_theta2` |
+| `gradsalt2_{sfx}` | `grad_salt2` |
+| `gradrho2_{sfx}` | `grad_rho2` |
 | `gradeta2_sfc` | `grad_eta2` |
-| `turner_angle_{sfx}` | `turner_angle_3d` |
+| `turner_angle_{sfx}` | `turner_angle` |
 
 ### `kinematic` (kinematic.zarr)
 
@@ -183,11 +184,11 @@ each suffix; `coriolis_f` is an extra (2D) channel.
 
 | Channel | Source / function |
 |---|---|
-| `relative_vorticity_{sfx}` | `relative_vorticity_3d` |
-| `strain_n_{sfx}`, `strain_s_{sfx}`, `strain_mag_{sfx}` | `strain_3d` |
-| `divergence_{sfx}` | `divergence_3d` |
-| `rossby_number_{sfx}` | `rossby_number_3d` |
-| `okubo_weiss_{sfx}` | `okubo_weiss_3d` |
+| `relative_vorticity_{sfx}` | `relative_vorticity` |
+| `strain_n_{sfx}`, `strain_s_{sfx}`, `strain_mag_{sfx}` | `strain` |
+| `divergence_{sfx}` | `divergence` |
+| `rossby_number_{sfx}` | `rossby_number` |
+| `okubo_weiss_{sfx}` | `okubo_weiss_parameter` |
 | `coriolis_f` (extra) | `coriolis_parameter` |
 
 ### `frontogenesis` (frontogenesis.zarr)
@@ -197,10 +198,10 @@ Same definitions as the surface subset; `ug`/`vg` are surface-only bases
 
 | Channel | Source / function |
 |---|---|
-| `frontogenesis_tendency_{sfx}` | `frontogenesis_tendency_3d` |
-| `frontogenesis_geo_{sfx}` | `frontogenesis_geo_3d` |
+| `frontogenesis_tendency_{sfx}` | `frontogenesis_tendency` |
+| `frontogenesis_geo_{sfx}` | `frontogenesis_geo` |
 | `frontogenesis_ageo_{sfx}` | subset dispatcher (inline) |
-| `ug_sfc`, `vg_sfc` | `geostrophic_velocity_3d` |
+| `ug_sfc`, `vg_sfc` | `geostrophic_velocity` |
 | `Wstar_{sfx}` | `modified_okubo_weiss` |
 
 ### `native_fields` (native_fields.zarr)
@@ -211,7 +212,7 @@ Model variables at each depth suffix; `Eta` is surface-only.
 |---|---|
 | `Theta_{sfx}`, `Salt_{sfx}` | model output |
 | `Eta_sfc` | model output |
-| `U_{sfx}`, `V_{sfx}` | `geographic_velocity_3d` |
+| `U_{sfx}`, `V_{sfx}` | `geographic_velocity` |
 | `W_{sfx}` | model output (interpolated to tracer levels) |
 
 ### `surface_wind` (surface_wind.zarr) — surface_only

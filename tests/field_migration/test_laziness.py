@@ -34,7 +34,7 @@ import dask
 import pytest
 
 import dbof.preprocessing.calculate_fields as caf
-import dbof.preprocessing.calculated_fields_at_depth as cfad
+import dbof.preprocessing.calculate_fields_at_depth as cfad
 import dbof.utils.physical_calculations as pc
 
 
@@ -60,49 +60,40 @@ def no_compute_allowed():
 # ---------------------------------------------------------------------------
 
 LAZY_FNS = [
-    ("_density_lazy", lambda ds, g: cfad._density_lazy(ds)),
-
-    ("buoyancy_field_3d", lambda ds, g: cfad.buoyancy_field_3d(ds)),
-    ("buoyancy_frequency_squared_3d",
-     lambda ds, g: cfad.buoyancy_frequency_squared_3d(ds)),
+    # -- vertical-structure fields (calculate_fields_at_depth) --
+    ("buoyancy_frequency_squared",
+     lambda ds, g: cfad.buoyancy_frequency_squared(ds)),
     ("mixed_layer_depth", lambda ds, g: cfad.mixed_layer_depth(ds)),
     ("mixed_layer_depth_DI", lambda ds, g: cfad.mixed_layer_depth_DI(ds)),
     ("mixed_layer_heat_content",
      lambda ds, g: cfad.mixed_layer_heat_content(ds)),
-    ("geographic_velocity_3d",
-     lambda ds, g: cfad.geographic_velocity_3d(ds, g)),
-    ("vertical_shear_magnitude_3d",
-     lambda ds, g: cfad.vertical_shear_magnitude_3d(ds, g)),
-    ("richardson_number_3d", lambda ds, g: cfad.richardson_number_3d(ds, g)),
-    ("froude_number_3d", lambda ds, g: cfad.froude_number_3d(ds, g)),
-    ("rossby_number_3d", lambda ds, g: cfad.rossby_number_3d(ds, g)),
-    ("burger_number_3d", lambda ds, g: cfad.burger_number_3d(ds, g)),
-    ("balanced_richardson_number_3d",
-     lambda ds, g: cfad.balanced_richardson_number_3d(ds, g)),
-    ("advective_buoyancy_fluxes_3d",
-     lambda ds, g: cfad.advective_buoyancy_fluxes_3d(ds, g)),
-    ("ertel_pv_terms_3d", lambda ds, g: cfad.ertel_pv_terms_3d(ds, g)),
-    ("grad_theta2_3d", lambda ds, g: cfad.grad_theta2_3d(ds, g)),
-    ("grad_salt2_3d", lambda ds, g: cfad.grad_salt2_3d(ds, g)),
-    ("grad_rho2_3d", lambda ds, g: cfad.grad_rho2_3d(ds, g)),
-    ("grad_b2_3d", lambda ds, g: cfad.grad_b2_3d(ds, g)),
-    ("grad_eta2", lambda ds, g: cfad.grad_eta2(ds, g)),
-    ("turner_angle_3d", lambda ds, g: cfad.turner_angle_3d(ds, g)),
-    ("compute_velocity_jacobian_3d",
-     lambda ds, g: cfad.compute_velocity_jacobian_3d(ds, g)),
-    ("relative_vorticity_3d",
-     lambda ds, g: cfad.relative_vorticity_3d(ds, g)),
-    ("strain_3d", lambda ds, g: cfad.strain_3d(ds, g)),
-    ("divergence_3d", lambda ds, g: cfad.divergence_3d(ds, g)),
-    ("okubo_weiss_3d", lambda ds, g: cfad.okubo_weiss_3d(ds, g)),
-    ("compute_buoyancy_gradients_3d",
-     lambda ds, g: cfad.compute_buoyancy_gradients_3d(ds, g)),
-    ("frontogenesis_tendency_3d",
-     lambda ds, g: cfad.frontogenesis_tendency_3d(ds, g)),
-    ("geostrophic_velocity_3d",
-     lambda ds, g: cfad.geostrophic_velocity_3d(ds, g)),
-    ("frontogenesis_geo_3d",
-     lambda ds, g: cfad.frontogenesis_geo_3d(ds, g)),
+    ("vertical_shear_magnitude",
+     lambda ds, g: cfad.vertical_shear_magnitude(ds, g)),
+    ("richardson_number", lambda ds, g: cfad.richardson_number(ds, g)),
+    ("froude_number", lambda ds, g: cfad.froude_number(ds, g)),
+    ("burger_number", lambda ds, g: cfad.burger_number(ds, g)),
+    ("balanced_richardson_number",
+     lambda ds, g: cfad.balanced_richardson_number(ds, g)),
+    ("advective_buoyancy_fluxes",
+     lambda ds, g: cfad.advective_buoyancy_fluxes(ds, g)),
+    ("ertel_pv_terms", lambda ds, g: cfad.ertel_pv_terms(ds, g)),
+    # -- single implementations (calculate_fields) exercised on 3D input --
+    ("potential_density[3d]", lambda ds, g: caf.potential_density(ds)),
+    ("buoyancy_of_field[3d]", lambda ds, g: caf.buoyancy_of_field(ds)),
+    ("geographic_velocity[3d]",
+     lambda ds, g: caf.geographic_velocity(ds, g)),
+    ("turner_angle[3d]", lambda ds, g: caf.turner_angle(ds, g)),
+    ("grad_b2[3d]", lambda ds, g: caf.grad_b2(ds, g)),
+    ("relative_vorticity[3d]",
+     lambda ds, g: caf.relative_vorticity(ds, g)),
+    ("okubo_weiss_parameter[3d]",
+     lambda ds, g: caf.okubo_weiss_parameter(ds, g)),
+    ("modified_okubo_weiss[3d]",
+     lambda ds, g: caf.modified_okubo_weiss(ds, g)),
+    ("frontogenesis_tendency[3d]",
+     lambda ds, g: caf.frontogenesis_tendency(ds, g)),
+    ("frontogenesis_geo[3d]",
+     lambda ds, g: caf.frontogenesis_geo(ds, g)),
 ]
 
 # Surface-module functions that must be lazy.

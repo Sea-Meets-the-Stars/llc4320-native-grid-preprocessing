@@ -477,6 +477,52 @@ channel is now the sigma0 anomaly (−1000 offset vs before); the
 m s⁻²).  All gradient/derivative-based fields are unaffected by these
 constant offsets.
 
+### Phase 3 — COMPLETE (2026-07-29)
+
+**Pre-deletion verification (user requirement):** before deleting
+anything, every canonical ``calculate_fields`` function was compared
+against its depth-module duplicate on the FULL 3D fixture (all k levels,
+not just k=0): jacobian (4 components), relative_vorticity, strain (3),
+divergence, okubo_weiss, rossby_number, geographic_velocity,
+grad_theta2/salt2/rho2/b2/eta2, turner_angle, buoyancy gradients (incl.
+vs the phys helpers), frontogenesis tendency/geo, geostrophic_velocity,
+and the _density_lazy / buoyancy_field_3d wrappers — ALL identical
+(rtol 1e-10).  2D-vs-3D input structure does not matter for any of them.
+
+1. ``calculated_fields_at_depth.py`` → ``calculate_fields_at_depth.py``
+   (git mv; module docstring rewritten).  The module now holds ONLY
+   vertical-structure fields, suffix-free: mixed_layer_depth,
+   mixed_layer_depth_DI, mixed_layer_heat_content,
+   buoyancy_frequency_squared, vertical_shear_components,
+   vertical_shear_magnitude, richardson_number, froude_number,
+   burger_number, balanced_richardson_number, advective_buoyancy_fluxes,
+   ertel_pv_terms.
+2. Deleted (verified duplicates/wrappers): all ``_3d`` kinematic,
+   gradient, frontal, frontogenesis and vector functions;
+   ``_density_lazy``; ``buoyancy_field_3d``;
+   ``_buoyancy_gradient_phys_3d`` / ``_buoyancy_gradient_squared_phys_3d``.
+   Internal rewires: N² uses ``potential_density``; burger uses
+   ``calculate_fields.rossby_number``; R_ib's internal |∇b|² uses
+   ``compute_buoyancy_gradients`` + ``ng.grad_squared``; fluxes/PV use
+   ``buoyancy_of_field`` / ``geographic_velocity``.
+3. ``depth_subsets.py`` imports split cleanly: 10 vertical functions from
+   ``calculate_fields_at_depth``, everything else from
+   ``calculate_fields``; all ``_3d`` call sites renamed.
+4. Tests: ``test_calculated_fields_at_depth.py`` →
+   ``test_calculate_fields_at_depth.py`` (suffix-free R_ib);
+   field_migration equivalence tests now certify the SINGLE
+   implementation is dimension-agnostic (``caf(ds2d)`` vs
+   ``caf(ds3d).isel(k=0)``); phys-route test replaced by deletion
+   assertions; laziness list rebuilt (50 tests); golden regression
+   re-pointed.  docs/Fields.md and Global_Maps.md refreshed.
+5. Validation (sandbox): field_migration 84 tests pass; offline
+   test_calculate_fields_at_depth, test_mld, test_jacobian,
+   test_variable_selection (44 passed), test_generate_tile (19 offline)
+   pass.  The S3 real-tile test needs a server-side rerun.  Golden
+   baseline again left ungenerated — create and commit it locally
+   (post-Phase-3 values == post-Phase-2 values; nothing numerical changed
+   in this phase, by construction and by the verification above).
+
 **Known value changes (intentional, from Phase 1):** buoyancy-based dimensional fields
 (buoyancy channel, gradb2, frontogenesis, uB/vB/wB, ertel PV terms)
 rescaled by (9.81/1000)/(9.8/1025) ≈ ×1.0260 per power of b (gradb2 and

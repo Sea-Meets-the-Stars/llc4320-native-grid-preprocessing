@@ -36,7 +36,7 @@ import numpy as np
 import pytest
 
 import dbof.preprocessing.calculate_fields as caf
-import dbof.preprocessing.calculated_fields_at_depth as cfad
+import dbof.preprocessing.calculate_fields_at_depth as cfad
 
 GOLDEN_PATH = (pathlib.Path(__file__).parent / "golden"
                / "field_baselines.npz")
@@ -112,21 +112,21 @@ def compute_all_fields(ds2d, grid2d, ds3d, grid3d):
 
     # ---- Depth module on ds3d ---------------------------------------------
     out["3d_sigma0"] = _values(caf.potential_density_anomaly(ds3d))
-    out["3d_buoyancy"] = _values(cfad.buoyancy_field_3d(ds3d))
-    out["3d_N2"] = _values(cfad.buoyancy_frequency_squared_3d(ds3d))
+    out["3d_buoyancy"] = _values(caf.buoyancy_of_field(ds3d))
+    out["3d_N2"] = _values(cfad.buoyancy_frequency_squared(ds3d))
     out["3d_MLD"] = _values(cfad.mixed_layer_depth(ds3d))
     out["3d_MLD_DI"] = _values(cfad.mixed_layer_depth_DI(ds3d))
     out["3d_ml_heat_content"] = _values(
         cfad.mixed_layer_heat_content(ds3d))
 
     out["3d_vertical_shear"] = _values(
-        cfad.vertical_shear_magnitude_3d(ds3d, grid3d))
-    out["3d_Ri"] = _values(cfad.richardson_number_3d(ds3d, grid3d))
-    out["3d_Fr"] = _values(cfad.froude_number_3d(ds3d, grid3d))
-    out["3d_Ro"] = _values(cfad.rossby_number_3d(ds3d, grid3d))
-    out["3d_Bu"] = _values(cfad.burger_number_3d(ds3d, grid3d))
+        cfad.vertical_shear_magnitude(ds3d, grid3d))
+    out["3d_Ri"] = _values(cfad.richardson_number(ds3d, grid3d))
+    out["3d_Fr"] = _values(cfad.froude_number(ds3d, grid3d))
+    out["3d_Ro"] = _values(caf.rossby_number(ds3d, grid3d))
+    out["3d_Bu"] = _values(cfad.burger_number(ds3d, grid3d))
     out["3d_R_ib"] = _values(
-        cfad.balanced_richardson_number_3d(ds3d, grid3d))
+        cfad.balanced_richardson_number(ds3d, grid3d))
 
     out["3d_wind_stress_curl"] = _values(
         caf.wind_stress_curl(ds3d, grid3d))
@@ -135,28 +135,28 @@ def compute_all_fields(ds2d, grid2d, ds3d, grid3d):
     out["3d_u_ekman"] = _values(ek["u_ekman"])
     out["3d_v_ekman"] = _values(ek["v_ekman"])
 
-    uB, vB, wB = cfad.advective_buoyancy_fluxes_3d(ds3d, grid3d)
+    uB, vB, wB = cfad.advective_buoyancy_fluxes(ds3d, grid3d)
     out["3d_uB"] = _values(uB)
     out["3d_vB"] = _values(vB)
     out["3d_wB"] = _values(wB)
 
-    pv = cfad.ertel_pv_terms_3d(ds3d, grid3d)
+    pv = cfad.ertel_pv_terms(ds3d, grid3d)
     out["3d_ertel_pv"] = _values(pv["ertel_pv"])
     out["3d_ertel_pv_vertical"] = _values(pv["ertel_pv_vertical"])
     out["3d_ertel_pv_tilt"] = _values(pv["ertel_pv_tilt"])
 
-    out["3d_grad_b2"] = _values(cfad.grad_b2_3d(ds3d, grid3d))
-    out["3d_turner_angle"] = _values(cfad.turner_angle_3d(ds3d, grid3d))
+    out["3d_grad_b2"] = _values(caf.grad_b2(ds3d, grid3d))
+    out["3d_turner_angle"] = _values(caf.turner_angle(ds3d, grid3d))
     out["3d_relative_vorticity"] = _values(
-        cfad.relative_vorticity_3d(ds3d, grid3d))
-    out["3d_okubo_weiss"] = _values(cfad.okubo_weiss_3d(ds3d, grid3d))
+        caf.relative_vorticity(ds3d, grid3d))
+    out["3d_okubo_weiss"] = _values(caf.okubo_weiss_parameter(ds3d, grid3d))
     out["3d_Wstar"] = _values(caf.modified_okubo_weiss(ds3d, grid3d))
-    bg3 = cfad.compute_buoyancy_gradients_3d(ds3d, grid3d)
+    bg3 = caf.compute_buoyancy_gradients(ds3d, grid3d)
     out["3d_buoyancy_gradients_zonal"] = _values(bg3.zonal)
     out["3d_frontogenesis_tendency"] = _values(
-        cfad.frontogenesis_tendency_3d(ds3d, grid3d))
+        caf.frontogenesis_tendency(ds3d, grid3d))
     out["3d_frontogenesis_geo"] = _values(
-        cfad.frontogenesis_geo_3d(ds3d, grid3d))
+        caf.frontogenesis_geo(ds3d, grid3d))
 
     return out
 

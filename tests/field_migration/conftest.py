@@ -3,7 +3,7 @@ Shared fixtures for the field-migration safety-net tests.
 
 MIGRATION SCAFFOLDING — see ``prompts/field_migration.md`` (Phase 0).
 These tests verify that consolidating ``calculate_fields.py``
-and ``calculated_fields_at_depth.py`` into ``calculate_fields.py`` /
+and ``calculate_fields_at_depth.py`` into ``calculate_fields.py`` /
 ``calculate_fields_at_depth.py`` is faithful.  They are not long-term
 tests; the ``tests/field_migration/`` directory is deleted (or selectively
 promoted) at Phase 5.
@@ -27,7 +27,7 @@ provided:
   what the SURF pipeline feeds ``calculate_fields``.
 - ``ds3d`` — depth-style ``ds_merge`` with ``k`` (tracer) and ``k_l``
   (W) vertical dimensions, ``Z``/``Zl`` coordinates and ``drF`` spacing,
-  matching what the DEPTH pipeline feeds ``calculated_fields_at_depth``.
+  matching what the DEPTH pipeline feeds ``calculate_fields_at_depth``.
 
 The k=0 level of every 3D variable equals the corresponding 2D variable
 EXACTLY, so equivalence tests can assert::
