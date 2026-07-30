@@ -14,7 +14,6 @@ depth-resolved diagnostics see ``depth_subsets.py``.
 import dask
 
 import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
-import dbof.utils.physical_calculations as physical_calculations
 from dbof.preprocessing.calculated_fields_at_depth import (
     ekman_pumping,
     ekman_transport,
@@ -121,12 +120,15 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
             gradrho2=results["gradrho2"],
         )
 
-    # Surface density [kg m-3] and buoyancy [m s-2] (JMD95 at p=0; buoyancy
-    # b = g rho / rho_ref x1e3, matching buoyancy_field_3d).
+    # Surface potential density [kg m-3] and buoyancy [m s-2] from the
+    # single lazy implementations (JMD95 at p=0; b = G rho / RHO0).
+    # Channel keys are unchanged.
     if "density" in needed:
-        results["density"] = physical_calculations.density_of_field(ds_merge)
+        results["density"] = calculate_additional_fields.potential_density(
+            ds_merge)
     if "buoyancy" in needed:
-        results["buoyancy"] = physical_calculations.buoyancy_of_field(ds_merge) * 1e3
+        results["buoyancy"] = calculate_additional_fields.buoyancy_of_field(
+            ds_merge)
 
     # Only return channels that were actually requested.
     return {k: v for k, v in results.items() if k in computed_feature_channels}

@@ -82,19 +82,22 @@ def test_log_grad_b_equivalence(ds2d, grid2d, ds3d, grid3d):
     assert_k0_equal(log2d, log3d, name="log_grad_b")
 
 
-def test_grad_squared_implementations_identical(ds2d, grid2d):
-    """pc.grad_squared(components) == cfad._grad_squared_3d(field).
+def test_grad_squared_single_implementation(ds2d, grid2d):
+    """ONE grad_squared: ng owns it; pc re-exports it; fields use it.
 
-    Certifies the canonical two-step workflow
-    (ng.calculate_native_gradient_tracer -> ng.grad_squared) replaces both
-    implementations without value changes.
+    Phase 1 note: ``_grad_squared_3d`` was deleted and
+    ``physical_calculations.grad_squared`` became a re-export of
+    ``native_gradient.grad_squared``.  This certifies the wiring and that
+    the canonical two-step workflow reproduces a grad_*2 field.
     """
+    assert pc.grad_squared is ng.grad_squared, (
+        "physical_calculations.grad_squared must re-export "
+        "native_gradient.grad_squared")
     gx, gy = ng.calculate_native_gradient_tracer(
         ds2d.Theta, ds2d, grid=grid2d)
-    via_components = pc.grad_squared(gx, gy)
-    via_field = cfad._grad_squared_3d(ds2d.Theta, ds2d, grid2d)
-    assert_k0_equal(via_components, via_field,
-                    name="grad_squared vs _grad_squared_3d")
+    manual = ng.grad_squared(gx, gy)
+    assert_k0_equal(manual, caf.grad_theta2(ds2d, grid2d),
+                    name="two-step workflow vs grad_theta2")
 
 
 def test_native_gradient_tracer_dimension_agnostic(ds2d, grid2d, ds3d,

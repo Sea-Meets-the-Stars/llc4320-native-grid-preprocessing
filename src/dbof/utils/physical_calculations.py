@@ -1,25 +1,23 @@
 import xarray as xr
 import dbof.utils.jmd95_xgcm_implementation as jmd95
 
-def grad_squared(zonal_grad, merid_grad):
-    """Compute the squared magnitude of a 2D gradient vector.
-
-    Parameters
-    ----------
-    zonal_grad : xarray.DataArray or dask array
-        Zonal (east-west) component of the gradient.
-    merid_grad : xarray.DataArray or dask array
-        Meridional (north-south) component of the gradient.
-
-    Returns
-    -------
-    xarray.DataArray or dask array
-        Sum of the squared zonal and meridional gradient components [(field_units m^-1)^2] .
-    """
-    return zonal_grad ** 2 + merid_grad ** 2
+# DEPRECATED: grad_squared moved to dbof.utils.native_gradient during the
+# field migration (see prompts/field_migration.md) — it is a pure operation
+# on gradient components, so it lives with the gradient machinery.  This
+# re-export keeps old imports working; new code should import it from
+# dbof.utils.native_gradient.
+from dbof.utils.native_gradient import grad_squared  # noqa: F401
 
 def buoyancy_of_field(ds):
-    """Compute surface buoyancy from potential temperature and salinity.
+    """LEGACY — superseded; do not use in new code.
+
+    Superseded by ``calculate_additional_fields.buoyancy_of_field`` (lazy,
+    b = G rho / RHO0_BOUSSINESQ).  This version persists intermediates
+    into memory and uses g = 9.8, rho_ref = 1025; kept only for
+    reference during the field migration (prompts/field_migration.md).
+    Nothing in src/ calls it anymore.
+
+    Compute surface buoyancy from potential temperature and salinity.
 
     Uses the JMD95 equation of state to compute in-situ density at the
     surface (p=0), then converts to buoyancy as b = g * rho / rho_ref.
@@ -60,7 +58,15 @@ def buoyancy_of_field(ds):
     return buoyancy
 
 def density_of_field(ds):
-    """Compute surface density from potential temperature and salinity.
+    """LEGACY — superseded; do not use in new code.
+
+    Superseded by ``calculate_additional_fields.potential_density`` (lazy).
+    This version persists the result into memory.  Note the output is
+    surface-referenced POTENTIAL density (JMD95 at p=0), despite the
+    historical wording below.  Kept only for reference during the field
+    migration (prompts/field_migration.md).  Nothing in src/ calls it.
+
+    Compute surface density from potential temperature and salinity.
 
     Uses the JMD95 equation of state to compute in-situ density at the
     surface (p=0).

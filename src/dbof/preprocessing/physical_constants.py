@@ -10,32 +10,27 @@ update propagates automatically.
 # ---------------------------------------------------------------------------
 
 G = 9.81
-"""float: Gravitational acceleration [m s⁻²]."""
+"""float: Gravitational acceleration [m s⁻²].
 
-G_KM = 0.0098
-"""float: Gravitational acceleration [km s⁻²].
-
-Used in buoyancy calculations where the length scale is kilometres
-(e.g. ``buoyancy_of_field``, ``buoyancy_field_3d``).
+The single g used everywhere (buoyancy, N², geostrophy).  The legacy
+``G_KM`` (0.0098 km s⁻², i.e. g = 9.8) was removed in the field
+migration — see prompts/field_migration.md.
 """
 
 # ---------------------------------------------------------------------------
-# Reference densities
+# Reference density
 # ---------------------------------------------------------------------------
 
 RHO0_BOUSSINESQ = 1000.0
-"""float: Boussinesq reference density [kg m⁻³].
+"""float: The single project-wide reference density ρ₀ [kg m⁻³].
 
-Used in the Brunt–Väisälä frequency  N² = (g / ρ₀) dρ/dz  and in
-heat-content integrals  Q = ρ₀ Cₚ ∫ θ dz.
-"""
-
-RHO0_SEAWATER = 1025.0
-"""float: Realistic seawater reference density [kg m⁻³].
-
-Used in buoyancy  b = −g ρ / ρ_ref,  Turner angle, and related
-diagnostics where the absolute magnitude matters more than the
-Boussinesq simplification.
+Used consistently in buoyancy  b = g ρ / ρ₀  (no anomaly subtraction —
+constant offsets vanish under the gradients/derivatives that consume b),
+the Brunt–Väisälä frequency  N² = (g / ρ₀) dρ/dz,  heat-content
+integrals  Q = ρ₀ Cₚ ∫ θ dz,  and the Turner-angle linear-EOS identity.
+Matches the Bodner submeso_param_net LLC4320 preprocessing.  The legacy
+``RHO0_SEAWATER`` (1025) was retired in the field migration — see
+prompts/field_migration.md.
 """
 
 SIGMA0_REFERENCE_DENSITY = 1000.0

@@ -381,3 +381,57 @@ after every file:
    (see Phase 1, step 2).
 
 ## Logs
+
+### Phase 0 — COMPLETE (2026-07-29)
+
+Created ``tests/field_migration/``: conftest (synthetic 13-face LLC grid
+adapted from test_jacobian.py; dask-backed 2D + 3D datasets, k=0 of 3D ==
+2D exactly), four equivalence files, laziness suite (raising-scheduler),
+golden regression (baseline auto-created on first local run — commit it).
+All synthetic, no network; run locally with ``conda activate llcngp;
+python -m pytest tests/field_migration -v``.  All duplicated pairs proved
+numerically identical, including the eager-vs-lazy density routes.  The
+phys/scaled buoyancy routes differed by exactly the predicted constant
+1.026046.  Fixture notes: coordinate variables stay numpy-backed and NOT
+set_coords (dask coords make xarray's coord-merge compute them — false
+positive for laziness tests); ``k_l`` carries nk+1 interface levels so
+W-to-tracer interpolation aligns (the helper implicitly needs one more W
+level than tracer levels — latent assumption, fine while surface/MLD
+focused).
+
+### Phase 1 — COMPLETE (2026-07-29)
+
+1. Added lazy ``potential_density`` and ``buoyancy_of_field``
+   (b = G·rho/RHO0_BOUSSINESQ) to ``calculate_additional_fields.py``;
+   rewired all 5 call sites (compute_buoyancy_gradients, grad_b2,
+   grad_rho2, both surface_subsets channels).  Legacy persist-based
+   functions kept in ``physical_calculations.py`` with LEGACY docstrings;
+   nothing in src/ calls them.
+2. ``grad_squared`` moved to ``native_gradient.py`` (pc re-exports it);
+   ``_grad_squared_3d`` deleted; all grad_*2 fields (both modules) and
+   the energetics KE use the canonical two-step workflow.
+3. Constants unified: ``G_KM`` and ``RHO0_SEAWATER`` deleted;
+   ``buoyancy_field_3d`` and ``_density_lazy`` are now thin wrappers over
+   the canonical functions; turner_angle (both modules) uses
+   RHO0_BOUSSINESQ; surface turner_angle switched np.where → xr.where
+   (pulled forward from Phase 2 — the laziness suite caught np.where
+   triggering compute).
+4. Chunk-spec moved out of ``_density_lazy`` into
+   ``depth_subsets._ensure_depth_chunking``, applied to every compute_*
+   entry point via a wrapper on SUBSET_COMPUTE_FNS.
+5. Tests updated per their docstrings: pinned-ratio test replaced by
+   ``test_phys_route_now_matches_scaled_route`` (routes now identical);
+   grad_rho2/grad_b2 moved from the legacy-eager list to the lazy list;
+   new lazy functions added to coverage (now 60 laziness tests).
+   Suite: 87 field_migration tests pass; test_calculated_fields_at_depth,
+   test_mld, test_jacobian pass offline (network test + xmitgcm-dependent
+   module unavailable in the validation sandbox — rerun in llcngp).
+
+**Known value changes (intentional):** buoyancy-based dimensional fields
+(buoyancy channel, gradb2, frontogenesis, uB/vB/wB, ertel PV terms)
+rescaled by (9.81/1000)/(9.8/1025) ≈ ×1.0260 per power of b (gradb2 and
+frontogenesis scale by its square); turner_angle shifted slightly
+(RHO0 1025 → 1000 in the linear-EOS identity).  Dimensionless R_ib / W*
+unchanged in structure (their buoyancy was already the phys definition;
+W*'s |Q|²/f² term now shares it exactly).  The golden baseline should be
+generated fresh (post-Phase-1) on the local machine and committed.

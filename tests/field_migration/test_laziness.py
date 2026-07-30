@@ -13,13 +13,12 @@ raises on any task execution.  Graph construction never invokes the
 scheduler, so a truly lazy function passes; any hidden compute/persist
 raises immediately.
 
-Also DOCUMENTS the legacy eager behaviour the migration removes:
+Also DOCUMENTS the legacy eager behaviour: the superseded
 ``physical_calculations.density_of_field`` / ``buoyancy_of_field`` call
-``.persist()`` internally, so they (and the surface ``grad_rho2`` /
-``grad_b2`` built on them) DO trigger execution today.  Those
-``test_legacy_*_is_eager`` tests assert the eagerness exists; after
-Phase 1/2 they will fail (the functions will be lazy or unused) — DELETE
-them then; the ``test_lazy_*`` tests must keep passing.
+``.persist()`` internally and remain eager (they are kept, unused, for
+reference).  Phase 1 note: ``caf.grad_rho2`` / ``caf.grad_b2`` moved off
+the legacy route onto the lazy ``potential_density`` /
+``buoyancy_of_field`` and now live in the lazy list below.
 
 Running (local machine — synthetic data only, no network)::
 
@@ -114,8 +113,19 @@ LAZY_FNS = [
      lambda ds, g: cfad.frontogenesis_geo_3d(ds, g)),
 ]
 
-# Surface-module functions that are ALREADY lazy (no density dependency).
+# Surface-module functions that must be lazy.
 LAZY_SURFACE_FNS = [
+    ("potential_density", lambda ds, g: caf.potential_density(ds)),
+    ("buoyancy_of_field", lambda ds, g: caf.buoyancy_of_field(ds)),
+    ("grad_rho2", lambda ds, g: caf.grad_rho2(ds, g)),
+    ("grad_b2", lambda ds, g: caf.grad_b2(ds, g)),
+    ("log_grad_b", lambda ds, g: caf.log_grad_b(ds, g)),
+    ("turner_angle", lambda ds, g: caf.turner_angle(ds, g)),
+    ("compute_buoyancy_gradients",
+     lambda ds, g: caf.compute_buoyancy_gradients(ds, g)),
+    ("frontogenesis_tendency",
+     lambda ds, g: caf.frontogenesis_tendency(ds, g)),
+    ("frontogenesis_geo", lambda ds, g: caf.frontogenesis_geo(ds, g)),
     ("compute_velocity_jacobian",
      lambda ds, g: caf.compute_velocity_jacobian(ds, g)),
     ("relative_vorticity", lambda ds, g: caf.relative_vorticity(ds, g)),
@@ -160,15 +170,12 @@ def test_lazy_surface_module_function(name, fn, ds2d, grid2d):
 @pytest.mark.parametrize("name,fn", [
     ("pc.density_of_field", lambda ds, g: pc.density_of_field(ds)),
     ("pc.buoyancy_of_field", lambda ds, g: pc.buoyancy_of_field(ds)),
-    ("caf.grad_rho2", lambda ds, g: caf.grad_rho2(ds, g)),
-    ("caf.grad_b2", lambda ds, g: caf.grad_b2(ds, g)),
-], ids=["density_of_field", "buoyancy_of_field", "grad_rho2", "grad_b2"])
+], ids=["density_of_field", "buoyancy_of_field"])
 def test_legacy_density_route_is_eager(name, fn, ds2d, grid2d):
-    """Legacy persist()-based density/buoyancy DOES trigger execution.
+    """The superseded persist()-based functions remain eager (and unused).
 
-    This is the exact behaviour Phase 1 removes.  When these start
-    passing lazily (i.e. this test FAILS because no compute triggers),
-    the migration has landed — delete this test.
+    Documents why they were replaced.  Delete this test when the legacy
+    functions themselves are deleted.
     """
     with pytest.raises(ComputeTriggered):
         with no_compute_allowed():

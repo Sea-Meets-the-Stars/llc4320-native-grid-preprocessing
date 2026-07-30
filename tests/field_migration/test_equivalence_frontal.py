@@ -5,13 +5,12 @@ MIGRATION SCAFFOLDING — see ``prompts/field_migration.md`` (Phase 0).
 Covers turner_angle, buoyancy gradients, frontogenesis (kinematic and
 geostrophic), and geostrophic velocity.
 
-Also PINS the known buoyancy-definition inconsistency the migration
-resolves: the "phys" buoyancy-gradient route (b = 9.81*rho/1000, used by
-R_ib and W*) differs from the scaled route (b = 9.8*rho/1025, used by
-grad_b2/frontogenesis) by exactly the constant factor
-(9.81/1000)/(9.8/1025).  When Phase 1/2 unify RHO0 = 1000 and g = 9.81,
-``test_phys_vs_scaled_buoyancy_gradient_ratio`` will fail — DELETE it at
-that point (its job is done); the equivalence tests must keep passing.
+Phase 1 note: the pinned-ratio test that documented the legacy
+two-buoyancy inconsistency (phys b = 9.81*rho/1000 vs scaled
+b = 9.8*rho/1025, constant factor 1.02566) was deleted when Phase 1
+unified both routes onto b = G*rho/RHO0_BOUSSINESQ — its replacement
+``test_phys_route_now_matches_scaled_route`` asserts the two routes are
+now IDENTICAL.
 
 Running (local machine — synthetic data only, no network)::
 
@@ -27,10 +26,6 @@ import dbof.preprocessing.calculate_additional_fields as caf
 import dbof.preprocessing.calculated_fields_at_depth as cfad
 
 from conftest import assert_k0_equal
-
-# Expected constant ratio between the two legacy buoyancy definitions:
-# phys (G/RHO0_BOUSSINESQ = 9.81/1000) over scaled (9.8/1025).
-_PHYS_OVER_SCALED = (9.81 / 1000.0) / (9.8 / 1025.0)
 
 
 def test_turner_angle_equivalence(ds2d, grid2d, ds3d, grid3d):
@@ -103,24 +98,21 @@ def test_frontogenesis_injection_consistent(ds2d, grid2d):
         name="frontogenesis_tendency injection")
 
 
-def test_phys_vs_scaled_buoyancy_gradient_ratio(ds3d, grid3d):
-    """PINS the legacy two-buoyancy inconsistency (DELETE after Phase 2).
+def test_phys_route_now_matches_scaled_route(ds3d, grid3d):
+    """After Phase 1, the phys and standard buoyancy routes are IDENTICAL.
 
-    The private phys route (used by R_ib / W*) must differ from the
-    scaled route (used by grad_b2 / frontogenesis) by exactly the
-    constant factor (9.81/1000)/(9.8/1025) ≈ 1.02566 — i.e. the ONLY
-    differences are g and rho_ref, as established in the migration plan.
+    ``_buoyancy_gradient_phys_3d`` (R_ib / W* route) and
+    ``compute_buoyancy_gradients_3d`` (grad_b2 / frontogenesis route) now
+    both use b = G*rho/RHO0_BOUSSINESQ, so their components must be equal
+    — clearing the way for Phase 2 to delete the private phys helpers.
     """
     bx_phys, by_phys = cfad._buoyancy_gradient_phys_3d(ds3d, grid3d)
-    bg_scaled = cfad.compute_buoyancy_gradients_3d(ds3d, grid3d)
-
-    bx_p = np.asarray(bx_phys.values)
-    bx_s = np.asarray(bg_scaled.zonal.values)
-    # Exclude near-zero gradients: the ratio is numerically ill-conditioned
-    # where both routes' float rounding dominates the tiny values.
-    mask = np.abs(bx_s) > 1e-6 * np.nanmax(np.abs(bx_s))
-    ratio = bx_p[mask] / bx_s[mask]
+    bg = cfad.compute_buoyancy_gradients_3d(ds3d, grid3d)
     np.testing.assert_allclose(
-        ratio, _PHYS_OVER_SCALED, rtol=1e-7,
-        err_msg="phys/scaled buoyancy gradients differ by more than the "
-                "expected constant factor — a third definition exists?")
+        np.asarray(bx_phys.values), np.asarray(bg.zonal.values),
+        rtol=1e-9, atol=1e-17, equal_nan=True,
+        err_msg="phys-vs-scaled zonal buoyancy gradients differ")
+    np.testing.assert_allclose(
+        np.asarray(by_phys.values), np.asarray(bg.merid.values),
+        rtol=1e-9, atol=1e-17, equal_nan=True,
+        err_msg="phys-vs-scaled merid buoyancy gradients differ")
