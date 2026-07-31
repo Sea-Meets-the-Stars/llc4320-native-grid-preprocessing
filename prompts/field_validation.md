@@ -358,8 +358,10 @@ Standard 2D domains (rows of Figs. 1–2; exact boxes to be pinned in
 - Row A — global, downsampled ``[::12, ::12]``
 - Row B — Western North Atlantic: ~80–40°W, 0/25–45°N (Gulf Stream;
   planning default 0–60°N per spec, trimmed box TBD, Clarification 7)
-- Row C — Atlantic sector, Southern Ocean: ~20°W–20°E, 65–40°S
-- Row D — eastern tropical Pacific: ~140–90°W, 5°S–5°N
+- Row C — Kuroshio, NW Pacific: 135–165°E, 25–45°N (added 2026-07-31,
+  LH)
+- Row D — Atlantic sector, Southern Ocean: ~20°W–20°E, 65–40°S
+- Row E — eastern tropical Pacific: ~140–90°W, 5°S–5°N
 
 Representative DEPTH tiles (one per region; selected by lon/lat through
 ``latlon_to_rect_ij``; exact tile idx recorded in the notebook):
