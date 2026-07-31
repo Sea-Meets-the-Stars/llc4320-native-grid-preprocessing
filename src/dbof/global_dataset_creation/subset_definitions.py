@@ -88,7 +88,7 @@ SURFACE_SUBSETS = {
         "model_data_feature_channels": [],
         "compute_features_channels": [
             "frontogenesis_tendency", "ug", "vg",
-            "frontogenesis_geo", "frontogenesis_ageo", "Wstar",
+            "frontogenesis_geo", "frontogenesis_ageo",
         ],
     },
 }

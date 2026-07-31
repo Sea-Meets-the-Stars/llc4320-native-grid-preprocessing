@@ -104,7 +104,6 @@ All velocity-gradient fields share one Jacobian computed per subset run.
 | `vg` | `geostrophic_velocity` | vg = (g/f)·∂η/∂x | m s⁻¹ |
 | `frontogenesis_geo` | `frontogenesis_geo` | F(ug, vg) — same formula with geostrophic velocities | s⁻⁵ |
 | `frontogenesis_ageo` | subset dispatcher (inline) | F(u, v) − F(ug, vg) | s⁻⁵ |
-| `Wstar` | `modified_okubo_weiss` | Modified Okubo-Weiss W* = 4·sgn(l₂)·√(l₁² + l₂²) (Bachman 2021); QG Q-vector sensitive; NaN at the equator | s⁻² |
 
 ---
 
