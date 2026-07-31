@@ -4,7 +4,8 @@
 
 Build a set of validation notebooks, one per calculated-field subset, at::
 
-    notebooks/notebooks_field_validation/{subset}.ipynb
+    notebooks/notebooks_field_validation/surface_fields/{subset}.ipynb
+    notebooks/notebooks_field_validation/depth_fields/{subset}.ipynb
 
 Each notebook shows the COMPLETE end-to-end pipeline for every final field
 in its subset: the raw inputs, the shared intermediate calculations, and
@@ -61,8 +62,15 @@ Follow these guidelines (for the eventual implementation):
 
 Ground truth: ``subset_definitions.SURFACE_SUBSETS`` /
 ``DEPTH_SUBSETS``.  Where a subset exists in both pipelines with real
-computation, it gets TWO notebooks (``_surface`` / ``_depth``), per the
-note that depth-only and surface-only pipelines are validated separately.
+computation, it gets TWO notebooks, per the note that depth-only and
+surface-only pipelines are validated separately.  UPDATED 2026-07-31:
+the two pipelines live in separate folders —
+``surface_fields/{subset}.ipynb`` and ``depth_fields/{subset}.ipynb`` —
+so the ``_surface``/``_depth`` filename suffixes in the table below
+become folder placement (e.g. ``kinematic_surface.ipynb`` →
+``surface_fields/kinematic.ipynb``).  SURFACE PHASE FIRST: all
+``surface_fields/`` notebooks are built end-to-end before any depth
+work begins.
 
 | Notebook file | Pipeline | Subset | Final calculated fields (channels) |
 |---|---|---|---|
@@ -108,7 +116,7 @@ Notation: functions live in ``calculate_fields.py`` (CF),
 | Intermediate | Units | Equation | Code | Depends on |
 |---|---|---|---|---|
 | rho_theta (potential density) | kg m⁻³ | JMD95(S, Θ, p=0) | CF.potential_density | Theta, Salt |
-| sigma0 | kg m⁻³ | rho_theta − RHO0_REFERENCE | CF.potential_density_anomaly | rho_theta |
+| sigma0 (potential density anomaly) | kg m⁻³ | rho_theta − RHO0_REFERENCE | CF.potential_density_anomaly | rho_theta |
 | b (buoyancy) | m s⁻² | G·sigma0/RHO0_REFERENCE | CF.buoyancy_of_field | sigma0 |
 | ∇b = (b_x, b_y) | s⁻² | native tracer gradient + CS/SN rotation | CF.compute_buoyancy_gradients → NG.calculate_native_gradient_tracer | b, dxC, dyC, CS, SN |
 | J = (du_dx, du_dy, dv_dx, dv_dy) | s⁻¹ | staggered diff + interp + tensor rotation | CF.compute_velocity_jacobian → NG.calculate_jacobian | U, V, dxC, dyC, CS, SN |
@@ -122,7 +130,20 @@ Notation: functions live in ``calculate_fields.py`` (CF),
 
 Per-notebook final-field chains (raw → intermediate → final; the figure
 column order).  Units per ``docs/Fields.md``; labels/cmaps per
-``field_cmaps.yaml``.
+``field_cmaps.yaml``.  UPDATED 2026-07-31: channel lists below are
+COMPLETE (verbatim from ``subset_definitions.py``), one line per
+channel — not examples.
+
+Plotting-intermediates convention (UPDATED 2026-07-31): intermediates
+are never saved in the product stores; they are always computed live
+from raw in the notebook.  Figure columns show only PHYSICALLY
+INTERPRETABLE intermediates (rho_theta, sigma0, b, |∇b|, u_east/
+v_north, N², MLD, ...); raw tensor/derivative components (du_dx etc.,
+J entries, uz/vz components) appear in the dependency table but are
+NOT plotted — they are validated implicitly because the final fields
+span them (ζ, δ, strain_n, strain_s are four independent linear
+combinations of the four J components, so validating those four
+validates J entirely; likewise vertical_shear validates uz/vz).
 
 **stratification** (DEPTH; raw: Theta, Salt)
 - N2: Theta, Salt → rho_theta → N² [s⁻²] — CFAD.buoyancy_frequency_squared
@@ -130,21 +151,28 @@ column order).  Units per ``docs/Fields.md``; labels/cmaps per
 - ml_heat_content: Theta (+MLD) → ∫cp·ρ₀·Θ dz [J m⁻²] — CFAD.mixed_layer_heat_content
 - Columns e.g. N2: `Theta | Salt | rho_theta | N2_{sfx}`
 
-**frontal_structure_surface** (SURF/OSN; raw: Theta, Salt, Eta)
+**frontal_structure (surface)** (SURF/OSN; raw: Theta, Salt, Eta;
+8 channels)
 - density: Theta, Salt → rho_theta → sigma0 — CF.potential_density_anomaly
 - buoyancy: sigma0 → b — CF.buoyancy_of_field
-- gradrho2: rho_theta → (∇ρ)² — CF.grad_rho2 (+NG.grad_squared)
 - gradb2: b → |∇b|² — CF.grad_b2; log_gradb (OSN sampling doc) — CF.log_grad_b
-- gradtheta2 / gradsalt2 / gradeta2: raw → |∇·|² — CF.grad_{theta,salt,eta}2
+- gradsalt2: Salt → |∇S|² — CF.grad_salt2
+- gradtheta2: Theta → |∇Θ|² — CF.grad_theta2
+- gradeta2: Eta → |∇η|² — CF.grad_eta2
+- gradrho2: rho_theta → |∇ρ|² — CF.grad_rho2 (+NG.grad_squared)
 - turner_angle: gradtheta2, gradsalt2, gradrho2 → Tu — CF.turner_angle
 - Columns e.g. turner: `Theta | Salt | gradtheta2 | gradsalt2 | gradrho2 | Tu`
 
-**kinematic_surface** (raw: U, V, [YC])
-- relative_vorticity / divergence / strain_{n,s,mag} / okubo_weiss:
-  U, V → J → field — CF.{relative_vorticity, divergence, strain,
-  okubo_weiss_parameter} (shared J computed once)
+**kinematic (surface)** (raw: U, V, [YC]; 8 channels; shared J
+computed once — J components tabled, not plotted, per convention above)
+- relative_vorticity: U, V → J → ζ — CF.relative_vorticity
+- strain_n: U, V → J → σₙ — CF.strain
+- strain_s: U, V → J → σₛ — CF.strain
+- strain_mag: U, V → J → σ — CF.strain
+- divergence: U, V → J → δ — CF.divergence
 - coriolis_f: YC → f — CF.coriolis_parameter
 - rossby_number: U, V → J → ζ; YC → f → ζ/f — CF.rossby_number
+- okubo_weiss: U, V → J → W — CF.okubo_weiss_parameter
 
 **frontogenesis_surface** (raw: U, V, Theta, Salt, Eta)
 - frontogenesis_tendency: (U,V → J) + (Θ,S → b → ∇b) → F(u,v) — CF.frontogenesis_tendency
@@ -195,6 +223,17 @@ Row A, and the anomaly conventions (σ₀ = ρ−1000; b anomaly-based).
 
 ## 3. Data loading strategy
 
+UPDATED 2026-07-31: notebooks GENERATE their own data before loading
+it.  Each notebook first RUNS the pipeline for its subset + timestep
+(template step 1; likely one new .yaml config per subset, drawing on
+``notebooks/notebooks_global/running_generate_global_script.ipynb``),
+then LOADS the freshly generated store (template step 2, drawing on
+``notebooks/notebooks_global/assess_generate_global_script.ipynb``).
+This makes the notebooks re-runnable validators after any future code
+change — Route A below reads the notebook-generated store, not a
+historical run.  Generation timestep: **20121109T12 for BOTH the
+surface and depth cases**.
+
 Two clearly distinguished routes:
 
 **Route A — 2D products, loaded directly.**  Final-field global maps and
@@ -216,6 +255,14 @@ any 3D intermediate diagnostics come from single-face 720×720×51 tiles
 ``dbof.tiles.tile_utils``.
 
 ## 4. Tiles workflow (existing capability and gaps)
+
+UPDATED 2026-07-31: DEPTH-PHASE ONLY — nothing in this section is
+needed for the surface phase.  A prior branch ``tiles-fields`` already
+extended tiles to work on any calculated field; it is now far behind
+main, so rather than rebasing it, its build will be re-integrated /
+ported into the field-validation branch when the depth phase starts.
+The extension list below should be reconciled against ``tiles-fields``
+at that point.
 
 Existing (reuse as-is):
 
@@ -345,53 +392,36 @@ optional extra rows.
 
 ## 7. Notebook template (shared, section-by-section)
 
-Every notebook follows this skeleton; DEPTH-only parts marked [D].
+UPDATED 2026-07-31 — this skeleton supersedes the earlier version.
+Notebooks generate AND load their own data so they can re-validate
+the pipeline after any future code change.  Surface template:
 
-0. **Header + provenance**: subset, pipeline, date (20121109T12 — the
-   only DEPTH date; Clarification 2), run_id/store used, git commit,
-   link to Fields.md row and to this plan.
-1. **Section 0 — Field & dependency table**: the 5-column table (Field /
-   Units / Equation / Equation location in code / Dependencies) covering
-   raw → intermediate → final, plus the processing-operations checklist
-   (masking, interpolation, staggering, rotation, differentiation,
-   downsampling, vertical selection, unit conversion) with a
-   yes/no/where note per operation.
-2. **Data loading**: Route A reader cells (2D products + grid + land
-   mask) and, [D], Route B tile cells (one per region).  Explicit
-   printout of shapes, coords, and the date/iteration confirmation.
-3. **Shared intermediates**: compute the subset's shared intermediates
-   ONCE (e.g. sigma0, b, J, ∇b, N², MLD) from raw inputs, with a short
-   sanity printout (min/max/units) per intermediate.
-4. **Sections 1–X — one per final field**, each containing:
-   a. one-paragraph pipeline description (raw → intermediate → final)
-      + equation;
-   b. **Figure 1 (maps)**: `pipeline_grids` scaffold, columns =
-      dependency order, rows = domains A–D;
-   c. **Figure 2 (PDFs)**: same scaffold, PDF panels; conventions
-      stated in-figure (NaN/mask removal: yes, land + halo rim;
-      physical filters if any: stated per field; bins: shared per field
-      across regions; y-axis: probability density; log-scaling: log10-x
-      for ∝-squared fields, log-y where stated);
-   d. [D] repeat Figures 1–2 per suffix: separate complete figures for
-      `_sfc`, `_z25m`, `_mld` (and `_mld_mean` where meaningful) — no
-      combined overcrowded figures;
-   e. [D] **Figure 3a/3b**: profiles + cross-section from the regional
-      tiles (skip for inherently-2D fields: MLD, ml_heat_content,
-      gradeta2, ug/vg, wind/ekman — note instead);
-   f. **Literature placeholder** (Figure 3 surface / Figure 4 depth):
-      fixed structure = (left) our diagnostic rendered by a callback,
-      (right) supplied literature .png, (below) short discussion of
-      similarities/differences/physical plausibility.  Diagnostic type
-      deliberately unspecified until reference is provided; the
-      `literature_comparison` module accepts any renderer.
-5. **Cross-references**: links to sibling notebooks for
-   already-validated dependencies (MLD → stratification; σ₀/b →
-   frontal_structure_surface; rotation/Jacobian machinery →
-   kinematic_surface).
-6. **Summary cell**: pass/fail-style checklist (units sensible, maps
-   physically structured, PDFs plausible, suffix ordering sensible,
-   guard-style uniqueness check) mirroring
-   `dev/verify_subsets_real_data.py` stats.
+1. **RUN pipeline** — ONE cell: run the SURF pipeline for this subset
+   and timestep (likely requires generating a new .yaml config per
+   subset); draw from the code used to RUN in
+   ``notebooks/notebooks_global/running_generate_global_script.ipynb``.
+2. **LOAD** — ONE cell: load the data generated in (1); draw from the
+   code used to LOAD in
+   ``notebooks/notebooks_global/assess_generate_global_script.ipynb``.
+3. **SUBSET NAME** — with the list of variables (channels) in the
+   subset.
+4. **Dependency table** — columns: FIELD NAME | UNITS | EQUATION |
+   DEPENDENCIES (raw data + calculated intermediates required) |
+   LOCATION OF CALC IN CODE.
+5. **Per final field**:
+   - **Figure 1 — maps**: row–column structure as in Sections 5–6
+     (rows = domains A–D, columns = dependency chain via
+     ``pipeline_grids``).
+   - **Figure 2 — PDFs**: same row–column structure; conventions per
+     Clarification 8 (stated in-figure).
+   - **Figure 3 — literature comparison**: one figure type per
+     variable, specified explicitly by LH per variable: (a) our
+     generated data, (b) .png from literature, plus short discussion.
+
+DEPTH additions (per-suffix figure sets incl. ``_mld_mean``, Route B
+tile cells, Figure 3a/3b profiles and cross-sections from the three
+regional tiles) attach to this skeleton in the depth phase; the depth
+template will be finalized when that phase starts.
 
 Template accommodations (subset-specific complications):
 
@@ -415,10 +445,11 @@ Template accommodations (subset-specific complications):
 ## 8. Notebook placement (supervisor request vs central directory)
 
 RECOMMENDATION: keep all notebooks centralized in
-``notebooks/notebooks_field_validation/`` (single environment, shared
-template, no import-path tricks, consistent with the existing
-``notebooks/notebooks_dev/`` convention), and satisfy "near the code"
-with explicit cross-references instead of co-location:
+``notebooks/notebooks_field_validation/``, organized into the two
+pipeline subfolders ``surface_fields/`` and ``depth_fields/`` (single
+environment, shared template, no import-path tricks, consistent with
+the existing ``notebooks/notebooks_dev/`` convention), and satisfy
+"near the code" with explicit cross-references instead of co-location:
 
 1. Module docstrings of ``calculate_fields.py`` and
    ``calculate_fields_at_depth.py`` gain a short "Validation notebooks"
@@ -426,8 +457,8 @@ with explicit cross-references instead of co-location:
 2. ``docs/Fields.md`` gains a "Validation notebook" column per subset
    table.
 3. ``notebooks/notebooks_field_validation/README.md`` lists every
-   notebook with its subset, pipeline, and validated channels (the
-   inverse index).
+   notebook (grouped by ``surface_fields/`` / ``depth_fields/``) with
+   its subset, pipeline, and validated channels (the inverse index).
 4. Cutout/tile workflows (``tiles/tile_utils.py`` registry docstring)
    reference the notebooks that exercise them.
 
@@ -438,11 +469,15 @@ the ease-of-access without the cost.
 
 ## 9. Ambiguities, inconsistencies, and missing metadata found
 
-- The produced zarr stores predate the field migration: buoyancy-family
-  channels are legacy-scaled, the density channel is σ₀+1000-style, and
-  buoyancy is non-anomaly.  Loading finals from them while computing
-  intermediates live would show inconsistent pipelines
-  (Clarification 1).
+- RESOLVED 2026-07-31: the field migration had no impact on the zarr
+  stores (see Logs); the pre-migration concern is void.  Moreover the
+  notebooks now generate their own stores (Section 3), so
+  store/code-version mismatch cannot arise.
+- Intermediates are not saved in the product stores — always computed
+  live from raw in the notebook.  Plotting policy: interpretable
+  intermediates plotted; component-level intermediates (J entries,
+  du/dx, uz/vz) tabled only, validated implicitly through the final
+  fields that span them (see Section 2 convention).
 - Only one DEPTH date exists (20121109T12); OSN wind covers only
   2011-11-01–2012-07-15, so surface_wind at that date requires the
   LLC_SURF S3 store path (present for 20121109T12? — verify).
@@ -466,19 +501,31 @@ the ease-of-access without the cost.
 
 ## 10. Deliverables checklist for implementation (in order)
 
-1. `plotting/regions.py` + region boxes pinned; add missing
+UPDATED 2026-07-31 — SURFACE PHASE FIRST, end-to-end, before any
+depth work.
+
+Surface phase:
+
+1. Per-subset SURF run configs (.yaml) + the RUN/LOAD cell pattern
+   extracted from ``notebooks_global/running_generate_global_script``
+   / ``assess_generate_global_script``.
+2. `plotting/regions.py` + region boxes pinned; add missing
    intermediate entries to `field_cmaps.yaml`.
-2. `plotting/pipeline_grids.py`, `plotting/pdfs.py`.
-3. Tile extensions (registry entries for U/V/W + tile-ds_merge/xgcm
-   helper with edge-trim convention).
-4. `plotting/depth_profiles.py`, `plotting/depth_cross_sections.py`,
+3. `plotting/pipeline_grids.py`, `plotting/pdfs.py`,
    `plotting/literature_comparison.py`.
-5. Template notebook (built once as `stratification.ipynb` — smallest
-   DEPTH subset with all diagnostic types), reviewed, then rolled out:
-   frontal_structure_surface → kinematic_surface →
-   frontogenesis_surface → surface_wind → native_fields_surface →
-   remaining DEPTH notebooks → `_depth` variants → icearea.
-6. Cross-reference plumbing (docstrings, Fields.md column, README).
+4. Template notebook built once as
+   `surface_fields/frontal_structure.ipynb` (richest surface chain),
+   reviewed, then rolled out: kinematic → frontogenesis →
+   surface_wind → native_fields → icearea.
+5. Cross-reference plumbing (docstrings, Fields.md column, README).
+
+Depth phase (after surface complete):
+
+6. Tile extensions (registry entries for U/V/W + tile-ds_merge/xgcm
+   helper with edge-trim convention).
+7. `plotting/depth_profiles.py`, `plotting/depth_cross_sections.py`.
+8. Depth template finalized on `depth_fields/stratification.ipynb`,
+   then remaining `depth_fields/` notebooks.
 
 ## Clarifications
 
@@ -515,3 +562,65 @@ the ease-of-access without the cost.
    a follow-up?
 
 ## Logs
+
+### 2026-07-31 — Clarifications resolved (planning discussion, LH + Claude)
+
+Decisions recorded; NO code or notebook changes made yet.
+
+1. **Store regeneration**: not needed. The field migration had NO impact
+   on the zarr stores in ``s3://dbof/LLC_RAW/``; the pre-migration
+   concern in Section 9 / Clarification 1 was unfounded. Route A
+   proceeds against existing products as-is.
+2. **Date coverage**: single-date v1 (20121109T12) accepted; notebooks
+   parameterized by date for future DEPTH dates.
+3. **Suffixes**: ``_mld_mean`` gets a FULL fourth figure set (Figures
+   1–2) wherever it is a real channel — not a noted omission.
+4. **KE promotion**: yes — promote the KE formula from
+   ``depth_subsets.compute_energetics`` into
+   ``calculate_fields_at_depth`` as part of this work.
+5. **Intermediate cmap entries**: adopted per plan (extend
+   ``field_cmaps.yaml``; no special-casing).
+6. **icearea**: standalone minimal notebook (keeps subset→notebook
+   mapping).
+7. **Row B box**: Gulf-Stream-centred, 25–45°N, 80–40°W.
+8. **PDF conventions**: confirmed as proposed (density y-axis; land+rim
+   NaN removal; log10-x for ∝-squared fields; shared bins per field
+   across domains; |lat|>2° Row D filter for f-normalised fields).
+9. **Tile count**: ALL THREE regional tiles (B Gulf Stream, C ACC,
+   D equatorial Pacific) per DEPTH notebook from v1 — not Gulf Stream
+   only.
+
+### 2026-07-31 — Structural update (LH)
+
+- Folder split: ``notebooks_field_validation/surface_fields/`` and
+  ``depth_fields/``, each holding ``{subset}.ipynb`` (folder replaces
+  filename suffix).
+- SURFACE FIRST: full end-to-end process on surface notebooks before
+  depth.
+- Notebooks GENERATE and LOAD their own data (RUN pipeline cell +
+  LOAD cell, drawing from ``notebooks_global/
+  running_generate_global_script.ipynb`` and
+  ``assess_generate_global_script.ipynb``) so they serve as
+  re-runnable validators after future code changes.
+- Template revised to 5 sections (Section 7); Figure 3 is the
+  literature comparison, with the figure type specified explicitly by
+  LH per variable.
+- Sections 1, 3, 7, 10 updated accordingly.  Still NO code changes.
+
+### 2026-07-31 — Doc review comments addressed (LH)
+
+- §2: sigma0 row relabeled "(potential density anomaly)"; channel
+  lists made complete per ``subset_definitions.py`` (one line per
+  channel; frontal_structure and kinematic expanded); new
+  plotting-intermediates convention (interpretable intermediates
+  plotted, tensor components tabled only — finals span them).
+- §3: generation timestep 20121109T12 for BOTH surface and depth.
+- §4: marked depth-phase only; ``tiles-fields`` branch noted — port
+  its build into the field-validation branch at depth phase rather
+  than rebasing.
+- §8: updated for ``surface_fields/`` / ``depth_fields/`` subfolders.
+- §9: pre-migration bullet resolved; intermediates-not-saved policy
+  added.
+- Per-field vs per-subset discussed: staying PER-SUBSET, option (a) —
+  each field's figure repeats its full dependency columns.
+- Next step agreed: begin ``surface_fields/frontal_structure.ipynb``.

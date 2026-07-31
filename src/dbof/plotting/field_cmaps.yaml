@@ -125,6 +125,8 @@ cmaps:
   KE_mld_mean: [speed, "Kinetic energy ML mean (m² s⁻²)"]
 
   # --- frontal structure (surface-only, no suffix) ---
+  density:      [dense,   "Potential density anomaly σ₀ (kg m⁻³)"]
+  buoyancy:     [balance, "Buoyancy b (m s⁻²)"]
   gradb2:       [amp,     "Buoyancy gradient magnitude² (s⁻⁴)"]
   gradsalt2:    [amp,     "Salinity gradient magnitude² (psu² m⁻²)"]
   gradtheta2:   [amp,     "Temperature gradient magnitude² (°C² m⁻²)"]
@@ -222,3 +224,9 @@ cmaps:
   vg_z25m:     [balance, "Geostrophic V 25 m (m s⁻¹)"]
   vg_mld:      [balance, "Geostrophic V MLD (m s⁻¹)"]
   vg_mld_mean: [balance, "Geostrophic V ML mean (m s⁻¹)"]
+
+  # --- non-channel intermediates (field-validation notebooks only) ---
+  # Dependency-chain columns in the validation figures; these are never
+  # output channels of any subset (plan §2 / Clarification 5).
+  rho_theta: [dense,   "Potential density ρθ (kg m⁻³)"]
+  log_gradb: [amp,     "log₁₀ |∇b| (log₁₀ s⁻²)"]
