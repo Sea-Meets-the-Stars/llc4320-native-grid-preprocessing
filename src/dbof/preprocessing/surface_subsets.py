@@ -13,9 +13,8 @@ depth-resolved diagnostics see ``depth_subsets.py``.
 
 import dask
 
-import dbof.preprocessing.calculate_additional_fields as calculate_additional_fields
-import dbof.utils.physical_calculations as physical_calculations
-from dbof.preprocessing.calculated_fields_at_depth import (
+import dbof.preprocessing.calculate_fields as calculate_fields
+from dbof.preprocessing.calculate_fields import (
     ekman_pumping,
     ekman_transport,
     wind_stress_curl,
@@ -42,7 +41,7 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     requested = set(computed_feature_channels)
     results = {}
     if {"U", "V"} & requested:
-        u_east, v_north = calculate_additional_fields.geographic_velocity(
+        u_east, v_north = calculate_fields.geographic_velocity(
             ds_merge, grid)
         if "U" in requested:
             results["U"] = u_east
@@ -61,7 +60,7 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
     results = {}
 
     if {"oceTAUX", "oceTAUY"} & requested:
-        tau_east, tau_north = calculate_additional_fields.geographic_wind_stress(
+        tau_east, tau_north = calculate_fields.geographic_wind_stress(
             ds_merge, grid)
         if "oceTAUX" in requested:
             results["oceTAUX"] = tau_east
@@ -91,11 +90,11 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     only once.
     """
     _GRAD_FNS = {
-        "gradsalt2":  calculate_additional_fields.grad_salt2,
-        "gradtheta2": calculate_additional_fields.grad_theta2,
-        "gradeta2":   calculate_additional_fields.grad_eta2,
-        "gradb2":     calculate_additional_fields.grad_b2,
-        "gradrho2":   calculate_additional_fields.grad_rho2,
+        "gradsalt2":  calculate_fields.grad_salt2,
+        "gradtheta2": calculate_fields.grad_theta2,
+        "gradeta2":   calculate_fields.grad_eta2,
+        "gradb2":     calculate_fields.grad_b2,
+        "gradrho2":   calculate_fields.grad_rho2,
     }
 
     # Turner angle depends on gradtheta2, gradsalt2, and gradrho2.
@@ -113,7 +112,7 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     }
 
     if turner_requested:
-        results["turner_angle"] = calculate_additional_fields.turner_angle(
+        results["turner_angle"] = calculate_fields.turner_angle(
             ds_merge,
             grid,
             gradtheta2=results["gradtheta2"],
@@ -121,12 +120,15 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
             gradrho2=results["gradrho2"],
         )
 
-    # Surface density [kg m-3] and buoyancy [m s-2] (JMD95 at p=0; buoyancy
-    # b = g rho / rho_ref x1e3, matching buoyancy_field_3d).
+    # Surface potential density [kg m-3] and buoyancy [m s-2] from the
+    # single lazy implementations (JMD95 at p=0; b = G rho / RHO0).
+    # Channel keys are unchanged.
     if "density" in needed:
-        results["density"] = physical_calculations.density_of_field(ds_merge)
+        results["density"] = calculate_fields.potential_density_anomaly(
+            ds_merge)
     if "buoyancy" in needed:
-        results["buoyancy"] = physical_calculations.buoyancy_of_field(ds_merge) * 1e3
+        results["buoyancy"] = calculate_fields.buoyancy_of_field(
+            ds_merge)
 
     # Only return channels that were actually requested.
     return {k: v for k, v in results.items() if k in computed_feature_channels}
@@ -140,17 +142,17 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     are returned.
     """
     requested = set(computed_feature_channels)
-    jac = calculate_additional_fields.compute_velocity_jacobian(ds_merge, grid)
+    jac = calculate_fields.compute_velocity_jacobian(ds_merge, grid)
 
     results = {}
 
     if 'relative_vorticity' in requested:
         results['relative_vorticity'] = (
-            calculate_additional_fields.relative_vorticity(ds_merge, grid, jacobian=jac))
+            calculate_fields.relative_vorticity(ds_merge, grid, jacobian=jac))
 
     if {'strain_n', 'strain_s', 'strain_mag'} & requested:
         strain_mag, strain_n, strain_s = (
-            calculate_additional_fields.strain(ds_merge, grid, jacobian=jac))
+            calculate_fields.strain(ds_merge, grid, jacobian=jac))
         if 'strain_n' in requested:
             results['strain_n'] = strain_n
         if 'strain_s' in requested:
@@ -160,19 +162,19 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
 
     if 'divergence' in requested:
         results['divergence'] = (
-            calculate_additional_fields.divergence(ds_merge, grid, jacobian=jac))
+            calculate_fields.divergence(ds_merge, grid, jacobian=jac))
 
     if 'coriolis_f' in requested:
         results['coriolis_f'] = (
-            calculate_additional_fields.coriolis_parameter(ds_merge, grid))
+            calculate_fields.coriolis_parameter(ds_merge, grid))
 
     if 'rossby_number' in requested:
         results['rossby_number'] = (
-            calculate_additional_fields.rossby_number(ds_merge, grid, jacobian=jac))
+            calculate_fields.rossby_number(ds_merge, grid, jacobian=jac))
 
     if 'okubo_weiss' in requested:
         results['okubo_weiss'] = (
-            calculate_additional_fields.okubo_weiss_parameter(ds_merge, grid, jacobian=jac))
+            calculate_fields.okubo_weiss_parameter(ds_merge, grid, jacobian=jac))
 
     return results
 
@@ -204,15 +206,15 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
         return {}
 
     # -- shared intermediates --------------------------------------------------
-    bg = calculate_additional_fields.compute_buoyancy_gradients(ds_merge, grid)
+    bg = calculate_fields.compute_buoyancy_gradients(ds_merge, grid)
 
     results = {}
 
     # Full frontogenesis tendency F(u, v)
     tendency = None
     if need_tendency:
-        jac = calculate_additional_fields.compute_velocity_jacobian(ds_merge, grid)
-        tendency = calculate_additional_fields.frontogenesis_tendency(
+        jac = calculate_fields.compute_velocity_jacobian(ds_merge, grid)
+        tendency = calculate_fields.frontogenesis_tendency(
             ds_merge, grid, jacobian=jac, buoyancy_gradients=bg)
         if 'frontogenesis_tendency' in requested:
             results['frontogenesis_tendency'] = tendency
@@ -220,7 +222,7 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     # Geostrophic velocity (needed for geo frontogenesis and/or ug/vg output)
     ug = vg = None
     if need_geo or need_ugvg:
-        ug, vg = calculate_additional_fields.geostrophic_velocity(ds_merge, grid)
+        ug, vg = calculate_fields.geostrophic_velocity(ds_merge, grid)
         if 'ug' in requested:
             results['ug'] = ug
         if 'vg' in requested:
@@ -229,7 +231,7 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     # Geostrophic frontogenesis tendency F(ug, vg)
     geo = None
     if need_geo:
-        geo = calculate_additional_fields.frontogenesis_geo(
+        geo = calculate_fields.frontogenesis_geo(
             ds_merge, grid, ug=ug, vg=vg, buoyancy_gradients=bg)
         if 'frontogenesis_geo' in requested:
             results['frontogenesis_geo'] = geo

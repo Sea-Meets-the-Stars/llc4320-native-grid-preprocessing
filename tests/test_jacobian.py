@@ -34,14 +34,14 @@ import dbof.utils.native_gradient as ng
 from dbof.llc4320_ingestion.grid import set_xgcm_grid
 
 # --- Real-grid (network) test configuration ------------------------------
-# The real LLC4320 grid lives in an LLC_DEPTH-style zarr store on S3.  The
-# face-separated grid (face, j, i) needed by ``face_connections`` is at
-# ``s3://dbof/LLC4320/grid.zarr`` (the global mosaic store
-# ``llc4320_grid.zarr`` is a flat 2-D array and is *not* usable here).
+# The real LLC4320 grid lives in an LLC_DEPTH-style zarr store on S3.
+# ``face_connections`` needs the *face-separated* grid (face, j, i) at
+# ``s3://dbof/LLC4320_RAW/DEPTH/grid.zarr`` — NOT the global 2-D mosaic
+# store (``llc4320_grid.zarr``), which has no face dimension.
 REAL_GRID_S3 = dict(
     s3_endpoint="https://s3-west.nrp-nautilus.io",
     bucket="dbof",
-    folder="LLC4320",
+    folder="LLC4320_RAW/DEPTH",
 )
 
 # Local cache for the (small) subset of grid fields we need, so the

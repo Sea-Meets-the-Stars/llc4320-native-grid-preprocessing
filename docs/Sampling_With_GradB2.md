@@ -8,7 +8,7 @@ dynamically active regions. Sampling runs on `log10(ΔB²)` — see [Weighted Sa
 ΔB² is computed in **generate-global** (the `frontal_structure` subset) and stored as the
 `gradb2` channel; the cutout job reads it and takes `log10` at sample time
 (`processing.sample_cutout_centers_with_loggradb`). Reference impl:
-`calculate_additional_fields.grad_b2` / `log_grad_b`.
+`calculate_fields.grad_b2` / `log_grad_b`.
 
 ### Buoyancy
 Surface buoyancy `b` is derived from `Theta` and `Salt` (`physical_calculations.buoyancy_of_field`).

@@ -173,7 +173,7 @@ full provenance. No global store required.
 flowchart TD
     subgraph IN["Inputs (raw LLC4320 depth store)"]
         TS["S3 dbof/LLC4320_RAW/DEPTH/<br/>{date}.zarr (Theta, Salt, ...)"]
-        GRIDT["S3 dbof/LLC4320/grid.zarr"]
+        GRIDT["S3 dbof/LLC4320_RAW/DEPTH/grid.zarr"]
     end
 
     CLI["generate_tile.main<br/>(--i/--j or --lon/--lat, --timestamp, --property)"] --> RUN["tile_utils.run"]
@@ -188,7 +188,7 @@ flowchart TD
     GRIDT --> LOADG
     TS --> LOADT
 
-    LOADT --> COMPUTE["compute_tile_property<br/>TILE_PROPERTIES[prop].compute(...)<br/>e.g. calculated_fields_at_depth.<br/>potential_density_anomaly_3d<br/>→ single .compute()"]
+    LOADT --> COMPUTE["compute_tile_property<br/>TILE_PROPERTIES[prop].compute(...)<br/>e.g. calculate_fields.<br/>potential_density_anomaly<br/>→ single .compute()"]
 
     COMPUTE --> BUILD["_build_output_dataset<br/>field + XC/YC/Z coords +<br/>provenance attrs (timestamp,<br/>iteration, tile_index, face_index,<br/>property, git_commit)"]
     LOADG --> BUILD

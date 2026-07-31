@@ -16,9 +16,8 @@ OSN
     timestep stores are used.
 
 DEPTH
-    All variables from S3 timestep stores in ``LLC4320_v1`` (full depth).
-    Grid is read from the ``LLC4320`` folder (original, non-corrupt
-    transfer location).
+    All variables (full depth) and ``grid.zarr`` from S3 timestep stores
+    in ``LLC4320_RAW/DEPTH``.
 
 Chunking & face-ordering contract (important for xgcm / DEPTH)
 ---------------------------------------------------------------

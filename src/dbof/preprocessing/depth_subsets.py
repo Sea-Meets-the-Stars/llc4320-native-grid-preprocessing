@@ -3,7 +3,7 @@ Compute-subset entry points for the depth pipeline.
 
 Each ``compute_*`` function:
 
-1. Builds lazy 3D fields via the functions in ``calculated_fields_at_depth``.
+1. Builds lazy 3D fields via the functions in ``calculate_fields_at_depth``.
 2. Applies ``apply_depth_strategies`` to reduce each 3D field to 2D at the
    requested depth channels (surface, z25m, mld, mld_mean).
 3. Calls ``dask.compute()`` once to materialise all results for the subset.
@@ -18,52 +18,47 @@ import dask
 from dbof.preprocessing.depth_strategies import (
     apply_depth_strategies,
 )
-from dbof.preprocessing.calculated_fields_at_depth import (
-    # -- density / core 3D --
+from dbof.preprocessing.calculate_fields_at_depth import (
+    # -- vertical-structure fields (require k / W / drF) --
     mixed_layer_depth,
-    buoyancy_frequency_squared_3d,
-    buoyancy_field_3d,
+    buoyancy_frequency_squared,
     mixed_layer_heat_content,
-    # -- shear & dimensionless --
-    vertical_shear_magnitude_3d,
-    richardson_number_3d,
-    froude_number_3d,
-    rossby_number_3d,
-    burger_number_3d,
-    balanced_richardson_number_3d,
-    # -- geographic vectors --
-    geographic_velocity_3d,
+    vertical_shear_magnitude,
+    richardson_number,
+    froude_number,
+    burger_number,
+    balanced_richardson_number,
+    advective_buoyancy_fluxes,
+    ertel_pv_terms,
+)
+import dbof.utils.native_gradient as ng
+from dbof.preprocessing.calculate_fields import (
+    # -- dimension-agnostic fields (single implementations) --
+    coriolis_parameter,
+    buoyancy_of_field,
+    geographic_velocity,
     geographic_wind_stress,
-    # -- wind --
     wind_stress_curl,
     ekman_pumping,
     ekman_transport,
-    # -- fluxes --
-    advective_buoyancy_fluxes_3d,
-    # -- PV --
-    ertel_pv_terms_3d,
-    # -- gradient / frontal structure --
-    _grad_squared_3d,
-    grad_theta2_3d,
-    grad_salt2_3d,
-    grad_rho2_3d,
-    grad_b2_3d,
+    grad_theta2,
+    grad_salt2,
+    grad_rho2,
+    grad_b2,
     grad_eta2,
-    turner_angle_3d,
-    # -- kinematic (individual 3D functions) --
-    compute_velocity_jacobian_3d,
-    relative_vorticity_3d,
-    strain_3d,
-    divergence_3d,
-    okubo_weiss_3d,
-    # -- frontogenesis (individual 3D functions) --
-    compute_buoyancy_gradients_3d,
-    frontogenesis_tendency_3d,
-    geostrophic_velocity_3d,
-    frontogenesis_geo_3d,
-    modified_okubo_weiss_3d,
+    turner_angle,
+    compute_velocity_jacobian,
+    relative_vorticity,
+    strain,
+    divergence,
+    okubo_weiss_parameter,
+    rossby_number,
+    modified_okubo_weiss,
+    compute_buoyancy_gradients,
+    frontogenesis_tendency,
+    geostrophic_velocity,
+    frontogenesis_geo,
 )
-from dbof.preprocessing.calculate_additional_fields import coriolis_parameter
 from dbof.preprocessing.vertical_helpers import _interp_w_to_tracer_levels
 
 
@@ -161,7 +156,7 @@ def compute_stratification(ds_merge, grid, computed_feature_channels):
         results["mixed_layer_depth"] = mld
 
     if any(c.startswith("N2_") for c in requested):
-        n2_3d = buoyancy_frequency_squared_3d(ds_merge)   # lazy
+        n2_3d = buoyancy_frequency_squared(ds_merge)   # lazy
         results.update(apply_depth_strategies(
             n2_3d, "N2", ds_merge, mld=mld, requested=requested))
 
@@ -200,13 +195,13 @@ def compute_vertical_shear(ds_merge, grid, computed_feature_channels):
     mld = _lazy_mld(ds_merge, requested)
 
     if shear_requested:
-        shear_3d = vertical_shear_magnitude_3d(ds_merge, grid)   # lazy
+        shear_3d = vertical_shear_magnitude(ds_merge, grid)   # lazy
         results.update(apply_depth_strategies(
             shear_3d, "vertical_shear", ds_merge, mld=mld,
             requested=requested))
 
     if ri_requested:
-        ri_3d = richardson_number_3d(ds_merge, grid)   # lazy
+        ri_3d = richardson_number(ds_merge, grid)   # lazy
         results.update(apply_depth_strategies(
             ri_3d, "Ri", ds_merge, mld=mld, requested=requested))
 
@@ -236,23 +231,23 @@ def compute_mixing_parameters(ds_merge, grid, computed_feature_channels):
     mld = _lazy_mld(ds_merge, requested)
 
     if any(c.startswith("Fr_") for c in requested):
-        fr_3d = froude_number_3d(ds_merge, grid, mld=mld)   # lazy
+        fr_3d = froude_number(ds_merge, grid, mld=mld)   # lazy
         results.update(apply_depth_strategies(
             fr_3d, "Fr", ds_merge, mld=mld, requested=requested))
 
     if any(c.startswith("Ro_") for c in requested):
-        ro_3d = rossby_number_3d(ds_merge, grid)   # lazy
+        ro_3d = rossby_number(ds_merge, grid)   # lazy
         results.update(apply_depth_strategies(
             ro_3d, "Ro", ds_merge, mld=mld, requested=requested))
 
     if any(c.startswith("Bu_") for c in requested):
-        bu_3d = burger_number_3d(ds_merge, grid, mld=mld)   # lazy
+        bu_3d = burger_number(ds_merge, grid, mld=mld)   # lazy
         results.update(apply_depth_strategies(
             bu_3d, "Bu", ds_merge, mld=mld, requested=requested))
 
     if any(c.startswith("R_ib_") for c in requested):
         # Balanced Richardson number R_ib = N² f² / |∇_h b|² (lazy).
-        rib_3d = balanced_richardson_number_3d(ds_merge, grid)
+        rib_3d = balanced_richardson_number(ds_merge, grid)
         results.update(apply_depth_strategies(
             rib_3d, "R_ib", ds_merge, mld=mld, requested=requested))
 
@@ -286,7 +281,7 @@ def compute_ertel_pv(ds_merge, grid, computed_feature_channels):
         return results
 
     mld = _lazy_mld(ds_merge, requested)
-    pv_dict = ertel_pv_terms_3d(ds_merge, grid)   # lazy 3D fields
+    pv_dict = ertel_pv_terms(ds_merge, grid)   # lazy 3D fields
 
     for base in active_bases:
         results.update(apply_depth_strategies(
@@ -320,7 +315,7 @@ def compute_buoyancy_fluxes(ds_merge, grid, computed_feature_channels):
         return results
 
     mld = _lazy_mld(ds_merge, requested)
-    uB, vB, wB = advective_buoyancy_fluxes_3d(ds_merge, grid)   # lazy
+    uB, vB, wB = advective_buoyancy_fluxes(ds_merge, grid)   # lazy
 
     if any(c.startswith("uB_") for c in requested):
         results.update(apply_depth_strategies(
@@ -359,10 +354,12 @@ def compute_energetics(ds_merge, grid, computed_feature_channels):
         return results
 
     mld = _lazy_mld(ds_merge, requested)
-    b = buoyancy_field_3d(ds_merge)   # lazy
+    b = buoyancy_of_field(ds_merge)   # lazy
     f = coriolis_parameter(ds_merge, grid)
 
-    grad_b2 = _grad_squared_3d(b, ds_merge, grid)   # lazy
+    b_x, b_y = ng.calculate_native_gradient_tracer(
+        b, ds_merge, grid=grid)                     # lazy
+    grad_b2 = ng.grad_squared(b_x, b_y)             # lazy
     grad_b_mag = np.sqrt(grad_b2)
     ke_3d = 0.5 * (mld * grad_b_mag / f)**2   # lazy
 
@@ -413,9 +410,9 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
 
     # Cache of 3D gradient fields: base_name → lazy xr.DataArray
     _GRAD_FNS = {
-        "gradtheta2": grad_theta2_3d,
-        "gradsalt2":  grad_salt2_3d,
-        "gradrho2":   grad_rho2_3d,
+        "gradtheta2": grad_theta2,
+        "gradsalt2":  grad_salt2,
+        "gradrho2":   grad_rho2,
     }
     grad_3d_cache = {}
     for base in needed_bases:
@@ -433,7 +430,7 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     if any(c.startswith("gradb2_") for c in requested):
         _ensure_mld()
         results.update(apply_depth_strategies(
-            grad_b2_3d(ds_merge, grid),
+            grad_b2(ds_merge, grid),
             "gradb2", ds_merge, mld=mld, requested=requested))
 
     # gradeta2 — |∇η|² (inherently 2D, surface only)
@@ -444,7 +441,7 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     if turner_requested:
         _ensure_mld()
         results.update(apply_depth_strategies(
-            turner_angle_3d(
+            turner_angle(
                 ds_merge, grid,
                 gradtheta2=grad_3d_cache["gradtheta2"],
                 gradsalt2=grad_3d_cache["gradsalt2"],
@@ -488,16 +485,16 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
         return results
 
     mld = _lazy_mld(ds_merge, requested)
-    jac = compute_velocity_jacobian_3d(ds_merge, grid)   # lazy — shared
+    jac = compute_velocity_jacobian(ds_merge, grid)   # lazy — shared
 
     if any(c.startswith("relative_vorticity_") for c in requested):
         results.update(apply_depth_strategies(
-            relative_vorticity_3d(ds_merge, grid, jacobian=jac),
+            relative_vorticity(ds_merge, grid, jacobian=jac),
             "relative_vorticity", ds_merge, mld=mld, requested=requested))
 
     if any(c.startswith(b + "_") for c in requested
            for b in ("strain_n", "strain_s", "strain_mag")):
-        sm, sn, ss = strain_3d(ds_merge, grid, jacobian=jac)
+        sm, sn, ss = strain(ds_merge, grid, jacobian=jac)
         for base, field in [("strain_n", sn), ("strain_s", ss),
                             ("strain_mag", sm)]:
             if any(c.startswith(base + "_") for c in requested):
@@ -506,17 +503,17 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
 
     if any(c.startswith("divergence_") for c in requested):
         results.update(apply_depth_strategies(
-            divergence_3d(ds_merge, grid, jacobian=jac),
+            divergence(ds_merge, grid, jacobian=jac),
             "divergence", ds_merge, mld=mld, requested=requested))
 
     if any(c.startswith("rossby_number_") for c in requested):
         results.update(apply_depth_strategies(
-            rossby_number_3d(ds_merge, grid),
+            rossby_number(ds_merge, grid),
             "rossby_number", ds_merge, mld=mld, requested=requested))
 
     if any(c.startswith("okubo_weiss_") for c in requested):
         results.update(apply_depth_strategies(
-            okubo_weiss_3d(ds_merge, grid, jacobian=jac),
+            okubo_weiss_parameter(ds_merge, grid, jacobian=jac),
             "okubo_weiss", ds_merge, mld=mld, requested=requested))
 
     # coriolis_f has no depth dependence — no depth strategies needed.
@@ -575,26 +572,26 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     mld = _lazy_mld(ds_merge, requested)
 
     # -- shared intermediates --
-    bg = compute_buoyancy_gradients_3d(ds_merge, grid)
+    bg = compute_buoyancy_gradients(ds_merge, grid)
 
     # Velocity Jacobian — shared by the full tendency and by W*.  Compute
     # it once here when either needs it (lazy; no .compute()).
     jac = None
     if need_tendency or need_wstar:
-        jac = compute_velocity_jacobian_3d(ds_merge, grid)
+        jac = compute_velocity_jacobian(ds_merge, grid)
 
     # Modified Okubo-Weiss W* — reuses the shared Jacobian.  Its buoyancy
     # gradient is the physically consistent (unscaled) one built inside
-    # modified_okubo_weiss_3d, so it is NOT the ×-scaled ``bg`` above.
+    # modified_okubo_weiss, so it is NOT the ×-scaled ``bg`` above.
     if need_wstar:
         results.update(apply_depth_strategies(
-            modified_okubo_weiss_3d(ds_merge, grid, jacobian=jac),
+            modified_okubo_weiss(ds_merge, grid, jacobian=jac),
             "Wstar", ds_merge, mld=mld, requested=requested))
 
     # Full frontogenesis tendency F(u, v)
     tendency_3d = None
     if need_tendency:
-        tendency_3d = frontogenesis_tendency_3d(
+        tendency_3d = frontogenesis_tendency(
             ds_merge, grid, jacobian=jac, buoyancy_gradients=bg)
         if any(c.startswith("frontogenesis_tendency_") for c in requested):
             results.update(apply_depth_strategies(
@@ -604,7 +601,7 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     # Geostrophic velocity (needed for geo frontogenesis and/or ug/vg output)
     ug = vg = None
     if need_geo or need_ugvg:
-        ug, vg = geostrophic_velocity_3d(ds_merge, grid)
+        ug, vg = geostrophic_velocity(ds_merge, grid)
         # Geostrophic velocity — inherently surface
         for vname, field in [("ug", ug), ("vg", vg)]:
             key = f"{vname}_sfc"
@@ -614,7 +611,7 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     # Geostrophic frontogenesis tendency F(ug, vg)
     geo_3d = None
     if need_geo:
-        geo_3d = frontogenesis_geo_3d(
+        geo_3d = frontogenesis_geo(
             ds_merge, grid, ug=ug, vg=vg, buoyancy_gradients=bg)
         if any(c.startswith("frontogenesis_geo_") for c in requested):
             results.update(apply_depth_strategies(
@@ -759,7 +756,7 @@ def compute_native_fields(ds_merge, grid, computed_feature_channels):
     #    depths.  Output 'U_*' is eastward, 'V_*' northward velocity.
     if any(c.startswith("U_") or c.startswith("V_") for c in requested):
         _ensure_mld()
-        u_east, v_north = geographic_velocity_3d(ds_merge, grid)
+        u_east, v_north = geographic_velocity(ds_merge, grid)
         if any(c.startswith("U_") for c in requested):
             results.update(apply_depth_strategies(
                 u_east, "U", ds_merge, mld=mld, requested=requested))
@@ -793,4 +790,40 @@ SUBSET_COMPUTE_FNS = {
     "frontal_structure": compute_frontal_structure,
     "kinematic":         compute_kinematic,
     "frontogenesis":     compute_frontogenesis,
+}
+
+
+def _ensure_depth_chunking(ds_merge):
+    """Enforce the DEPTH tile chunking once, at the pipeline entry point.
+
+    Moved here from ``calculate_fields_at_depth._density_lazy`` during
+    the field migration (see prompts/field_migration.md): (a) aligns
+    Theta/Salt chunks for the JMD95 ``apply_ufunc``; (b) makes vertical
+    columns contiguous (``k: -1``) so vertical derivatives / MLD
+    reductions never rechunk mid-graph.  Applying it here fixes chunking
+    for ALL fields (not just density-descended ones) and keeps the field
+    functions chunking-agnostic.
+
+    Generated by LH and Claude
+    """
+    chunk_spec = {'face': 1, 'j': 720, 'i': 720}
+    for dim in ('k', 'k_l'):
+        if dim in ds_merge.dims:
+            chunk_spec[dim] = -1
+    return ds_merge.chunk(chunk_spec)
+
+
+def _with_depth_chunking(fn):
+    """Wrap a compute_* entry point to rechunk ds_merge on the way in."""
+    def wrapped(ds_merge, grid, computed_feature_channels):
+        return fn(_ensure_depth_chunking(ds_merge), grid,
+                  computed_feature_channels)
+    wrapped.__name__ = fn.__name__
+    wrapped.__doc__ = fn.__doc__
+    return wrapped
+
+
+SUBSET_COMPUTE_FNS = {
+    name: _with_depth_chunking(fn)
+    for name, fn in SUBSET_COMPUTE_FNS.items()
 }

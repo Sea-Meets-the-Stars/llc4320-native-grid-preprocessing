@@ -131,7 +131,7 @@ extra_channels: [mixed_layer_depth]
 
 The mixed-layer depth (MLD) — the depth to the base of the mixed layer — has
 several definitions. Two estimators are implemented in
-`calculated_fields_at_depth.py`, both returning a 2D field (positive metres):
+`calculate_fields_at_depth.py`, both returning a 2D field (positive metres):
 
 | Field    | Function                  | Definition                                                                 |
 |----------|---------------------------|----------------------------------------------------------------------------|
@@ -262,7 +262,7 @@ deliberately **not** reused — it would bias `R_ib` by a constant `1e6`).
 (`f → 0`). Statically unstable columns (`N² < 0`) are **floored to
 `N² = 0`**, so `R_ib = 0` there rather than negative. It is computed by
 `balanced_richardson_number_3d` in
-`src/dbof/preprocessing/calculated_fields_at_depth.py`.
+`src/dbof/preprocessing/calculate_fields_at_depth.py`.
 
 The same `N² ≥ 0` floor is applied to the gradient Richardson number `Ri`
 (the `vertical_shear` subset, `richardson_number_3d`): negative `N²` is
@@ -308,7 +308,7 @@ tracers (`Theta`, `Salt`) — unlike the classical `okubo_weiss`, which needs
 only velocities; this is why it lives in the `frontogenesis` subset (which
 already loads both and builds the velocity Jacobian). It is computed by
 `modified_okubo_weiss_3d` in
-`src/dbof/preprocessing/calculated_fields_at_depth.py`.
+`src/dbof/preprocessing/calculate_fields_at_depth.py`.
 
 ---
 

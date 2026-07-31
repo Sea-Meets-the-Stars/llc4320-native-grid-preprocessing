@@ -1,12 +1,12 @@
 """
 Tests for the mixed-layer-depth estimators in
-``dbof.preprocessing.calculated_fields_at_depth``:
+``dbof.preprocessing.calculate_fields_at_depth``:
 
 - ``mixed_layer_depth``     — threshold (Bodner et al.) MLD, the project default
 - ``mixed_layer_depth_DI``  — Depth Integration Method (N²-weighted mean depth)
 
 Follows the synthetic-data philosophy of
-``tests/test_calculated_fields_at_depth.py``: build tiny in-memory,
+``tests/test_calculate_fields_at_depth.py``: build tiny in-memory,
 dask-backed arrays so the unit tests run in milliseconds with no network or
 model I/O.
 
@@ -39,10 +39,10 @@ import xarray as xr
 import pytest
 
 # code under test
-import dbof.preprocessing.calculated_fields_at_depth as cfad
+import dbof.preprocessing.calculate_fields_at_depth as cfad
 from dbof.preprocessing.physical_constants import (
     G,
-    RHO0_BOUSSINESQ,
+    RHO0_REFERENCE,
     MLD_INTEGRATION_DEPTH_M,
 )
 from dbof.preprocessing.vertical_helpers import _vertical_derivative
@@ -285,7 +285,7 @@ def test_mld_di_on_real_density_tile():
         # ρ from σ₀, then N² = (g/ρ₀) dρ/dz on the model levels.
         rho = ds["sigma0"] + 1000.0
         drho_dz = _vertical_derivative(rho, ds)
-        n2 = (G / RHO0_BOUSSINESQ) * drho_dz
+        n2 = (G / RHO0_REFERENCE) * drho_dz
 
         mld = cfad.mixed_layer_depth_DI(ds, n2=n2).compute()
 

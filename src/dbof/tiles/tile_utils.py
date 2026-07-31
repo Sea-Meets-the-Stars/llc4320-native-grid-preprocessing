@@ -45,7 +45,7 @@ from dask.diagnostics import ProgressBar
 # repo modules (installed as the ``dbof`` package).
 import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
-import dbof.preprocessing.calculated_fields_at_depth as calculated_fields_at_depth
+import dbof.preprocessing.calculate_fields as calculate_fields
 import dbof.utils.faces_to_latlon as faces_to_latlon
 from dbof.global_dataset_creation.data_sources import get_data_source
 # Reuse the canonical date<->iteration converter + format and the git-commit
@@ -120,8 +120,8 @@ def _resolve_s3_source(config_path: Path | None) -> dict:
     config_path : Path or None
         Optional legacy override.  When ``None`` (the default), the canonical
         LLC_DEPTH source is taken from ``data_sources.get_data_source("DEPTH")``
-        -- full-depth timestep stores in ``LLC4320_v1`` plus ``grid.zarr`` in
-        ``LLC4320``.  When supplied, the YAML's ``s3_source`` block is loaded
+        -- full-depth timestep stores and ``grid.zarr`` in
+        ``LLC4320_RAW/DEPTH``.  When supplied, the YAML's ``s3_source`` block is loaded
         instead (see :func:`_load_s3_config`).
 
     Returns
@@ -362,8 +362,8 @@ class TileProperty:
 
 # NOTE: property *calculations* deliberately do NOT live in this module.  Each
 # calculated field has exactly one implementation in
-# ``preprocessing.calculated_fields_at_depth`` (e.g. potential density is
-# ``potential_density_anomaly_3d``); the registry below points ``compute`` at
+# ``preprocessing.calculate_fields`` (e.g. potential density is
+# ``potential_density_anomaly``); the registry below points ``compute`` at
 # those canonical functions.  Only trivial native-variable *selection*
 # (temperature/salinity passthroughs) stays here, since there is nothing to
 # compute for a field the model already stores.
@@ -414,7 +414,7 @@ TILE_PROPERTIES: dict[str, TileProperty] = {
         long_name="potential density anomaly referenced to surface (JMD95, p=0)",
         filename_prefix="density",
         # Single canonical σ₀ routine -- shared with the global depth pipeline.
-        compute=calculated_fields_at_depth.potential_density_anomaly_3d,
+        compute=calculate_fields.potential_density_anomaly,
     ),
     "temperature": TileProperty(
         name="temperature",

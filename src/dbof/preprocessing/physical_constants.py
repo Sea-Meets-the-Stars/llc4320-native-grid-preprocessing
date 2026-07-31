@@ -12,40 +12,21 @@ update propagates automatically.
 G = 9.81
 """float: Gravitational acceleration [m s⁻²]."""
 
-G_KM = 0.0098
-"""float: Gravitational acceleration [km s⁻²].
-
-Used in buoyancy calculations where the length scale is kilometres
-(e.g. ``buoyancy_of_field``, ``buoyancy_field_3d``).
-"""
-
 # ---------------------------------------------------------------------------
-# Reference densities
+# Reference density
 # ---------------------------------------------------------------------------
 
-RHO0_BOUSSINESQ = 1000.0
-"""float: Boussinesq reference density [kg m⁻³].
+RHO0_REFERENCE = 1000.0
+"""float: Reference density ρ₀ [kg m⁻³].
 
-Used in the Brunt–Väisälä frequency  N² = (g / ρ₀) dρ/dz  and in
-heat-content integrals  Q = ρ₀ Cₚ ∫ θ dz.
-"""
+Used consistently everywhere a reference density appears:
 
-RHO0_SEAWATER = 1025.0
-"""float: Realistic seawater reference density [kg m⁻³].
+- σ₀ anomaly:            σ₀ = ρ(S, Θ, p=0) − ρ₀
+- buoyancy:              b = g σ₀ / ρ₀
+- Brunt–Väisälä:         N² = (g / ρ₀) dρ/dz
+- heat-content integral: Q = ρ₀ Cₚ ∫ θ dz
+- Turner-angle linear-EOS identity, Ekman transport/pumping
 
-Used in buoyancy  b = −g ρ / ρ_ref,  Turner angle, and related
-diagnostics where the absolute magnitude matters more than the
-Boussinesq simplification.
-"""
-
-SIGMA0_REFERENCE_DENSITY = 1000.0
-"""float: Reference density subtracted to form the σ₀ anomaly [kg m⁻³].
-
-    σ₀ = ρ(S, Θ, p=0) − SIGMA0_REFERENCE_DENSITY
-
-Used by :func:`calculated_fields_at_depth.potential_density_anomaly_3d`
-(and the mixed-layer-depth criterion) so the ``− 1000`` offset is named in
-exactly one place.
 """
 
 # ---------------------------------------------------------------------------
