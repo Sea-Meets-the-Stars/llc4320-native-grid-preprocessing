@@ -197,6 +197,7 @@ cmaps:
   okubo_weiss_mld_mean:        [curl, "Okubo-Weiss ML mean (s⁻²)"]
 
   # --- frontogenesis (surface-only, no suffix) ---
+  Wstar:                  [curl,    "Modified Okubo-Weiss W* (s⁻²)"]
   frontogenesis_tendency: [curl,    "Frontogenesis tendency (s⁻²)"]
   ug:                     [balance, "Geostrophic U (m s⁻¹)"]
   vg:                     [balance, "Geostrophic V (m s⁻¹)"]

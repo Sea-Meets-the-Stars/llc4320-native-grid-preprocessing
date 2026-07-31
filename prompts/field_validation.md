@@ -332,7 +332,10 @@ Existing in ``src/dbof/plotting/`` (REUSE, do not recreate):
 
 Gap: there is NO regional-selection module — region boxes currently
 live ad hoc in notebooks.  Proposed new modules (names follow the
-existing snake_case, one-plot-type-per-module convention):
+existing snake_case, one-plot-type-per-module convention).
+STATUS 2026-07-31: regions / pipeline_grids / pdfs /
+literature_comparison BUILT (see Logs); depth_profiles /
+depth_cross_sections remain for the depth phase:
 
 | Proposed module | Responsibility | Key inputs |
 |---|---|---|
@@ -482,7 +485,9 @@ the ease-of-access without the cost.
   fields that span them (see Section 2 convention).
 - Only one DEPTH date exists (20121109T12); OSN wind covers only
   2011-11-01–2012-07-15, so surface_wind at that date requires the
-  LLC_SURF S3 store path (present for 20121109T12? — verify).
+  LLC_SURF S3 store path.  RESOLVED 2026-07-31: the 20121109T12
+  LLC_SURF raw surface data has been transferred (LH) — wind and
+  SIarea need no OSN llc_wind data at the validation date.
 - ``field_cmaps.yaml`` covers output channels but NOT intermediates
   (rho_theta, b, b_x/b_y, J components, uz/vz, W_c, curl τ before
   scaling) — entries must be added for the dependency columns.
@@ -626,3 +631,90 @@ Decisions recorded; NO code or notebook changes made yet.
 - Per-field vs per-subset discussed: staying PER-SUBSET, option (a) —
   each field's figure repeats its full dependency columns.
 - Next step agreed: begin ``surface_fields/frontal_structure.ipynb``.
+
+### 2026-07-31 — Implementation: surface deliverables 1–4 built
+
+(Restored after accidental overwrite.)  Built (on branch
+``field-validation``):
+
+- ``configs/global/run/field_validation_surface.yaml`` — SURF,
+  20121109T12, run_id ``field_validation_v1``; notebooks pass
+  ``--subset`` explicitly.
+- ``plotting/regions.py`` — domain registry + ``select_region`` /
+  ``select_all_regions`` / ``region_outline``; boxes pinned.
+- ``plotting/pipeline_grids.py`` — rows(domains)×cols(chain) map grid;
+  ONE norm + colorbar per column (pooled across regions).
+- ``plotting/pdfs.py`` — PDF grid per Clarification 8 conventions.
+- ``plotting/literature_comparison.py`` — Figure 3 layout;
+  placeholder-safe until per-variable references are supplied.
+- ``field_cmaps.yaml`` — added missing output channels ``density``,
+  ``buoyancy`` + intermediates ``rho_theta``, ``log_gradb``.
+- ``global_maps.plot_global_field`` — backwards-compatible ``norm=``
+  override (shared column norms).
+- ``surface_fields/frontal_structure.ipynb`` — 5-section template,
+  8 per-field sections; raw Theta/Salt/Eta + rho_theta computed LIVE
+  via ``load_snapshot``/``stitch_and_mask`` (store has only outputs).
+- ``notebooks_field_validation/README.md`` — subset→notebook→channel
+  index (deliverable 5 partially pulled forward).
+
+Post-first-run fixes (real-data issues found by LH):
+
+- Global row must render on cartopy Robinson with
+  ``transform=PlateCarree()`` (assess-notebook pattern); plain-axes
+  pcolormesh of the full stitched grid smears seam/Arctic quads.
+- ``mask_wrap_cells`` (public): NaN cells adjacent to coordinate
+  jumps (>180° lon / >30° lat) before drawing the global row — kills
+  the residual seam/Arctic striations that painted over land.
+- Land rendering: gray axis facecolor (``LAND_COLOR = 0.85``) — NaN
+  land/halo shows uniform gray on all map panels.  (PDFs always
+  excluded land: NaNs dropped before binning.)
+- Panels enlarged (5.2×3.4 in); regional-extent boxes (crimson) drawn
+  on every global panel.
+- Kuroshio added as validation region: 135–165°E, 25–45°N (Row C;
+  §6 updated).  TODO depth phase: pick a Kuroshio representative tile
+  (suggest near 145°E, 35°N) alongside the tiles listed in §6.
+- Literature convention (supersedes earlier note): flat directory
+  ``notebooks_field_validation/literature_figures/``, files named
+  ``{field}_{Citation}_{description}.png``.  First reference supplied
+  by LH: turner_angle — Whalen & Drushka (2024), World Ocean Atlas
+  climatology, GLOBAL view → our Figure 3 panel for turner_angle is a
+  global Robinson map (``figure3_literature(global_view=True)``;
+  ``side_by_side`` gained a ``projection=`` kwarg).  All other fields
+  still await references (Gulf Stream regional map default).
+
+Status vs §10: surface items 1–3 done; item 4 (template notebook)
+built and undergoing first real-data review by LH; item 5
+(cross-reference plumbing) partially done (README).  Not yet run
+end-to-end by Claude (S3 unreachable from sandbox) — LH is executing
+the real run.
+
+### 2026-07-31 — Rollout: remaining 5 surface notebooks built
+
+``surface_fields/``: native_fields, surface_wind, icearea,
+kinematic, frontogenesis — all from the reviewed frontal_structure
+template (incl. post-review fixes: Robinson global row +
+mask_wrap_cells, gray land, per-column shared norms, region boxes,
+literature_figures convention, NEW |lat|>2° Eq.-Pacific PDF filter
+for f-normalised fields via in-notebook ``_pdf_arrays``).
+
+Per-subset notes:
+
+- native_fields: no live cell (all raw channels are in the store);
+  raw staggered U/V are NOT plotted (cannot be stitched) — chains are
+  single-column; W ≈ 0 at k_l=0 noted per §7.
+- surface_wind: coriolis_f recomputed in-notebook on the rect grid
+  (independent f cross-check; store has no f channel).  §9 LLC_SURF
+  item RESOLVED: 20121109T12 raw surface data transferred (LH) —
+  notebook warnings softened accordingly.
+- icearea: minimal single-field notebook (Clarification 6); SIarea
+  from the transferred LLC_SURF store (no OSN llc_wind needed).
+- kinematic: live U/V via CF.geographic_velocity; J components
+  tabled not plotted; F_NORM = {rossby_number}.
+- frontogenesis: live Eta/U/V/buoyancy; F_NORM = {ug, vg,
+  frontogenesis_geo, frontogenesis_ageo, Wstar}.
+- ``field_cmaps.yaml``: added missing ``Wstar`` (surface) entry.
+
+All 6 surface notebooks now BUILT (README statuses updated); real-data
+execution/review by LH pending for the 5 new ones.  §10 item 4
+complete pending review; next: item 5 cross-reference plumbing
+(docstrings + Fields.md column), then depth phase.

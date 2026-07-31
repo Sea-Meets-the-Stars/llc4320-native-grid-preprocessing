@@ -10,7 +10,11 @@ output, and validates every field with dependency-chain maps
 
 Layout: `surface_fields/{subset}.ipynb` (SURF) and
 `depth_fields/{subset}.ipynb` (DEPTH).  Surface phase first.
-Literature reference images go in `literature/{subset}/{field}.png`.
+Literature reference images live flat in `literature_figures/`,
+named `{field}_{Citation}_{description}.png` (e.g.
+`turner-angle_Whalen&Drushka(2024)_World-Ocean-Atlas-climatology.png`).
+When the reference is a global view, our panel is rendered as a
+global Robinson map (`figure3_literature(..., global_view=True)`).
 
 Shared plotting modules: `src/dbof/plotting/` — `regions.py`
 (validation domains), `pipeline_grids.py` (map grids),
@@ -34,12 +38,12 @@ Channel lists are verbatim from
 
 | Notebook | Fields (channels) | Status |
 |---|---|---|
-| `native_fields.ipynb` | Theta (raw), Salt (raw), Eta (raw), W (raw), U, V | planned |
-| `surface_wind.ipynb` | oceQnet (raw, SURF only), oceTAUX, oceTAUY, wind_stress_curl, ekman_pumping, u_ekman, v_ekman | planned |
-| `icearea.ipynb` | SIarea (raw) | planned |
+| `native_fields.ipynb` | Theta (raw), Salt (raw), Eta (raw), W (raw), U, V | **built** |
+| `surface_wind.ipynb` | oceQnet (raw, SURF only), oceTAUX, oceTAUY, wind_stress_curl, ekman_pumping, u_ekman, v_ekman | **built** |
+| `icearea.ipynb` | SIarea (raw) | **built** |
 | `frontal_structure.ipynb` | gradb2, gradsalt2, gradtheta2, gradeta2, gradrho2, turner_angle, density, buoyancy | **template — built** |
-| `kinematic.ipynb` | relative_vorticity, strain_n, strain_s, strain_mag, divergence, coriolis_f, rossby_number, okubo_weiss | planned |
-| `frontogenesis.ipynb` | frontogenesis_tendency, ug, vg, frontogenesis_geo, frontogenesis_ageo, Wstar | planned |
+| `kinematic.ipynb` | relative_vorticity, strain_n, strain_s, strain_mag, divergence, coriolis_f, rossby_number, okubo_weiss | **built** |
+| `frontogenesis.ipynb` | frontogenesis_tendency, ug, vg, frontogenesis_geo, frontogenesis_ageo, Wstar | **built** |
 
 ## Depth subsets (DEPTH) — `depth_fields/`
 
@@ -70,8 +74,8 @@ Extra channels are inherently 2D.
   gray; log colour scale for ∝-squared gradient fields.
 - PDFs: probability density; land + halo-rim NaNs removed before
   binning; log10-x for ∝-squared fields; bins shared per field across
-  the four domains; |lat|>2° filter for f-normalised fields in Row D
-  (stated in-figure).
+  all domains; |lat|>2° filter for f-normalised fields on the
+  Eq. Pacific row (stated in-figure).
 - Cross-references instead of re-validation: σ₀/b →
   `surface_fields/frontal_structure.ipynb`; MLD → DEPTH
   `stratification.ipynb`; rotation/Jacobian machinery →
