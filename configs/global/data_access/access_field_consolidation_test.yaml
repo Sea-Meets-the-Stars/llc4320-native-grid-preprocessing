@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Unified data-access config for generate_global.py output
+#
+# This config is consumed by the assessment notebook
+# (assess_generate_global_script.ipynb) and any downstream reader
+# that needs to load data produced by the unified pipeline.
+#
+# Channel lists live in code (subset_definitions.py) and are imported at
+# read time — they are NOT duplicated here.  This config stores the S3
+# coordinates needed to locate the data, plus depth_suffixes which must
+# match whatever was used during generation.
+#
+# Full S3 path to each subset:
+#   s3://{bucket}/{folder}/{run_id}/{date_prefix}/{dataset_name}
+# ---------------------------------------------------------------------------
+
+# Pipeline that produced the data: SURF | OSN | DEPTH
+# This selects which subset definitions and channel-expansion logic to use
+# when interpreting the data.
+pipeline: "SURF"
+
+# Depth suffixes used during generation (DEPTH pipeline only).
+# This MUST match the depth_suffixes in the generation config
+# (configs/global/run/run.yaml) at the time the data was produced.
+# If omitted, the code default [sfc, z25m, mld, mld_mean] is used.
+depth_suffixes: [sfc, mld]
+
+data_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  # folder: use surface_fields for SURF/OSN output, depth_fields for DEPTH output
+  folder: "surface_fields"
+
+# NOTE:
+# - run_id MUST exactly match the run_id used when generate-global was run.
+# - date_prefix MUST match the date subdirectory (YYYYMMDD_HHMMSS) produced by
+#   the pipeline for the snapshot you want to read.
+  run_id: "vfieldtest"
+  date_prefix: "20120501_120000"
+
+# Grid Zarr store written by generate_grid_global.py.
+# NOTE: The grid is stored WITHOUT a run_id prefix (shared across all runs):
+#   s3://{bucket}/{folder}/{dataset_name}
+grid_access:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof"
+  folder: "LLC4320_GRID_2D"
+  dataset_name: "llc4320_grid.zarr"
