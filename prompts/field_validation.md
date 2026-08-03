@@ -803,6 +803,44 @@ frontal_structure now shares the same generator):
   normalisation conventions against that module when a copy is made
   available in this repo (open TODO).
 
+### 2026-08-03 — F-convention finding (Bachman comparison) + fixes
+
+- First real-data Bachman comparison (LH): W* and |∇b| magnitudes
+  match the reference directly; frontogenesis_tendency is offset by
+  ~4 decades.  RESOLVED via the paper (LH checked Eq. 38;
+  JPO-D-21-0037.1): Bachman's F = 2Q·∇ₕb/|∇ₕb| (Hoskins 1982),
+  buoyancy-based but |∇b|-NORMALISED and doubled → units s⁻³, vs
+  our store channel = Q·∇b (unnormalised, s⁻⁵).  [Earlier
+  density-gradient/(ρ₀/g)² hypothesis was wrong — numerically
+  coincidental — and is superseded.]  Comparison cells now compute
+  their EXACT quantity: F₃₈ = 2·frontogenesis_tendency/|∇b| (our
+  channel is identically Q·∇b; expand the dot product), plot it at
+  the reference ±5e-15 scale, and print |F₃₈| percentiles so any
+  residual offset is quantified.  Note: the reference fields are
+  from an IDEALISED channel simulation (year 5, day 100), not
+  LLC4320 — residual magnitude offsets may be model/regime;
+  morphology and lognormal PDF shapes are the validation targets.
+  DECISION (LH): Eq. 38 does NOT replace our pipeline definition
+  (store channel stays Q·∇b); it is computed only inside the
+  comparison.  New §6.2 cell shows the two definitions side by side
+  (same numerator, different normalisation/units) over the Kerguelen
+  box.
+- native_fields Section 6 added (notebook regenerated to the new
+  layout — re-run is cheap, no live cell): Yu et al. (2021) global
+  Eta + U maps, LLC4320 itself at 2011-11-24 vs our 2012-11-09 —
+  same-model reference; large-scale structure must match, any
+  sign/offset/rotation mismatch = pipeline problem.  png:
+  ``Eta-U_Yu-etal(2021)_global-maps.png``.
+  ``stacked_side_by_side`` gained ``projection=`` (global Robinson
+  left panels).
+- Bachman map comparison colour scales PINNED to the reference:
+  W* ±1e-7, converted F ±5e-15, |∇b| 0–5e-7 (LH request).
+- Equations added to frontogenesis dep table + section titles
+  (F formula, F(ug,vg), ageo residual, full W* λ/Q definitions).
+- Units fix: ``field_cmaps.yaml`` had the frontogenesis family as
+  s⁻²; corrected to s⁻⁵ (15 entries; code + Fields.md were already
+  s⁻⁵).  W* stays s⁻².
+
 ### 2026-08-03 — FIRST REAL BUG CAUGHT BY VALIDATION: Wstar missing
 
 The frontogenesis RUN failed with ``KeyError: 'Wstar'``:

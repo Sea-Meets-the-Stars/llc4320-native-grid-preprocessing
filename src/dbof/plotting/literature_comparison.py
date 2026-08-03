@@ -88,7 +88,8 @@ def stacked_side_by_side(render_fns, png_path, *,
                          lit_title="(b) Literature",
                          caption=None,
                          panel_h=3.2,
-                         width=14.0):
+                         width=14.0,
+                         projection=None):
     """Multi-panel our-data column vs one literature .png.
 
     For references whose figure stacks several fields (e.g. Bachman
@@ -114,6 +115,9 @@ def stacked_side_by_side(render_fns, png_path, *,
         Height per left-column panel (inches).
     width : float
         Total figure width (inches).
+    projection : cartopy CRS or None
+        Projection for OUR (left) panels — e.g. ``ccrs.Robinson()``
+        when the reference shows global maps.  None = plain axes.
 
     Outputs
     -------
@@ -125,7 +129,10 @@ def stacked_side_by_side(render_fns, png_path, *,
 
     axes_ours = []
     for i, fn in enumerate(render_fns):
-        ax = fig.add_subplot(gs[i, 0])
+        if projection is not None:
+            ax = fig.add_subplot(gs[i, 0], projection=projection)
+        else:
+            ax = fig.add_subplot(gs[i, 0])
         fn(ax)
         if our_titles:
             ax.set_title(our_titles[i], fontsize=10)
