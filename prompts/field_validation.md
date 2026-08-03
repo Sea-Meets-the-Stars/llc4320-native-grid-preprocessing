@@ -787,6 +787,21 @@ frontal_structure now shares the same generator):
   ``..._Kerguelen-pdfs.png`` in ``literature_figures/``.
 - Builder now supports per-subset regeneration
   (``python dev/build_field_validation_notebooks.py <subset ...>``).
+- kinematic Section 6 added (kinematic.ipynb regenerated — needs
+  re-run): (6.1) Bachman et al. (2021) ζ/W Kerguelen maps (b → 
+  frontal_structure, W* → frontogenesis per cross-reference rule;
+  png ``vorticity-okuboweiss_Bachman-etal(2021)_Kerguelen-maps.png``);
+  (6.2) Balwada et al. (2021) vorticity–strain JOINT PDFs — new
+  module ``src/dbof/plotting/jpdfs.py`` (occurrence JPDF with
+  AVD/SD/CVD separatrices + conditional-mean divergence Δ/|f₀|,
+  f₀ = regional mean |f|; pngs ``jpdf-occurrence_...`` /
+  ``jpdf-divergence_Balwada-etal(2021)_vorticity-strain.png``).
+  DECISION (LH + Claude): do NOT import from the ``fronts`` repo
+  (would invert dependency direction); ``jpdfs.py`` is a fresh
+  implementation and the PORT TARGET for
+  ``fronts/properties/analysis/jpdf.py`` — reconcile bin and
+  normalisation conventions against that module when a copy is made
+  available in this repo (open TODO).
 
 ### 2026-08-03 — FIRST REAL BUG CAUGHT BY VALIDATION: Wstar missing
 
