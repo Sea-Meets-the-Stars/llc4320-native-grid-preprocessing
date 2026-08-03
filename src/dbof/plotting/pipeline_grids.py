@@ -117,6 +117,8 @@ def pipeline_map_grid(chain, region_arrays, cmap_cfg, *,
                       percentiles=(1, 99),
                       coastlines=True,
                       region_boxes=True,
+                      zoom_final=True,
+                      zoom_half_km=100.0,
                       suptitle=None):
     """Figure 1 of a field's validation section: the map grid.
 
@@ -146,6 +148,15 @@ def pipeline_map_grid(chain, region_arrays, cmap_cfg, *,
     region_boxes : bool
         Draw the regional bounding boxes (crimson outlines) on every
         global-row panel, so Rows B–D locate themselves on Row A.
+    zoom_final : bool
+        Append one extra column: the FINAL field (last chain element)
+        cropped to a 2·zoom_half_km square box centred on each
+        region's ``zoom`` anchor (full-resolution structure — the
+        regional panels alias submesoscale texture into 'sparkle' at
+        figure size).  Global row is left blank in this column; the
+        zoom box is outlined on each regional final-field panel.
+    zoom_half_km : float
+        Half-width of the zoom box in km (100 -> 200x200 km).
     suptitle : str or None
         Overall figure title.
 
@@ -169,7 +180,8 @@ def pipeline_map_grid(chain, region_arrays, cmap_cfg, *,
     """
     region_order = region_order or regions_mod.REGION_ORDER
     row_titles = [regions_mod.REGIONS[r]["short"] for r in region_order]
-    n_rows, n_cols = len(region_order), len(chain)
+    n_rows = len(region_order)
+    n_cols = len(chain) + (1 if zoom_final else 0)
 
     # Build the grid by hand: cartopy projection for global rows only.
     fig = plt.figure(figsize=(n_cols * PANEL_W, n_rows * PANEL_H))
@@ -244,6 +256,45 @@ def pipeline_map_grid(chain, region_arrays, cmap_cfg, *,
             fig.colorbar(im_last, ax=axes[:, j].tolist(),
                          orientation="horizontal", fraction=0.03,
                          pad=0.02, label=label)
+
+    if zoom_final:
+        # Extra column: the FINAL field at full resolution in a
+        # 2*zoom_half_km square box (regional panels alias the
+        # submesoscale texture; this shows the real structure).
+        jz = len(chain)
+        final = chain[-1]
+        cmap_name, _ = cmap_cfg.get(final, ("viridis", final))
+        pooled = np.concatenate([
+            region_arrays[final][r][2].ravel() for r in region_order
+        ])
+        # Same norm as the final column: zoom is directly comparable.
+        norm_f = make_field_norm(pooled, cmap_name,
+                                 log=final in log_scale_channels,
+                                 diverging_cmaps=diverging_cmaps,
+                                 percentiles=percentiles)
+        axes[0, jz].set_title(
+            f"{final} ({2 * zoom_half_km:.0f} km zoom)", fontsize=9)
+        for i, region in enumerate(region_order):
+            ax = axes[i, jz]
+            if (is_global[i]
+                    or regions_mod.REGIONS[region].get("zoom") is None):
+                ax.set_axis_off()   # no zoom on the global row
+                continue
+            x, y, arr = region_arrays[final][region]
+            xz, yz, sub = regions_mod.crop_zoom(
+                x, y, arr, region, half_km=zoom_half_km)
+            ax.set_facecolor(LAND_COLOR)
+            plot_global_field(ax, xz, yz, sub, final, cmap_cfg,
+                              diverging_cmaps=diverging_cmaps,
+                              add_coastline=False, norm=norm_f)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            # Locate the zoom box on the regional final-field panel.
+            (w, e), (s, n) = regions_mod.zoom_box(
+                region, half_km=zoom_half_km)
+            axes[i, len(chain) - 1].plot(
+                [w, e, e, w, w], [s, s, n, n, s], **BOX_KW)
+
     if suptitle:
         fig.suptitle(suptitle, fontsize=12, y=1.005)
     return fig, axes

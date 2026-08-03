@@ -71,7 +71,10 @@ Extra channels are inherently 2D.
 
 - Maps: one shared colour scale per dependency column; global row on
   cartopy Robinson with regional-extent boxes; land/halo NaNs shown
-  gray; log colour scale for ∝-squared gradient fields.
+  gray; log colour scale for ∝-squared gradient fields.  Final
+  column: the final field zoomed to a 200×200 km box per region
+  (anchors in `regions.py`; crimson locator box on the regional
+  panel) — full-resolution structure without rendering aliasing.
 - Chains show EVERY computed step, including gradient / Jacobian
   components (computed live with production code; never stored in
   the global products).  J components are plotted in `kinematic`

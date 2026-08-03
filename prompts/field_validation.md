@@ -774,6 +774,17 @@ frontal_structure now shares the same generator):
 - Notebook generator committed as
   ``dev/build_field_validation_notebooks.py`` (canonical source for
   all six surface notebooks; edit templates/specs there and re-run).
+- Figure 1 gained a ZOOM column (module-level, no notebook rebuild):
+  the final field cropped to a 200×200 km box (km-square via
+  cos-lat lon scaling) centred on each region's ``zoom`` anchor
+  (Gulf Stream −60E/37N, Kuroshio 145E/35N, ACC 0E/−52N, Eq. Pacific
+  −110E/0N — matching the plan §6 representative points); blank on
+  the global row; crimson locator box on each regional final panel;
+  shares the final column's norm.  Rationale: regional panels alias
+  1/48° submesoscale texture into 'sparkle' at figure size; the zoom
+  shows the actually-resolved structure.  Toggle:
+  ``pipeline_map_grid(zoom_final=, zoom_half_km=)``;
+  ``regions.zoom_box`` / ``regions.crop_zoom``.
   The live batch-stitch loop stays inline in the notebooks (decision
   LH: small, stable; regeneration via the builder covers the
   divergence risk).  If later extracted: destination is
