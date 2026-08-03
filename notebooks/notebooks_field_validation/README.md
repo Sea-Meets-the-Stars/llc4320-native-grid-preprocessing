@@ -72,6 +72,10 @@ Extra channels are inherently 2D.
 - Maps: one shared colour scale per dependency column; global row on
   cartopy Robinson with regional-extent boxes; land/halo NaNs shown
   gray; log colour scale for ∝-squared gradient fields.
+- Chains show EVERY computed step, including gradient / Jacobian
+  components (computed live with production code; never stored in
+  the global products).  J components are plotted in `kinematic`
+  only; ∇b components in `frontal_structure` / `frontogenesis`.
 - PDFs: probability density; land + halo-rim NaNs removed before
   binning; log10-x for ∝-squared fields; bins shared per field across
   all domains; |lat|>2° filter for f-normalised fields on the

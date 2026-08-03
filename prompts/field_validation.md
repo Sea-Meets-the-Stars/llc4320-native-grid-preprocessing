@@ -134,16 +134,23 @@ column order).  Units per ``docs/Fields.md``; labels/cmaps per
 COMPLETE (verbatim from ``subset_definitions.py``), one line per
 channel — not examples.
 
-Plotting-intermediates convention (UPDATED 2026-07-31): intermediates
-are never saved in the product stores; they are always computed live
-from raw in the notebook.  Figure columns show only PHYSICALLY
-INTERPRETABLE intermediates (rho_theta, sigma0, b, |∇b|, u_east/
-v_north, N², MLD, ...); raw tensor/derivative components (du_dx etc.,
-J entries, uz/vz components) appear in the dependency table but are
-NOT plotted — they are validated implicitly because the final fields
-span them (ζ, δ, strain_n, strain_s are four independent linear
-combinations of the four J components, so validating those four
-validates J entirely; likewise vertical_shear validates uz/vz).
+Plotting-intermediates convention (SUPERSEDED 2026-08-01, supervisor
+request — see Logs): intermediates are never saved in the product
+stores; they are always computed live from raw in the notebook.
+EVERY computed step is now PLOTTED as its own chain column, including
+component-level intermediates: gradient components (dTheta_dx/dy,
+dSalt_dx/dy, dEta_dx/dy, drho_dx/dy, db_dx/dy) and velocity-Jacobian
+components (du_dx, du_dy, dv_dx, dv_dy).  Components are computed
+live via ``native_gradient.calculate_native_gradient_tracer`` /
+``CF.compute_velocity_jacobian`` / ``CF.compute_buoyancy_gradients``
+(all tracer-point, stitchable) and batch-stitched with bounded
+memory.  Deduplication across notebooks still applies: J components
+are plotted in kinematic only (frontogenesis references them);
+∇b components are plotted in frontal_structure and frontogenesis
+(their consumers).  [Earlier convention — components tabled only,
+validated implicitly via the spanning finals — was reversed by
+supervisor request; the spanning argument remains in the dependency
+tables as rationale for which notebook plots which components.]
 
 **stratification** (DEPTH; raw: Theta, Salt)
 - N2: Theta, Salt → rho_theta → N² [s⁻²] — CFAD.buoyancy_frequency_squared
@@ -718,3 +725,56 @@ All 6 surface notebooks now BUILT (README statuses updated); real-data
 execution/review by LH pending for the 5 new ones.  §10 item 4
 complete pending review; next: item 5 cross-reference plumbing
 (docstrings + Fields.md column), then depth phase.
+
+### 2026-08-01 — Component-level intermediates + PR strategy
+
+Supervisor request: show EVERY computed step (e.g. Theta → ∇Θ →
+|∇Θ|²).  Decision (LH): global stores stay intermediate-free; for
+the SURFACE phase all intermediates are computed LIVE in the
+notebooks (no tiles needed); depth-resolved intermediates come via
+the tiles route AFTER Tuesday.
+
+PR strategy agreed: (1) surface field-validation PR first (Tuesday
+target); (2) ``tiles-fields-v2`` as its own PR — PORTED fresh onto
+current main, not rebased from the stale ``tiles-fields`` branch;
+(3) depth-validation work stacked on top (merge tiles-fields-v2
+into the working branch locally while its PR is in review).
+
+Implementation (all 6 surface notebooks REBUILT from one builder —
+frontal_structure now shares the same generator):
+
+- §2 plotting convention superseded: component intermediates are
+  plotted as chain columns (see amended §2 note).
+- ``field_cmaps.yaml``: added 10 gradient-component + 4 Jacobian-
+  component entries (balance/curl diverging).
+- Live cells now build a ``live_map`` of lazy DataArrays and
+  batch-stitch (4 per batch), slicing to regions inside the loop —
+  peak memory ≤ 4 full-res arrays regardless of intermediate count.
+- frontal_structure: chains show d{Θ,S,η,ρθ,b}_dx/dy before each
+  grad*2 (14 live fields).
+- kinematic: chains show du_dx/du_dy/dv_dx/dv_dy (live via
+  CF.compute_velocity_jacobian) feeding ζ, δ, σₙ, σₛ.
+- frontogenesis: chains show db_dx/db_dy (CF.compute_buoyancy_
+  gradients), dEta_dx/dEta_dy, and rect-grid coriolis_f for ug/vg;
+  J components referenced to kinematic (identical arrays).
+- native_fields / surface_wind / icearea: chains unchanged (no
+  hidden steps; raw staggered fields cannot be stitched).
+
+### 2026-08-01 — Store-vs-live consistency cell + canonical builder
+
+- Every notebook with live intermediates gained ONE final cell that
+  numerically asserts each final channel (store) equals the function
+  of its live-computed dependencies on the Gulf Stream domain
+  (REL_TOL 1e-4; float32 store vs float64 live).  E.g. gradtheta2 ==
+  dTheta_dx²+dTheta_dy²; ζ == dv_dx−du_dy; ug == −(G/f)·dEta_dy;
+  ekman = τ/(ρ₀f); turner arctan formula.  This turns the two-path
+  design (finals via RUN→store→LOAD, dependencies live) into an
+  explicit pass/fail test of pipeline plumbing.  native_fields /
+  icearea have no derived relations → no cell.
+- Notebook generator committed as
+  ``dev/build_field_validation_notebooks.py`` (canonical source for
+  all six surface notebooks; edit templates/specs there and re-run).
+  The live batch-stitch loop stays inline in the notebooks (decision
+  LH: small, stable; regeneration via the builder covers the
+  divergence risk).  If later extracted: destination is
+  ``src/dbof/plotting/live_fields.py``, NOT the notebooks folder.

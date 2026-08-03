@@ -231,3 +231,19 @@ cmaps:
   # output channels of any subset (plan §2 / Clarification 5).
   rho_theta: [dense,   "Potential density ρθ (kg m⁻³)"]
   log_gradb: [amp,     "log₁₀ |∇b| (log₁₀ s⁻²)"]
+  # Gradient components (tracer-point, CS/SN-rotated to east/north)
+  dTheta_dx: [balance, "∂Θ/∂x (°C m⁻¹)"]
+  dTheta_dy: [balance, "∂Θ/∂y (°C m⁻¹)"]
+  dSalt_dx:  [balance, "∂S/∂x (psu m⁻¹)"]
+  dSalt_dy:  [balance, "∂S/∂y (psu m⁻¹)"]
+  dEta_dx:   [balance, "∂η/∂x (–)"]
+  dEta_dy:   [balance, "∂η/∂y (–)"]
+  drho_dx:   [balance, "∂ρθ/∂x (kg m⁻⁴)"]
+  drho_dy:   [balance, "∂ρθ/∂y (kg m⁻⁴)"]
+  db_dx:     [balance, "∂b/∂x (s⁻²)"]
+  db_dy:     [balance, "∂b/∂y (s⁻²)"]
+  # Velocity Jacobian components (tracer-point, rotated)
+  du_dx:     [curl,    "∂u/∂x (s⁻¹)"]
+  du_dy:     [curl,    "∂u/∂y (s⁻¹)"]
+  dv_dx:     [curl,    "∂v/∂x (s⁻¹)"]
+  dv_dy:     [curl,    "∂v/∂y (s⁻¹)"]
