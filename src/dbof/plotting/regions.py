@@ -61,6 +61,14 @@ REGIONS = {
         "short": "Kuroshio",
         "zoom": (145.0, 35.0),      # Kuroshio Extension jet
     },
+    # Literature-comparison regions (NOT in REGION_ORDER — they are
+    # not standard figure rows; sliced on demand per notebook).
+    "kerguelen": {
+        "lon": (60.0, 85.0),
+        "lat": (-50.0, -38.0),
+        "title": "Kerguelen Plateau (Bachman et al. 2021)",
+        "short": "Kerguelen",
+    },
 }
 
 #: Kilometres per degree of latitude (spherical Earth).

@@ -760,6 +760,34 @@ frontal_structure now shares the same generator):
 - native_fields / surface_wind / icearea: chains unchanged (no
   hidden steps; raw staggered fields cannot be stitched).
 
+### 2026-08-03 — Literature restructure + Bachman (2021) comparison
+
+- CONVENTION CHANGE (LH): literature comparisons move from
+  per-field Figure 3 to a per-NOTEBOOK "Section 6 — Literature
+  comparisons", one subsection PER REFERENCE, present only where a
+  reference exists (no permanent placeholders for fields like
+  gradsalt2 that may never have one).  Rationale: references are
+  per-paper, not per-field (Bachman validates 3 fields at once).
+  Builder updated; ONLY frontogenesis.ipynb regenerated (it needed a
+  full re-run after the Wstar fix anyway) — the other executed
+  notebooks keep the old per-field Figure 3 layout until their next
+  regeneration.
+- frontogenesis: Jacobian components (du_dx..dv_dy) now computed
+  live and PLOTTED in the tendency and W* chains (supersedes the
+  kinematic cross-reference for this subset).
+- Bachman et al. (2021) comparison added to frontogenesis Section 6:
+  Kerguelen Plateau region (60–85°E, 50–38°S; ``regions.REGIONS
+  ['kerguelen']``, not a standard row — sliced via per-notebook
+  ``EXTRA_REGIONS``): (6.1) stacked maps of Wstar /
+  frontogenesis_tendency / |∇b| (|∇b| from live db components;
+  ``gradb_mag`` cmap added) via new
+  ``literature_comparison.stacked_side_by_side``; (6.2) overlaid
+  log₁₀-magnitude occurrence histograms.  Expected .png names:
+  ``Wstar-F-gradb_Bachman-etal(2021)_Kerguelen-maps.png`` /
+  ``..._Kerguelen-pdfs.png`` in ``literature_figures/``.
+- Builder now supports per-subset regeneration
+  (``python dev/build_field_validation_notebooks.py <subset ...>``).
+
 ### 2026-08-03 — FIRST REAL BUG CAUGHT BY VALIDATION: Wstar missing
 
 The frontogenesis RUN failed with ``KeyError: 'Wstar'``:

@@ -10,11 +10,17 @@ output, and validates every field with dependency-chain maps
 
 Layout: `surface_fields/{subset}.ipynb` (SURF) and
 `depth_fields/{subset}.ipynb` (DEPTH).  Surface phase first.
-Literature reference images live flat in `literature_figures/`,
-named `{field}_{Citation}_{description}.png` (e.g.
-`turner-angle_Whalen&Drushka(2024)_World-Ocean-Atlas-climatology.png`).
-When the reference is a global view, our panel is rendered as a
-global Robinson map (`figure3_literature(..., global_view=True)`).
+Literature comparisons live in each notebook's closing
+"Section 6 — Literature comparisons": one subsection PER REFERENCE
+(a reference may validate several fields, e.g. Bachman et al. 2021 →
+Wstar + frontogenesis_tendency + |∇b| over the Kerguelen Plateau),
+present only where a reference exists.  Images live flat in
+`literature_figures/`, named `{field(s)}_{Citation}_{description}.png`
+(e.g.
+`turner-angle_Whalen&Drushka(2024)_World-Ocean-Atlas-climatology.png`,
+`Wstar-F-gradb_Bachman-etal(2021)_Kerguelen-maps.png`).
+(Executed notebooks generated before 2026-08-03 still carry the older
+per-field Figure 3 layout until regenerated.)
 
 Shared plotting modules: `src/dbof/plotting/` — `regions.py`
 (validation domains), `pipeline_grids.py` (map grids),

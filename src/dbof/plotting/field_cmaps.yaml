@@ -242,6 +242,7 @@ cmaps:
   drho_dy:   [balance, "∂ρθ/∂y (kg m⁻⁴)"]
   db_dx:     [balance, "∂b/∂x (s⁻²)"]
   db_dy:     [balance, "∂b/∂y (s⁻²)"]
+  gradb_mag: [speed,   "Buoyancy gradient magnitude |∇b| (s⁻²)"]
   # Velocity Jacobian components (tracer-point, rotated)
   du_dx:     [curl,    "∂u/∂x (s⁻¹)"]
   du_dy:     [curl,    "∂u/∂y (s⁻¹)"]
