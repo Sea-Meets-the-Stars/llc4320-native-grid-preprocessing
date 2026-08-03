@@ -180,7 +180,7 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
 
 
 def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
-    """Subset: frontogenesis — tendency, geo/ageo decomposition, ug, vg.
+    """Subset: frontogenesis — tendency, geo/ageo, ug, vg, Wstar.
 
     Computes shared intermediates (velocity Jacobian, buoyancy gradients,
     geostrophic velocity) once and passes them to the individual property
@@ -201,23 +201,35 @@ def compute_frontogenesis(ds_merge, grid, computed_feature_channels):
     need_geo = ('frontogenesis_geo' in requested
                 or 'frontogenesis_ageo' in requested)
     need_ugvg = 'ug' in requested or 'vg' in requested
+    need_wstar = 'Wstar' in requested
 
-    if not (need_tendency or need_geo or need_ugvg):
+    if not (need_tendency or need_geo or need_ugvg or need_wstar):
         return {}
 
     # -- shared intermediates --------------------------------------------------
     bg = calculate_fields.compute_buoyancy_gradients(ds_merge, grid)
+
+    # Velocity Jacobian is shared by the full tendency and W*.
+    jac = None
+    if need_tendency or need_wstar:
+        jac = calculate_fields.compute_velocity_jacobian(ds_merge, grid)
 
     results = {}
 
     # Full frontogenesis tendency F(u, v)
     tendency = None
     if need_tendency:
-        jac = calculate_fields.compute_velocity_jacobian(ds_merge, grid)
         tendency = calculate_fields.frontogenesis_tendency(
             ds_merge, grid, jacobian=jac, buoyancy_gradients=bg)
         if 'frontogenesis_tendency' in requested:
             results['frontogenesis_tendency'] = tendency
+
+    # Modified Okubo-Weiss W* (Bachman 2021) — was missing from this
+    # dispatcher although declared in subset_definitions; found by the
+    # field-validation RUN (KeyError: 'Wstar'), fixed 2026-08-03.
+    if need_wstar:
+        results['Wstar'] = calculate_fields.modified_okubo_weiss(
+            ds_merge, grid, jacobian=jac)
 
     # Geostrophic velocity (needed for geo frontogenesis and/or ug/vg output)
     ug = vg = None

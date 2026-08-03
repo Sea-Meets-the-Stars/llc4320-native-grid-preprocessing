@@ -20,6 +20,11 @@ Shared plotting modules: `src/dbof/plotting/` — `regions.py`
 (validation domains), `pipeline_grids.py` (map grids),
 `pdfs.py` (PDF grids), `literature_comparison.py`.
 
+`precision_provenance.ipynb` (this folder) documents the dtype flow
+(raw float32 → JMD95 float64 → store float32) and why the
+consistency-check residuals are rounding, not grid discrepancies.
+Notebook generator: `dev/build_field_validation_notebooks.py`.
+
 ## Validation domains (rows of Figures 1–2)
 
 | Row | Region | Box |

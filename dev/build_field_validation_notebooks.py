@@ -532,6 +532,9 @@ ds_raw, ds_merge, it = load_snapshot(
     surface_only=False, data_source=get_data_source(PIPELINE),
 )
 print(f"OSN iteration {it}  (store iteration {reader.iteration})")
+for _v in ds_merge.data_vars:
+    if ds_merge[_v].ndim >= 2:
+        print(f"  raw {_v}: {ds_merge[_v].dtype}")
 
 # Lazy live fields: raw, rho_theta, and every gradient component
 # (tracer-point, CS/SN-rotated) — the exact code under validation.
@@ -880,6 +883,9 @@ ds_raw, ds_merge, it = load_snapshot(
     surface_only=False, data_source=get_data_source(PIPELINE),
 )
 print(f"OSN iteration {it}  (store iteration {reader.iteration})")
+for _v in ds_merge.data_vars:
+    if ds_merge[_v].ndim >= 2:
+        print(f"  raw {_v}: {ds_merge[_v].dtype}")
 
 u_east, v_north = calculate_fields.geographic_velocity(
     ds_merge, xgrid)
@@ -998,6 +1004,9 @@ ds_raw, ds_merge, it = load_snapshot(
     surface_only=False, data_source=get_data_source(PIPELINE),
 )
 print(f"OSN iteration {it}  (store iteration {reader.iteration})")
+for _v in ds_merge.data_vars:
+    if ds_merge[_v].ndim >= 2:
+        print(f"  raw {_v}: {ds_merge[_v].dtype}")
 
 u_east, v_north = calculate_fields.geographic_velocity(
     ds_merge, xgrid)

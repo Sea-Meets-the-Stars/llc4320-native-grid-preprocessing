@@ -760,6 +760,20 @@ frontal_structure now shares the same generator):
 - native_fields / surface_wind / icearea: chains unchanged (no
   hidden steps; raw staggered fields cannot be stitched).
 
+### 2026-08-03 — FIRST REAL BUG CAUGHT BY VALIDATION: Wstar missing
+
+The frontogenesis RUN failed with ``KeyError: 'Wstar'``:
+``subset_definitions`` declares Wstar as a frontogenesis channel and
+``calculate_fields.modified_okubo_weiss`` exists, but
+``surface_subsets.compute_frontogenesis`` never wired it up — the
+channel has NEVER been produced by the SURF pipeline (consistent with
+Wstar also having been absent from ``field_cmaps.yaml``).  Fixed:
+``need_wstar`` path added, velocity Jacobian hoisted and shared
+between the tendency and W*; dispatch logic verified with stubbed
+unit checks (full set / Wstar-only / ug-only).  This fix ships in the
+surface field-validation PR — found by the validation framework's
+RUN cell, which is exactly its purpose.
+
 ### 2026-08-01 — Store-vs-live consistency cell + canonical builder
 
 - Every notebook with live intermediates gained ONE final cell that
@@ -774,6 +788,18 @@ frontal_structure now shares the same generator):
 - Notebook generator committed as
   ``dev/build_field_validation_notebooks.py`` (canonical source for
   all six surface notebooks; edit templates/specs there and re-run).
+- ``notebooks_field_validation/precision_provenance.ipynb`` added
+  (standalone; does NOT touch the executed subset notebooks):
+  documents the dtype flow — raw LLC4320 float32 (verified
+  empirically: Theta/Salt/Eta all float32), dtype-preserving
+  calculations except JMD95 (``output_dtypes=[float]`` → float64 for
+  the density family), store always cast float32 at write.  Explains
+  the consistency residuals (exact 0.0 for float32-both-paths
+  chains; ~1 ULP of float32 for the density family) and the white
+  zoom-map specks (gradtheta2 min ≈1e-14, ~50 float32 quanta above
+  the precision floor → physical near-zero gradients at critical
+  points).  Builder live-cell templates now print raw dtypes
+  (dormant until next regeneration).
 - Figure 1 gained a ZOOM column (module-level, no notebook rebuild):
   the final field cropped to a 200×200 km box (km-square via
   cos-lat lon scaling) centred on each region's ``zoom`` anchor
