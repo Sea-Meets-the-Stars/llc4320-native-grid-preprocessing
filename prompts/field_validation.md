@@ -825,6 +825,42 @@ frontal_structure now shares the same generator):
   comparison.  New §6.2 cell shows the two definitions side by side
   (same numerator, different normalisation/units) over the Kerguelen
   box.
+- native_fields §6.2 added (notebook regenerated — re-run needed,
+  cheap): our global U and V (balance cmap, pinned ±0.5 m s⁻¹ so
+  mean jets stand out) beside the textbook global-circulation
+  schematic — comprehensive direction/sign check on the CS/SN
+  rotation (WBCs poleward, EBCs equatorward, equatorial bands, ACC).
+  Expected png: ``native-fields_u-v_global-circulation-schematic
+  .png`` (LH to save; attribution slot in caption).  The
+  session-adopted Yu-cell customisations (balance cmaps, per-field
+  tidal-phase captions) are now BAKED INTO THE BUILDER — the
+  regeneration preserves them.  NOTE: the frontogenesis
+  F-convention cells (our Q·∇b instead of Eq. 38) remain
+  session-only, NOT yet in the builder — do not regenerate
+  frontogenesis until they are baked in.
+- Bodner |∇b| amplitude difference RESOLVED via primary source
+  (restored after overwrite; LH located the reference's plotting
+  code: github.com/abodner/submeso_param_net,
+  plot_global_grad_b.ipynb).  History: our decimated global row
+  looked black+speckle (aliasing); block-mean AND block-RMS
+  coarsening of our native |∇b| both stayed ×4–6 dimmer than the
+  reference — impossible, since coarsening can only dim and our
+  native field matches Bachman.  Primary source shows their
+  operator: coarsen Θ/S to 1/4° via ``xarray.coarsen(12,12).mean()``
+  THEN σ₀ → b → ``diff/dxF``.  METRIC BUG in the reference: after
+  coarsening, ``diff`` spans 12 native cells (~26 km) but ``dxF`` is
+  the block-MEAN of native spacings (~2.2 km; coarsen averages
+  coords, doesn't sum) → their |∇b| inflated ×12.  Dividing their
+  colour scale by 12 restores the native ≥ coarse hierarchy and
+  quantitative agreement with our field (and with Bachman).  NEW
+  standalone notebook ``surface_fields/gradb.ipynb``: applies their
+  operator VERBATIM to our snapshot (should match their figure)
+  beside the corrected-metric version (÷12), with percentile
+  printouts and full discussion — the definitive evidence artifact.
+  frontal_structure §6.2 (block-mean coarsening) + its discussion
+  paragraph stay as the in-context companion.  The figure is
+  motivational in the reference; does not affect their results.
+  A friendly heads-up to the authors is LH's call.
 - surface_wind.ipynb regenerated (now also on the Section-6 layout):
   U and V loaded from the NATIVE_FIELDS store of the same run/date
   as COMPANION columns in the oceTAUX/oceTAUY chains (LH request) —
