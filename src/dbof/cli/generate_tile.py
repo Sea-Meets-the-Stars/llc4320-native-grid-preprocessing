@@ -128,6 +128,13 @@ def _parse_args(argv=None) -> argparse.Namespace:
         "--qa-plot", dest="qa_plot", action="store_true",
         help="Also write a surface QA plot (PNG) next to the NetCDF.",
     )
+    p.add_argument(
+        "--no-mask-land", dest="mask_land", action="store_false",
+        help=(
+            "Skip the hFacC==0 land mask (applied by default; see "
+            "compute_tile_property)."
+        ),
+    )
     args = p.parse_args(argv)
 
     # Enforce exactly one location convention here so the CLI gives a clean
@@ -172,6 +179,7 @@ def main(argv=None) -> None:
         config_path=args.s3_config,
         clobber=args.clobber,
         gen_qa_plot=args.qa_plot,
+        mask_land=args.mask_land,
     )
 
 

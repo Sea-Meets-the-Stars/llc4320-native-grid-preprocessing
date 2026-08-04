@@ -114,27 +114,37 @@ def test_face_mapping_handles_rotation(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def _expected_value_for(prop_name: str) -> float:
-    """Return the field value the synthetic Theta=3, Salt=35.5 tracers produce."""
+    """Return the field value the synthetic Theta=3, Salt=35.5, Eta=0.1
+    tracers produce."""
     if prop_name == "density":
         # JMD95 surface density - 1000.
         import dbof.utils.jmd95_xgcm_implementation as jmd95
         return float(jmd95.jmd95(35.5, 3.0, 0.0)) - 1000.0
-    if prop_name == "temperature":
+    if prop_name in ("temperature", "Theta"):
         return 3.0
-    if prop_name == "salinity":
+    if prop_name in ("salinity", "Salt"):
         return 35.5
+    if prop_name == "Eta":
+        return 0.1
     raise ValueError(f"unknown property '{prop_name}'")
 
 
-@pytest.mark.parametrize("prop_name", sorted(tu.TILE_PROPERTIES))
+# Cheap constant-field cases through the REAL run() with S3 mocked:
+# channel names, the legacy aliases, and the 2D output path (Eta).
+# The per-entry sweep of the FULL registry (every field, edge rim,
+# rotation) lives in tests/test_tile_field_registry.py.
+@pytest.mark.parametrize(
+    "prop_name",
+    ["density", "temperature", "salinity", "Theta", "Salt", "Eta"],
+)
 def test_run_round_trip(monkeypatch, tmp_path, prop_name):
-    """Run the full pipeline against in-memory synthetic data for each property.
+    """Run the full pipeline against in-memory synthetic data.
 
     Substitutes the S3 source resolver, the S3 loaders, the stitched lookup
     arrays, and the git-commit shell-out.  Verifies output dims, the filename
-    convention, and a known property value across every registered property.
+    convention, and a known property value (constant tracers).
     """
-    prop = tu.TILE_PROPERTIES[prop_name]
+    prop = tu.resolve_property(prop_name)
 
     # --- Synthetic tile geometry: every rect pixel resolves to face 0 at
     # --- face-local coords matching the rect coords (mod FACE_SIZE).
@@ -198,7 +208,10 @@ def test_run_round_trip(monkeypatch, tmp_path, prop_name):
 
     # --- Reload and check shape, dtype, and the property's expected value. ---
     ds = xr.open_dataset(out_path, engine="h5netcdf")
-    assert dict(ds.sizes) == {"k": 51, "j": 720, "i": 720}
+    if prop_name == "Eta":       # inherently-2D output: no vertical axis
+        assert dict(ds.sizes) == {"j": 720, "i": 720}
+    else:
+        assert dict(ds.sizes) == {"k": 51, "j": 720, "i": 720}
     assert prop.out_name in ds
     assert ds[prop.out_name].dtype == np.float32
 
@@ -326,7 +339,12 @@ def test_density_uses_canonical_compute_fn():
     """
     import dbof.preprocessing.calculate_fields as cfd
 
-    assert tu.TILE_PROPERTIES["density"].compute is cfd.potential_density_anomaly
+    # The registry wraps the canonical function in the ``_no_grid``
+    # signature adapter (plumbing only); the physics function inside
+    # the closure must be the shared implementation.
+    compute = tu.TILE_PROPERTIES["density"].compute
+    wrapped = [c.cell_contents for c in (compute.__closure__ or ())]
+    assert cfd.potential_density_anomaly in wrapped
     # And no property-calculation helper leaked back into tile_utils.
     assert not hasattr(tu, "_compute_sigma0")
     assert not hasattr(tu, "RHO0_REFERENCE")
@@ -436,21 +454,30 @@ def _make_synthetic_grid_face(n_k: int) -> xr.Dataset:
 
 
 def _make_synthetic_tracers_face(n_k: int) -> xr.Dataset:
-    """Constant-Theta/Salt tracers covering the tile (so output is known)."""
+    """Constant tracers covering the tile (so output is known).
+
+    Theta=3 C, Salt=35.5 psu (3D) and Eta=0.1 m (2D, exercising the
+    2D output path).
+    """
     n_j = n_i = tm.TILE_SIZE
     theta = np.full((1, n_k, n_j, n_i), 3.0,  dtype=np.float32)
     salt  = np.full((1, n_k, n_j, n_i), 35.5, dtype=np.float32)
+    eta   = np.full((1, n_j, n_i),      0.1,  dtype=np.float32)
     ds = xr.Dataset(
         data_vars={
             "Theta": (("face", "k", "j", "i"), theta),
             "Salt":  (("face", "k", "j", "i"), salt),
+            "Eta":   (("face", "j", "i"),      eta),
         },
         coords={
             "face": np.array([0]),
             "k":    np.arange(n_k),
         },
     )
-    return ds
+    # Dask-backed like the production S3 loads: the single .compute()
+    # in compute_tile_property then streams chunk-wise, keeping the
+    # test's peak memory bounded (JMD95 promotes to float64).
+    return ds.chunk({"k": 4, "j": 360, "i": 360})
 
 
 # ---------------------------------------------------------------------------
@@ -600,3 +627,70 @@ def test_rect_ij_to_tile_against_grid_zarr(i_rect, j_rect):
             f"at rect (i={i_rect}, j={j_rect})."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# _tile_indexer: staggered-dim slicing (ported from the tiles_field branch)
+# ---------------------------------------------------------------------------
+
+def test_tile_indexer_slices_staggered_dims():
+    """One indexer covers tracer AND staggered dims; verticals untouched.
+
+    The grid metrics (dxC/dyC/rAz) and staggered velocities (U on i_g,
+    V on j_g) must come down at tile size, not full-face -- otherwise
+    the tile-context merge misaligns.  Chunk-aligned tiles take the
+    SAME slice on staggered dims as on tracer dims.
+    """
+    tile = tm.TileInfo(
+        tile_idx=0, tile_j_rect=0, tile_i_rect=0,
+        rect_j_slice=slice(0, 720), rect_i_slice=slice(0, 720),
+        face_idx=0,
+        j_face_slice=slice(720, 1440), i_face_slice=slice(0, 720),
+    )
+    z = np.zeros((2, 4, 4))
+    ds = xr.Dataset({
+        "Theta": (("k", "j", "i"),   z),
+        "U":     (("k", "j", "i_g"), z),
+        "V":     (("k", "j_g", "i"), z),
+        "rAz":   (("j_g", "i_g"),    z[0]),
+    })
+
+    idx = tu._tile_indexer(ds, tile)
+    assert idx == {
+        "j":   tile.j_face_slice, "j_g": tile.j_face_slice,
+        "i":   tile.i_face_slice, "i_g": tile.i_face_slice,
+    }
+    # Vertical dims are never sliced (full water column).
+    assert "k" not in idx and "k_l" not in idx
+
+    # A tracer-only dataset gets no staggered entries.
+    idx_tracer = tu._tile_indexer(ds[["Theta"]], tile)
+    assert set(idx_tracer) == {"j", "i"}
+
+
+# ---------------------------------------------------------------------------
+# hFacC land mask (ported from the tiles_field branch)
+# ---------------------------------------------------------------------------
+
+def test_compute_tile_property_land_mask():
+    """mask_land=True NaNs hFacC==0 cells; mask_land=False keeps them.
+
+    Uses the Theta passthrough entry so no xgcm grid is needed.
+    """
+    n = 4
+    theta = np.full((1, 2, n, n), 3.0, dtype=np.float32)
+    hfac = np.ones((1, n, n), dtype=np.float32)
+    hfac[0, 1, 2] = 0.0                       # one land cell
+    ds = xr.Dataset({
+        "Theta": (("face", "k", "j", "i"), theta),
+        "hFacC": (("face", "j", "i"),      hfac),
+    })
+    prop = tu.TILE_PROPERTIES["Theta"]
+
+    masked = tu.compute_tile_property(ds, None, prop)
+    assert np.isnan(masked.values[:, 1, 2]).all()
+    # Every other cell untouched.
+    assert np.isfinite(masked.values).sum() == masked.size - 2
+
+    unmasked = tu.compute_tile_property(ds, None, prop, mask_land=False)
+    assert np.isfinite(unmasked.values).all()

@@ -19,6 +19,7 @@ from dbof.preprocessing.depth_strategies import (
     apply_depth_strategies,
 )
 from dbof.preprocessing.calculate_fields_at_depth import (
+    kinetic_energy,
     # -- vertical-structure fields (require k / W / drF) --
     mixed_layer_depth,
     buoyancy_frequency_squared,
