@@ -349,11 +349,16 @@ figure3_literature(
     png_name=("turner-angle_Whalen&Drushka(2024)_"
               "World-Ocean-Atlas-climatology.png"),
     global_view=True,
-    caption=("Compare with Whalen & Drushka (2024), World Ocean "
+    caption=("Compare with Whalen & Drushka (2025), World Ocean "
              "Atlas climatology.  Note: WOA is a coarse multi-decade "
              "climatology vs one LLC4320 snapshot \\u2014 expect "
              "agreement in the large-scale Tu pattern (T- vs "
-             "S-controlled regimes), not in mesoscale detail."),
+             "S-controlled regimes), not in mesoscale detail.\\n"
+             "Whalen, C. B., and K. Drushka, 2025: Global "
+             "Distribution and Governing Dynamics of "
+             "Submesoscale Density Fronts. J. Phys. Oceanogr., "
+             "55, 1831\\u20131845, "
+             "https://doi.org/10.1175/JPO-D-24-0119.1."),
 )\
 """
 
@@ -552,8 +557,8 @@ stacked_side_by_side(
                  mcolors.Normalize(vmin=0, vmax=5e-7),
                  "|\u2207b| (s\u207b\u00b2)  [ref scale "
                  "0\u20135e-7]")],
-    LIT_DIR / ("Wstar-F-gradb_Bachman-etal(2021)_"
-               "Kerguelen-maps.png"),
+    LIT_DIR / ("frontogenesis_F-gradB-W*_mapss_Kerguelen_"
+               "MITgcm_Bachman(2021).png"),
     our_titles=["Wstar", "F (Bachman Eq. 38)", "|\u2207b|"],
     caption=("Colour scales pinned to Bachman et al. (2021).  W* and "
              "|\u2207b| compare directly.  F computed per their "
@@ -562,7 +567,11 @@ stacked_side_by_side(
              "|\u2207b|.  Reference fields are from an IDEALISED "
              "channel simulation (their year 5, day 100), not "
              "LLC4320 \u2014 compare morphology; residual "
-             "magnitude offsets may be model/seasonal."),
+             "magnitude offsets may be model/seasonal.\\n"
+             "Bachman, S. D., 2021: An Eulerian Scheme for "
+             "Identifying Fronts and Vortices in Quasi-Balanced "
+             "Flows. J. Phys. Oceanogr., 51, 3279\u20133296, "
+             "https://doi.org/10.1175/JPO-D-21-0037.1."),
 )
 plt.show()\
 """
@@ -602,22 +611,27 @@ def _bachman_pdfs(ax):
 
 side_by_side(
     _bachman_pdfs,
-    LIT_DIR / ("Wstar-F-gradb_Bachman-etal(2021)_"
-               "Kerguelen-pdfs.png"),
+    LIT_DIR / ("frontogenesis_F-gradB-W*_PDFs_Kerguelen_"
+               "MITgcm_Bachman(2021).png"),
     caption=("Compare modal positions and widths with Bachman et "
              "al. (2021) Fig 2.  |W*| and |\u2207b| compare "
              "directly; F uses their Eq. 38 (2Q\u00b7\u2207b/"
              "|\u2207b|, s\u207b\u00b3).  Their fields are from "
              "an idealised channel run \u2014 expect lognormal "
-             "SHAPES to match; modal offsets may be model/regime."),
+             "SHAPES to match; modal offsets may be model/regime.\\n"
+             "Bachman, S. D., 2021: An Eulerian Scheme for "
+             "Identifying Fronts and Vortices in Quasi-Balanced "
+             "Flows. J. Phys. Oceanogr., 51, 3279\u20133296, "
+             "https://doi.org/10.1175/JPO-D-21-0037.1."),
 )
 plt.show()\
 """
 
 TURNER_LIT_MD = """\
-### 6.1 Whalen & Drushka (2024) — Turner angle, global
+### 6.1 Whalen & Drushka (2025) — Turner angle, global
 
-Global World Ocean Atlas climatology vs our single LLC4320 snapshot:
+Global World Ocean Atlas climatology (image filename says 2024; the
+published paper is 2025) vs our single LLC4320 snapshot:
 expect agreement in the large-scale Tu regimes, not mesoscale
 detail.\
 """
@@ -670,13 +684,17 @@ def _kerg_panel(field):
 stacked_side_by_side(
     [_kerg_panel("relative_vorticity"),
      _kerg_panel("okubo_weiss")],
-    LIT_DIR / ("vorticity-okuboweiss_Bachman-etal(2021)_"
-               "Kerguelen-maps.png"),
+    LIT_DIR / ("kinematic_B-omega-W-W*_maps_Kerguelen_"
+               "MITgcm_Bachman(2021).png"),
     our_titles=["relative_vorticity (\u03c9)", "okubo_weiss (W)"],
     caption=("Bachman et al. (2021) panels b (\u03c9) and c (W).  "
              "Expect eddy cores (W<0) ringed by strain (W>0); "
              "b \u2192 frontal_structure.ipynb, "
-             "W* \u2192 frontogenesis.ipynb."),
+             "W* \u2192 frontogenesis.ipynb.\\n"
+             "Bachman, S. D., 2021: An Eulerian Scheme for "
+             "Identifying Fronts and Vortices in Quasi-Balanced "
+             "Flows. J. Phys. Oceanogr., 51, 3279\u20133296, "
+             "https://doi.org/10.1175/JPO-D-21-0037.1."),
 )
 plt.show()\
 """
@@ -733,13 +751,20 @@ def _occ(ax):
 
 side_by_side(
     _occ,
-    LIT_DIR / ("jpdf-occurrence_Balwada-etal(2021)_"
-               "vorticity-strain.png"),
+    LIT_DIR / ("kinematic_strain-vorticity-JPDF_"
+               "Balwada-et-al(2021).png"),
     caption=("Occurrence JPDF, signed-f0 convention: expect the "
              "Balwada et al. (2021) shape \u2014 mode near the "
              "origin, cyclonic (right) tail along the \u03c3 = "
              "\u03b6 separatrix.  Reference is an idealised ACC "
-             "channel; compare shape and regime occupation."),
+             "channel at ~1 km resolution; compare shape and "
+             "regime occupation.\\n"
+             "Balwada, D., Q. Xiao, S. Smith, R. Abernathey, and "
+             "A. R. Gray, 2021: Vertical Fluxes Conditioned on "
+             "Vorticity and Strain Reveal Submesoscale "
+             "Ventilation. J. Phys. Oceanogr., 51, "
+             "2883\u20132901, "
+             "https://doi.org/10.1175/JPO-D-21-0016.1."),
 )
 plt.show()
 
@@ -751,11 +776,17 @@ def _cond(ax):
 
 side_by_side(
     _cond,
-    LIT_DIR / ("jpdf-divergence_Balwada-etal(2021)_"
-               "vorticity-strain.png"),
+    LIT_DIR / ("kinematic_divergence-conditional-JPDF_"
+               "Balwada-et-al(2021).png"),
     caption=("Conditional-mean divergence: expect convergence "
              "(negative, blue) concentrated along the cyclonic "
-             "strain ridge \u2014 Balwada et al. (2021)."),
+             "strain ridge.\\n"
+             "Balwada, D., Q. Xiao, S. Smith, R. Abernathey, and "
+             "A. R. Gray, 2021: Vertical Fluxes Conditioned on "
+             "Vorticity and Strain Reveal Submesoscale "
+             "Ventilation. J. Phys. Oceanogr., 51, "
+             "2883\u20132901, "
+             "https://doi.org/10.1175/JPO-D-21-0016.1."),
 )
 plt.show()
 
@@ -768,12 +799,18 @@ def _condgb(ax):
 
 side_by_side(
     _condgb,
-    LIT_DIR / ("jpdf-gradb_Balwada-etal(2021)_"
-               "vorticity-strain.png"),
+    LIT_DIR / ("kinematic_gradb-conditional-JPDF_"
+               "Balwada-et-al(2021).png"),
     caption=("Conditional-mean |\u2207b| (log scale, 1e-8\u2013"
              "1e-6): expect the tightest buoyancy gradients along "
              "the cyclonic-strain ridge, weakest in the AVD "
-             "interior \u2014 Balwada et al. (2021)."),
+             "interior.\\n"
+             "Balwada, D., Q. Xiao, S. Smith, R. Abernathey, and "
+             "A. R. Gray, 2021: Vertical Fluxes Conditioned on "
+             "Vorticity and Strain Reveal Submesoscale "
+             "Ventilation. J. Phys. Oceanogr., 51, "
+             "2883\u20132901, "
+             "https://doi.org/10.1175/JPO-D-21-0016.1."),
 )
 plt.show()\
 """
@@ -833,7 +870,7 @@ YU_CELL = """\
 # their 2011-11-24 vs our 2012-11-09 snapshot).
 import cartopy.crs as ccrs
 
-from dbof.plotting.literature_comparison import stacked_side_by_side
+from dbof.plotting.literature_comparison import side_by_side
 
 
 def _global_panel(field):
@@ -851,24 +888,212 @@ def _global_panel(field):
             ax, x, y, arr, field, CMAP_CFG,
             diverging_cmaps=DIVERGING,
             transform=ccrs.PlateCarree(), add_coastline=True,
-            coastline_kw={{"linewidth": 0.4, "edgecolor": "k"}})
+            coastline_kw={"linewidth": 0.4, "edgecolor": "k"})
         if im is not None:
             plt.colorbar(im, ax=ax, orientation="horizontal",
                          fraction=0.04, pad=0.04, label=label)
     return _render
 
 
-stacked_side_by_side(
-    [_global_panel("Eta"), _global_panel("U")],
-    LIT_DIR / "Eta-U_Yu-etal(2021)_global-maps.png",
-    our_titles=["Eta", "U (eastward)"],
+for _field, _png in [
+    ("Eta", "native-fields_eta_LLC4320_global_24NOV2011_"
+            "Yu-et-al(2021).png"),
+    ("U", "native-fields_u-ug_LLC4320_global_24NOV2011_"
+          "Yu-et-al(2021).png"),
+]:
+    side_by_side(
+        _global_panel(_field), LIT_DIR / _png,
+        projection=ccrs.Robinson(),
+        caption=(f"Global {_field} vs Yu et al. (2021), "
+                 "2011-11-24 — SAME model, different date: "
+                 "large-scale structure must match; mesoscale "
+                 "detail differs in phase.  Any sign/offset/"
+                 "rotation mismatch = pipeline problem.\\n"
+                 "Yu, X., Ponte, A. L., Lahaye, N., Caspar-Cohen, "
+                 "Z., & Menemenlis, D. (2021). Geostrophy "
+                 "assessment and momentum balance of the global "
+                 "oceans in a tide- and eddy-resolving model. "
+                 "J. Geophys. Res.: Oceans, 126, e2021JC017422. "
+                 "https://doi.org/10.1029/2021JC017422."),
+    )
+    plt.show()\
+"""
+
+
+
+FS_GRADB_MD = """\
+### 6.2 Global |∇b| snapshot comparison
+
+|∇b| = √(bₓ² + b_y²) from the live gradient components, global view,
+colour scale pinned to the reference (0–1.1e-6 s⁻²).  Rename the
+``PNG_NAME`` below to match the saved reference image / citation.\
+"""
+
+FS_GRADB_CELL = """\
+# Global |grad b| = hypot(db_dx, db_dy) vs literature global map.
+import cartopy.crs as ccrs
+
+from dbof.plotting.literature_comparison import side_by_side
+
+PNG_NAME = ("frontal-structure_gradb_global_LLC4320_"
+            "Bodner-et-al(2025).png")
+
+_xg, _yg, _dbx = region_arrays["db_dx"]["global"]
+_dby = region_arrays["db_dy"]["global"][2]
+gradb_glob = mask_wrap_cells(_xg, _yg, np.hypot(_dbx, _dby))
+
+
+def _gradb_panel(ax):
+    \"\"\"Global |grad b| on the reference colour scale.
+
+    Inputs: ax (cartopy GeoAxes).  Outputs: draws on ax.
+    Generated by LH and Claude
+    \"\"\"
+    ax.set_facecolor("black")     # reference uses black land/bg
+    im = ax.pcolormesh(_xg, _yg, gradb_glob,
+                       transform=ccrs.PlateCarree(),
+                       cmap="magma", vmin=0.0, vmax=1.1e-6,
+                       shading="nearest")
+    ax.coastlines(linewidth=0.3, color="gray")
+    plt.colorbar(im, ax=ax, orientation="horizontal",
+                 fraction=0.04, pad=0.04, extend="max",
+                 label="|\u2207b| (s\u207b\u00b2) "
+                       "[ref scale 0\u20131.1e-6]")
+
+
+side_by_side(
+    _gradb_panel, LIT_DIR / PNG_NAME,
     projection=ccrs.Robinson(),
-    caption=("Yu et al. (2021): LLC4320 global Eta and U on "
-             "2011-11-24 vs our 2012-11-09 snapshot \u2014 SAME "
-             "model, different date.  Expect near-identical "
-             "large-scale structure; mesoscale detail differs in "
-             "phase.  Any large-scale mismatch (sign, offset, "
-             "rotation) would indicate a pipeline problem."),
+    caption=("Global surface |\u2207b| = \u221a(b\u2093\u00b2 + "
+             "b\u1d67\u00b2), colour scale pinned to the "
+             "reference.  Expect WBC extensions, ACC, and "
+             "equatorial fronts bright; gyre interiors dark.\\n"
+             "Bodner, A., Balwada, D., & Zanna, L. (2025). A "
+             "data-driven approach for parameterizing ocean "
+             "submesoscale buoyancy fluxes. J. Adv. Model. "
+             "Earth Syst., 17, e2025MS004991. "
+             "https://doi.org/10.1029/2025MS004991."),
+)
+plt.show()\
+"""
+
+FS_PGF_MD = """\
+### 6.3 Pressure-gradient force g·|∇η| comparison
+
+g·√(gradeta2) from the STORE channel (validates the product
+directly), colour scale pinned to the reference (0–8e-5 m s⁻²).
+NOTE: the reference is a time-RMS ⟨g∇η⟩_rms (internal-tide beams
+smoothed/emphasised); ours is ONE snapshot — expect the same
+large-scale pattern but streakier instantaneous detail.  Rename
+``PNG_NAME`` to match the saved reference image / citation.\
+"""
+
+FS_PGF_CELL = """\
+# Global pressure-gradient force g*|grad eta| vs literature RMS map.
+from dbof.preprocessing.physical_constants import G
+
+PNG_NAME = ("frontal-structure_gradEta_globalLLC4320_"
+            "Yu-et-al(2021).png")
+
+_xg2, _yg2, _ge2 = region_arrays["gradeta2"]["global"]
+pgf_glob = mask_wrap_cells(_xg2, _yg2, G * np.sqrt(_ge2))
+
+
+def _pgf_panel(ax):
+    \"\"\"Global g|grad eta| on the reference colour scale.
+
+    Inputs: ax (cartopy GeoAxes).  Outputs: draws on ax.
+    Generated by LH and Claude
+    \"\"\"
+    ax.set_facecolor(LAND_COLOR)
+    im = ax.pcolormesh(_xg2, _yg2, pgf_glob,
+                       transform=ccrs.PlateCarree(),
+                       cmap="OrRd", vmin=0.0, vmax=8e-5,
+                       shading="nearest")
+    ax.coastlines(linewidth=0.3, color="k")
+    plt.colorbar(im, ax=ax, orientation="horizontal",
+                 fraction=0.04, pad=0.04, extend="max",
+                 label="g\u00b7|\u2207\u03b7| (m s\u207b\u00b2) "
+                       "[ref scale 0\u20138e-5]")
+
+
+side_by_side(
+    _pgf_panel, LIT_DIR / PNG_NAME,
+    projection=ccrs.Robinson(),
+    caption=("Instantaneous g\u00b7|\u2207\u03b7| from the "
+             "gradeta2 store channel vs the reference time-RMS "
+             "\u27e8g\u2207\u03b7\u27e9: same large-scale "
+             "pattern (WBCs, ACC, internal-tide generation "
+             "sites); a single snapshot is streakier than the "
+             "RMS.\\n"
+             "Yu, X., Ponte, A. L., Lahaye, N., Caspar-Cohen, Z., "
+             "& Menemenlis, D. (2021). Geostrophy assessment and "
+             "momentum balance of the global oceans in a tide- and "
+             "eddy-resolving model. J. Geophys. Res.: Oceans, 126, "
+             "e2021JC017422. "
+             "https://doi.org/10.1029/2021JC017422."),
+)
+plt.show()\
+"""
+
+
+
+
+FG_UG_MD = """\
+### 6.4 Yu et al. (2021) — geostrophic u_g, global
+
+Global ug vs the reference (their 2011-11-24 LLC4320 snapshot,
+±2 m s⁻¹, equatorial band |lat|<10° masked white).  Same model —
+large-scale structure should match closely.\
+"""
+
+FG_UG_CELL = """\
+# Yu et al. (2021) comparison: global geostrophic u_g (ref scale
+# +/-2 m/s; |lat|<10 deg masked as in the reference figure).
+import cartopy.crs as ccrs
+import matplotlib.colors as _mcolors
+
+_xu, _yu, _ug = region_arrays["ug"]["global"]
+_ugm = mask_wrap_cells(_xu, _yu, _ug)
+_ugm = np.where(np.abs(_yu) > 10.0, _ugm, np.nan)
+
+
+def _ug_panel(ax):
+    \"\"\"Global ug on the reference colour scale.
+
+    Inputs: ax (cartopy GeoAxes).  Outputs: draws on ax.
+    Generated by LH and Claude
+    \"\"\"
+    ax.set_facecolor(LAND_COLOR)
+    im, _ = plot_global_field(
+        ax, _xu, _yu, _ugm, "ug", CMAP_CFG,
+        diverging_cmaps=DIVERGING,
+        transform=ccrs.PlateCarree(), add_coastline=True,
+        coastline_kw={"linewidth": 0.4, "edgecolor": "k"},
+        norm=_mcolors.TwoSlopeNorm(vcenter=0, vmin=-2.0, vmax=2.0))
+    if im is not None:
+        plt.colorbar(im, ax=ax, orientation="horizontal",
+                     fraction=0.04, pad=0.04,
+                     label="u_g (m s⁻¹) "
+                           "[ref scale ±2]")
+
+
+side_by_side(
+    _ug_panel,
+    LIT_DIR / ("frontogenesis_ug_globalLLC4320_24NOV2011_"
+               "Yu-et-al(2021).png"),
+    projection=ccrs.Robinson(),
+    caption=("Global geostrophic u_g vs Yu et al. (2021) "
+             "(2011-11-24; equatorial band |lat|<10° masked "
+             "as in the reference).  SAME model — large-scale "
+             "structure should match closely; mesoscale differs "
+             "in phase.\\n"
+             "Yu, X., Ponte, A. L., Lahaye, N., Caspar-Cohen, Z., "
+             "& Menemenlis, D. (2021). Geostrophy assessment and "
+             "momentum balance of the global oceans in a tide- "
+             "and eddy-resolving model. J. Geophys. Res.: Oceans, "
+             "126, e2021JC017422. "
+             "https://doi.org/10.1029/2021JC017422."),
 )
 plt.show()\
 """
@@ -1019,7 +1244,9 @@ live_map = {
          "(`calculate_fields.turner_angle`).  Masked where |∇ρ| = 0.",
          TURNER_FIG3),
     ],
-    lit_cells=[(TURNER_LIT_MD, TURNER_FIG3)],
+    lit_cells=[(TURNER_LIT_MD, TURNER_FIG3),
+               (FS_GRADB_MD, FS_GRADB_CELL),
+               (FS_PGF_MD, FS_PGF_CELL)],
     crossref=(
         "**Cross-references** — σ₀ and b are validated here; sibling "
         "notebooks (`kinematic`, `frontogenesis`, DEPTH "
@@ -1132,12 +1359,17 @@ f-division (ekman fields — equatorial NaNs expected); face→lat-lon
 stitching; global downsampling.\
 """,
     live_md=(
-        "### In-notebook intermediate: coriolis_f\n\n"
-        "This store has no `coriolis_f` channel; the ekman chains "
-        "need f as a dependency column.  Recomputed here on the rect "
-        "grid with the same equation as `calculate_fields."
-        "coriolis_parameter` (independent cross-check), masked to "
-        "ocean pixels."),
+        "### In-notebook extras: coriolis_f + surface currents\n\n"
+        "`coriolis_f` is recomputed on the rect grid (same equation "
+        "as `calculate_fields.coriolis_parameter`; independent "
+        "cross-check), masked to ocean pixels.  Surface currents "
+        "`U`, `V` are loaded from the **native_fields store of the "
+        "same run/date** as COMPANION columns for the rotated wind "
+        "stress (not dependencies): expect broad stress/current "
+        "alignment under the trades and westerlies with Ekman "
+        "deflection, and WBC jets that are NOT wind-aligned.  Run "
+        "native_fields.ipynb Section 1 first if that store is "
+        "missing."),
     live_cell="""\
 # coriolis_f on the rect grid (same equation as
 # calculate_fields.coriolis_parameter), ocean-masked via oceTAUX.
@@ -1154,11 +1386,28 @@ region_arrays = {}
 region_arrays["coriolis_f"] = regions.select_all_regions(
     f_rect, XC, YC)
 del f_rect
-print("coriolis_f ready (rect-grid cross-check)")\
+print("coriolis_f ready (rect-grid cross-check)")
+
+# Surface currents U, V from the native_fields store of the SAME
+# run/date — companion columns for the rotated wind stress (NOT
+# dependencies; cross-subset physical comparison).  Requires the
+# native_fields store for this run_id/date (generated by
+# native_fields.ipynb).
+defn_nf = get_subset_definition(PIPELINE, "native_fields")
+reader_nf = zarr_dataset.GlobalZarrDatasetReader(
+    bucket=BUCKET, folder=FOLDER, run_id=RUN_ID,
+    dataset_name=defn_nf["dataset_name"], date_prefix=DATE_PREFIX,
+    fs=fs,
+)
+for _ch in ["U", "V"]:
+    _arr = reader_nf.get_channel_snapshot(_ch)
+    region_arrays[_ch] = regions.select_all_regions(_arr, XC, YC)
+    del _arr
+print("U, V loaded from native_fields store (same run/date)")\
 """,
     chains={
-        "oceTAUX": ["oceTAUX"],
-        "oceTAUY": ["oceTAUY"],
+        "oceTAUX": ["U", "oceTAUX"],
+        "oceTAUY": ["V", "oceTAUY"],
         "wind_stress_curl": ["oceTAUX", "oceTAUY",
                              "wind_stress_curl"],
         "ekman_pumping": ["wind_stress_curl", "coriolis_f",
@@ -1171,9 +1420,14 @@ print("coriolis_f ready (rect-grid cross-check)")\
     log_fields=set(),
     fields=[
         ("oceTAUX", "5.1 oceTAUX (eastward wind stress)",
-         "Rotated τ east: trades (negative), westerlies (positive)."),
+         "Rotated τ east: trades (negative), westerlies (positive).  "
+         "Companion column U (surface current, native_fields store, "
+         "same run/date): broadly aligned in wind-driven regimes; "
+         "WBC jets stand out as NOT wind-aligned."),
         ("oceTAUY", "5.2 oceTAUY (northward wind stress)",
-         "Rotated τ north: monsoon/storm-track structure."),
+         "Rotated τ north: monsoon/storm-track structure.  "
+         "Companion column V (surface current): same comparison as "
+         "U/oceTAUX."),
         ("wind_stress_curl", "5.3 wind_stress_curl",
          "∇×τ from native gradients of the rotated stress; gyre-"
          "scale sign structure."),
@@ -1513,7 +1767,8 @@ print("coriolis_f ready (rect-grid cross-check)")\
     ],
     lit_cells=[(BACHMAN_MAPS_MD, BACHMAN_MAPS_CELL),
                (F_DEF_MD, F_DEF_CELL),
-               (BACHMAN_PDFS_MD, BACHMAN_PDFS_CELL)],
+               (BACHMAN_PDFS_MD, BACHMAN_PDFS_CELL),
+               (FG_UG_MD, FG_UG_CELL)],
     crossref=(
         "**Cross-references** — J machinery → `kinematic.ipynb`; "
         "b and |∇b|² (gradb2) → `frontal_structure.ipynb`; raw "

@@ -825,6 +825,41 @@ frontal_structure now shares the same generator):
   comparison.  New §6.2 cell shows the two definitions side by side
   (same numerator, different normalisation/units) over the Kerguelen
   box.
+- surface_wind.ipynb regenerated (now also on the Section-6 layout):
+  U and V loaded from the NATIVE_FIELDS store of the same run/date
+  as COMPANION columns in the oceTAUX/oceTAUY chains (LH request) —
+  not dependencies; a stress-vs-current physical comparison (Ekman
+  deflection in wind-driven regimes; WBC jets not wind-aligned) that
+  doubles as a cross-subset store-consistency check.  Requires the
+  native_fields store to exist (it does).  Re-run needed.
+- CITATIONS + FILENAME ALIGNMENT (LH request): every Section-6
+  comparison caption now ends with the full citation + DOI on its
+  own line (Balwada 2021 ×4 in kinematic; Bachman 2021 in kinematic
+  6.1 + frontogenesis 6.1/6.3; Yu et al. 2021 in native_fields,
+  frontogenesis 6.4, frontal 6.3; Bodner et al. 2025 in frontal
+  6.2; Whalen & Drushka 2025 in frontal 6.1 — note the reference
+  image filename says 2024, the published paper is 2025).  All png
+  paths aligned to the committed ``literature_figures/`` filenames
+  (LH's subset_field_source scheme, incl. the 'mapss' typo) and
+  verified programmatically.  NEW: frontogenesis §6.4 global ug vs
+  Yu et al. (2021) (±2 m s⁻¹ pinned, |lat|<10° masked as in the
+  reference); native_fields split into TWO Yu comparisons (eta and
+  u-ug are separate reference images).  Unused reference images
+  available for future sections:
+  ``relative-vorticity_kurushio_4FEB2012_Su-etal-(2020)`` and
+  ``kinematic_vorticity-JPDF-strain-decomposedVorticity``.
+  Regenerated: kinematic, frontogenesis, frontal_structure,
+  native_fields — all four need re-runs.
+- frontal_structure.ipynb REGENERATED to the Section-6 layout (LH
+  request: lit verification once at the end, not per field) — full
+  re-run needed (heaviest live cell, 14 stitched fields).  Section 6:
+  (6.1) Whalen turner (moved from per-field Figure 3); (6.2) global
+  |∇b| = hypot(db_dx, db_dy) snapshot, magma, pinned 0–1.1e-6 s⁻²;
+  (6.3) pressure-gradient force g·√(gradeta2) from the STORE
+  channel, pinned 0–8e-5 m s⁻² — caption notes reference is a
+  time-RMS vs our snapshot (streakier).  Citations for 6.2/6.3
+  reference images TBD by LH (``PNG_NAME`` variables in-cell,
+  ``CITATION-TBD`` placeholders).
 - Balwada JPDF review (LH real-data run) — three fixes + one add:
   (a) MIRRORED TAILS RESOLVED: not a pipeline error (velocities
   verified via boundary-current signs; f correct).  Cause: notebook
