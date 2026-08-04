@@ -825,6 +825,23 @@ frontal_structure now shares the same generator):
   comparison.  New §6.2 cell shows the two definitions side by side
   (same numerator, different normalisation/units) over the Kerguelen
   box.
+- Balwada JPDF review (LH real-data run) — three fixes + one add:
+  (a) MIRRORED TAILS RESOLVED: not a pipeline error (velocities
+  verified via boundary-current signs; f correct).  Cause: notebook
+  normalised ζ by |f₀|; Balwada uses SIGNED f₀ (β-plane at 35°S,
+  f₀<0), under which SH cyclones (ζ<0) map to POSITIVE ζ/f₀.  Now
+  f₀ = signed regional mean f; σ, Δ by |f₀|.  (b) separatrix bug:
+  σ=|ζ| drawn with a 2-point line degenerates to a horizontal line —
+  fixed (dense sampling).  (c) Balwada region description corrected:
+  idealised ACC channel, 2000×2000 km, β-plane at 35°S, meridional
+  Gaussian ridge — Kerguelen box kept as the real-ocean analog
+  (comparable size, real ridge in the ACC).  (d) |∇b|-conditioned
+  JPDF added (``plot_jpdf_conditional_log``, Purples 1e-8..1e-6;
+  kinematic live cell now loads Theta/Salt and computes
+  ``gradb_mag`` via compute_buoyancy_gradients; png
+  ``jpdf-gradb_Balwada-etal(2021)_vorticity-strain.png``).
+  kinematic.ipynb regenerated — re-run needed (live cell slightly
+  longer: +Theta/Salt read, +1 stitched field).
 - native_fields Section 6 added (notebook regenerated to the new
   layout — re-run is cheap, no live cell): Yu et al. (2021) global
   Eta + U maps, LLC4320 itself at 2011-11-24 vs our 2012-11-09 —

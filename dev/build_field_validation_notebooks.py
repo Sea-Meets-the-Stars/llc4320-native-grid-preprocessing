@@ -684,29 +684,47 @@ plt.show()\
 KIN_JPDF_MD = """\
 ### 6.2 Balwada et al. (2021) — vorticity–strain joint PDFs
 
-Occurrence JPDF of (ζ/f₀, σ/|f₀|) and the conditional-mean
-divergence Δ/|f₀| in the same plane (``dbof.plotting.jpdfs`` —
-fresh implementation, to be reconciled against
-``fronts/properties/analysis/jpdf.py``).  f₀ = regional mean |f|.
-Region: Kerguelen box (the reference used its own study region —
-compare the SHAPE: mass along σ = |ζ|, cyclonic skewness, AVD/SD/CVD
-occupation, convergence along the CVD separatrix).\
+Reference setup: an IDEALISED ACC-like channel (2000 km × 2000 km ×
+3 km, β-plane centred at 35°S, meridional Gaussian ridge 1 km high /
+150 km wide), with f₀ = f(35°S) < 0.  Our Kerguelen box is a
+reasonable real-ocean analog: comparable size (~1900 × 1330 km) and
+a real topographic ridge in the ACC.
+
+SIGN CONVENTION (matters in the SH): ζ is normalised by SIGNED f₀
+(regional mean f, negative here), σ and Δ by |f₀| — so CYCLONIC
+vorticity (ζ < 0 in the SH) maps to POSITIVE ζ/f₀, as in the
+reference.  Normalising by |f| instead mirrors the plots left-right.
+
+Panels: occurrence JPDF, conditional-mean divergence Δ̄/|f₀|, and
+conditional-mean |∇b| (computed live from Theta/Salt via
+``compute_buoyancy_gradients``).  ``dbof.plotting.jpdfs`` is a fresh
+implementation — reconcile against
+``fronts/properties/analysis/jpdf.py``.\
 """
 
 KIN_JPDF_CELL = """\
 # Balwada et al. (2021)-style joint PDFs over the Kerguelen box.
 from dbof.plotting.jpdfs import (
     plot_jpdf_occurrence, plot_jpdf_conditional,
+    plot_jpdf_conditional_log,
 )
 
 _zeta = _kerg("relative_vorticity")[2]
 _sig = _kerg("strain_mag")[2]
 _div = _kerg("divergence")[2]
-f0 = np.nanmean(np.abs(_kerg("coriolis_f")[2]))
-print(f"f0 (regional mean |f|) = {f0:.3e} s-1")
+_gb = _kerg("gradb_mag")[2]
 
-_m = (np.isfinite(_zeta) & np.isfinite(_sig) & np.isfinite(_div))
-zf, sf, dv = _zeta[_m] / f0, _sig[_m] / f0, _div[_m] / f0
+# SIGNED f0 (Balwada: f0 = f(35S) < 0).  Cyclones (zeta<0 in the
+# SH) then map to POSITIVE zeta/f0; using |f| mirrors the plots.
+f0 = np.nanmean(_kerg("coriolis_f")[2])
+print(f"f0 (signed regional mean f) = {f0:.3e} s-1")
+
+_m = (np.isfinite(_zeta) & np.isfinite(_sig)
+      & np.isfinite(_div) & np.isfinite(_gb))
+zf = _zeta[_m] / f0
+sf = _sig[_m] / np.abs(f0)
+dv = _div[_m] / np.abs(f0)
+gb = _gb[_m]
 
 
 def _occ(ax):
@@ -717,10 +735,11 @@ side_by_side(
     _occ,
     LIT_DIR / ("jpdf-occurrence_Balwada-etal(2021)_"
                "vorticity-strain.png"),
-    caption=("Occurrence JPDF: expect the Balwada et al. (2021) "
-             "shape \u2014 mode near the origin, ridge along "
-             "\u03c3 = \u03b6 (CVD separatrix), cyclonic "
-             "skewness."),
+    caption=("Occurrence JPDF, signed-f0 convention: expect the "
+             "Balwada et al. (2021) shape \u2014 mode near the "
+             "origin, cyclonic (right) tail along the \u03c3 = "
+             "\u03b6 separatrix.  Reference is an idealised ACC "
+             "channel; compare shape and regime occupation."),
 )
 plt.show()
 
@@ -736,12 +755,28 @@ side_by_side(
                "vorticity-strain.png"),
     caption=("Conditional-mean divergence: expect convergence "
              "(negative, blue) concentrated along the cyclonic "
-             "strain ridge, divergence on the anticyclonic side "
-             "\u2014 Balwada et al. (2021)."),
+             "strain ridge \u2014 Balwada et al. (2021)."),
+)
+plt.show()
+
+
+def _condgb(ax):
+    plot_jpdf_conditional_log(
+        ax, zf, sf, gb,
+        clabel=r"$\\overline{|\\nabla b|}$ (s$^{-2}$)")
+
+
+side_by_side(
+    _condgb,
+    LIT_DIR / ("jpdf-gradb_Balwada-etal(2021)_"
+               "vorticity-strain.png"),
+    caption=("Conditional-mean |\u2207b| (log scale, 1e-8\u2013"
+             "1e-6): expect the tightest buoyancy gradients along "
+             "the cyclonic-strain ridge, weakest in the AVD "
+             "interior \u2014 Balwada et al. (2021)."),
 )
 plt.show()\
 """
-
 
 
 F_DEF_MD = """\
@@ -1258,7 +1293,7 @@ from dbof.utils.faces_to_latlon import stitch_and_mask
 
 ds_grid, land_mask, xgrid = set_up_grid(PIPELINE, None)
 ds_raw, ds_merge, it = load_snapshot(
-    PIPELINE, DATE, ds_grid, ["U", "V"],
+    PIPELINE, DATE, ds_grid, ["U", "V", "Theta", "Salt"],
     surface_only=False, data_source=get_data_source(PIPELINE),
 )
 print(f"OSN iteration {it}  (store iteration {reader.iteration})")
@@ -1270,6 +1305,9 @@ u_east, v_north = calculate_fields.geographic_velocity(
     ds_merge, xgrid)
 J = calculate_fields.compute_velocity_jacobian(ds_merge, xgrid)
 
+# |grad b| for the Balwada gradb-conditioned JPDF (Section 6).
+bg = calculate_fields.compute_buoyancy_gradients(ds_merge, xgrid)
+
 # Extra slice region for the Bachman/Balwada comparisons.
 EXTRA_REGIONS = ["kerguelen"]
 
@@ -1277,6 +1315,7 @@ live_map = {
     "U": u_east, "V": v_north,
     "du_dx": J.du_dx, "du_dy": J.du_dy,
     "dv_dx": J.dv_dx, "dv_dy": J.dv_dy,
+    "gradb_mag": (bg.zonal**2 + bg.merid**2) ** 0.5,
 }\
 """ + LIVE_TAIL,
     chains={
