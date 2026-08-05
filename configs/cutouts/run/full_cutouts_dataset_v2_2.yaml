@@ -53,3 +53,6 @@ feature_channels:
     - SIarea
 runtime:
   zarr_async_concurrency: 128
+  dask_scheduler: "distributed"
+  dask_n_workers: 18
+  dask_threads_per_worker: 1
