@@ -984,3 +984,49 @@ RUN cell, which is exactly its purpose.
   LH: small, stable; regeneration via the builder covers the
   divergence risk).  If later extracted: destination is
   ``src/dbof/plotting/live_fields.py``, NOT the notebooks folder.
+
+### 2026-08-05 — Sparkle diagnostic notebook (boss request)
+
+Boss is worried about the pixel 'sparkle' in the grad(x)² (and
+possibly kinematic) fields.  The consistency checks already rule out
+the float32→64→32 round-trip (residuals ~1e-7 relative = pure
+rounding; a real stencil/metric/rotation bug would be O(1) relative),
+so the sparkle is created during calculation — the question is at
+which stage.
+
+New: `notebooks/notebooks_dev/field_validation_sparkle.ipynb`
+(canonical builder `dev/build_sparkle_notebook.py`, 37 cells) +
+`src/dbof/plotting/sparkle_grids.py` (`sparkle_stage_grid`).
+
+Design (LH spec):
+- One figure per final field; columns = dependency chain
+  raw → intermediates → final.
+- Rows: store-full, store-zoom (200×200 km), live-full, live-zoom —
+  zoom is a ROW (not a last column) so every intermediate gets a
+  zoomed view.
+- Region-SELECTABLE (`REGION` cell, default gulf_stream; any region
+  with a zoom anchor).  Slicing to one region only — much lighter
+  than the validation notebooks.
+- Sequential colormaps ONLY (diverging maps can hide speckle in
+  their white midpoint).  One shared norm per column (store vs live
+  directly comparable): LogNorm for positive-definite stages with
+  the TOP end unclipped (sparkle stays visible as saturated dots),
+  robust 1–99.9 % linear limits for signed stages.
+- Store rows show a 'not stored (live only)' placeholder for chain
+  members never saved (gradient/Jacobian components, rho_theta).
+- Includes RUN (generate-global, both subsets, skip-existing) and
+  LOAD sections plus the live lazy recompute (same loaders/code as
+  the pipeline; batch-stitch BATCH=4, slice immediately).
+- Chains: the 5 grad(x)² frontal chains (exercising
+  native_gradient.calculate_native_gradient_tracer + grad_squared)
+  and 6 kinematic chains (exercising
+  native_gradient.calculate_jacobian): ζ, δ, strain_n/s/mag,
+  okubo_weiss.  No PDFs / literature — maps only.
+- Reading guide in the notebook: first column whose zoom shows
+  isolated extreme pixels = the stage that creates the sparkle;
+  raw → model data; gradient/Jacobian → differencing; final only →
+  squaring amplification (10x outlier → 100x).
+
+Helper smoke-tested on synthetic gulf_stream slices (placeholder
+path, log + linear norms, zoom crop, injected speckle visible).
+All generated code cells ast-parse; ≤80-char lines throughout.
