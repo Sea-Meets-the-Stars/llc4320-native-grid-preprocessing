@@ -15,11 +15,6 @@ def rotate_vector_to_geographic(u_x, v_y, ds_merge, grid, *, interpolate=True):
            u_east  = u*CS - v*SN
            v_north = u*SN + v*CS
 
-    This is the single source of the interpolate-then-rotate operation that the
-    Jacobian, the vertical-shear components, and the geographic wind-stress all
-    perform.  No face stitching is involved, so it is valid for an isolated
-    chunk/tile (subject to one-cell edge effects from ``boundary='fill'``).
-
     Parameters
     ----------
     u_x : xarray.DataArray

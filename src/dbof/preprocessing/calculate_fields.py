@@ -272,9 +272,6 @@ def grad_b2(ds_merge, grid):
         Units are s^-4
     """
     buoyancy = buoyancy_of_field(ds_merge)
-
-    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
-    # 2026-08-05): components are never squared.
     gradb2 = ng.calculate_grad_squared_tracer(
         buoyancy, ds_merge, grid)
 
@@ -329,9 +326,6 @@ def grad_rho2(ds_merge, grid):
     """
 
     rho = potential_density(ds_merge)
-
-    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
-    # 2026-08-05): components are never squared.
     gradrho2 = ng.calculate_grad_squared_tracer(
         rho, ds_merge, grid)
     return gradrho2
@@ -358,9 +352,6 @@ def grad_theta2(ds_merge, grid):
         Units are (degrees C/m)^2
     """
     theta = ds_merge.Theta
-
-    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
-    # 2026-08-05): components are never squared.
     gradtheta2 = ng.calculate_grad_squared_tracer(
         theta, ds_merge, grid)
     return gradtheta2
@@ -386,9 +377,6 @@ def grad_salt2(ds_merge, grid):
         Units are (psu/m)^2
     """
     salt = ds_merge.Salt
-
-    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
-    # 2026-08-05): components are never squared.
     gradsalt2 = ng.calculate_grad_squared_tracer(
         salt, ds_merge, grid)
     return gradsalt2
@@ -414,9 +402,6 @@ def grad_eta2(ds_merge, grid):
         Units are (m/m)^2
     """
     eta = ds_merge.Eta
-
-    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
-    # 2026-08-05): components are never squared.
     gradeta2 = ng.calculate_grad_squared_tracer(
         eta, ds_merge, grid)
     return gradeta2
