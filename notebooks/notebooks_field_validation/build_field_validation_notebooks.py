@@ -351,11 +351,11 @@ CHECKS_SRC["frontal_structure"] = """\
         (_gs("density"), _gs("rho_theta") - RHO0_REFERENCE),
     "buoyancy = G*density/RHO0":
         (_gs("buoyancy"), G * _gs("density") / RHO0_REFERENCE),
-    "turner_angle = arctan formula (store grads)":
-        (_gs("turner_angle"), np.degrees(np.arctan(
-            (RHO0_REFERENCE * (BETA**2 * _gs("gradsalt2")
-                               - ALPHA**2 * _gs("gradtheta2")))
-            / (-_gs("gradrho2") / RHO0_REFERENCE)))),\
+    # turner_angle is the projection form (Johnson et al. 2012,
+    # plan 2026-08-06): built from measured-grad(rho) dot products,
+    # NOT from the grad² channels — compare store vs live canonical.
+    "turner_angle (store) = turner_angle (live, projection)":
+        (_gs("turner_angle"), _gs("turner_angle_live")),\
 """
 
 CHECKS_SRC["kinematic"] = """\
@@ -1159,7 +1159,7 @@ SPECS["frontal_structure"] = dict(
 | gradeta2 | m² m⁻² | \\|∇η\\|² | dEta_dx, dEta_dy (← Eta) | `calculate_fields.grad_eta2` → `native_gradient` |
 | gradrho2 | kg² m⁻⁸ | \\|∇ρθ\\|² | drho_dx, drho_dy (← rho_theta ← Theta, Salt) | `calculate_fields.grad_rho2` → `native_gradient` |
 | gradb2 | s⁻⁴ | \\|∇b\\|² | db_dx, db_dy (← buoyancy) | `calculate_fields.grad_b2` → `native_gradient` |
-| turner_angle | ° | Tu = arctan[ρ₀(β²\\|∇S\\|² − α²\\|∇Θ\\|²) / (−\\|∇ρ\\|²/ρ₀)] | gradtheta2, gradsalt2, gradrho2 | `calculate_fields.turner_angle` |
+| turner_angle | ° | Tu = arctan[∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T − β∇S)] — projection form, Johnson et al. (2012) / Whalen & Drushka (2025); measured ∇ρ; co-located staggered dot products (`ng.calculate_grad_dot_tracer`); independent of the grad² channels | Theta, Salt → rho_theta | `calculate_fields.turner_angle` |
 
 Non-channel intermediates (computed LIVE below with the same
 production code, plotted as chain columns):
@@ -1234,6 +1234,8 @@ live_map = {
     "gradeta2_live": calculate_fields.grad_eta2(ds_merge, xgrid),
     "gradrho2_live": calculate_fields.grad_rho2(ds_merge, xgrid),
     "gradb2_live": calculate_fields.grad_b2(ds_merge, xgrid),
+    "turner_angle_live": calculate_fields.turner_angle(
+        ds_merge, xgrid),
 }\
 """ + LIVE_TAIL,
     chains={

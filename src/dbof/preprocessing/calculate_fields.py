@@ -406,60 +406,50 @@ def grad_eta2(ds_merge, grid):
         eta, ds_merge, grid)
     return gradeta2
 
-def turner_angle(ds_merge, grid, *, gradtheta2=None, gradsalt2=None, gradrho2=None):
-    """Compute the horizontal Turner Angle.
+def turner_angle(ds_merge, grid, *, rho=None):
+    """Horizontal Turner angle, PROJECTION form (Johnson et al. 2012).
 
-    Tu_h = arctan( ∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T - β∇S) )
-
-        Linear EOS  ∇ρ = ρ₀(−α∇T + β∇S) -->
-
-        Numerator   = ∇ρ·(α∇T + β∇S) = ρ₀(β²|∇S|² - α²|∇T|²)
-                 [T·S cross terms cancel exactly]
-
-        Denominator = ∇ρ·(α∇T - β∇S) = -|∇ρ|²/ρ₀
-                 [follows from |∇ρ|² = ρ₀²(α²|∇T|² - 2αβ∇T·∇S + β²|∇S|²)]
+    Tu_h = arctan( ∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T − β∇S) )   [degrees]
 
     Parameters
     ----------
     ds_merge : xarray.Dataset
-        Merged dataset containing 'Theta', 'Salt', grid metrics
-        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+        Merged dataset containing 'Theta', 'Salt' and grid metrics
+        ('dxC', 'dyC').
     grid : xgcm.Grid
         Grid object used for differencing and interpolation.
-    gradtheta2 : array-like, optional
-        Pre-computed |∇θ|².  Computed from *ds_merge* when *None*.
-    gradsalt2 : array-like, optional
-        Pre-computed |∇S|².  Computed from *ds_merge* when *None*.
-    gradrho2 : array-like, optional
-        Pre-computed |∇ρ|².  Computed from *ds_merge* when *None*.
+    rho : xarray.DataArray, optional
+        Pre-computed potential density (JMD95, p=0).  Computed from
+        *ds_merge* when *None*.
 
     Returns
     -------
-    dask.array.Array
-        Turner Angle.
-        Units are degrees.
+    xarray.DataArray
+        Turner angle [degrees], in (−90°, 90°), lazy.
     """
+    if rho is None:
+        rho = potential_density(ds_merge)
 
-    if gradtheta2 is None:
-        gradtheta2 = grad_theta2(ds_merge, grid)
-    if gradsalt2 is None:
-        gradsalt2 = grad_salt2(ds_merge, grid)
-    if gradrho2 is None:
-        gradrho2 = grad_rho2(ds_merge, grid)
+    # Measured-∇ρ projections onto the T and S gradients (all dot
+    # products on native staggered points; rotation-invariant).
+    p_t = ng.calculate_grad_dot_tracer(rho, ds_merge.Theta,
+                                       ds_merge, grid)
+    p_s = ng.calculate_grad_dot_tracer(rho, ds_merge.Salt,
+                                       ds_merge, grid)
 
-    numer = RHO0_REFERENCE * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
-    # xr.where (not np.where): stays lazy and keeps coords/attrs.  Mask
-    # pixels where |∇ρ| = 0 to avoid divide-by-zero.
-    denom = xr.where(gradrho2 > 0, -gradrho2 / RHO0_REFERENCE, np.nan)
-
-    tu_rad = np.arctan(numer / denom)
-    tu_h = np.degrees(tu_rad)
-
+    numer = ALPHA * p_t + BETA * p_s
+    denom = ALPHA * p_t - BETA * p_s
+    # xr.where keeps it lazy; exact-zero denominators (0/0 pixels,
+    # genuinely undefined angle) -> NaN rather than a warning.
+    tu_h = np.degrees(np.arctan(
+        numer / xr.where(denom != 0, denom, np.nan)))
+    tu_h.name = "turner_angle"
+    tu_h.attrs["long_name"] = (
+        "horizontal Turner angle (projection form, "
+        "Johnson et al. 2012)")
+    tu_h.attrs["units"] = "degrees"
     return tu_h
 
-# ------------------------------------------------------------------------------------
-# --------------------------------- KINEMATIC ----------------------------------------
-# ------------------------------------------------------------------------------------
 
 def relative_vorticity(ds_merge, grid, *, jacobian=None):
     """

@@ -164,14 +164,17 @@ def test_frontogenesis_injection_is_consistent(ds2d, grid2d):
 
 
 def test_turner_angle_injection_is_consistent(ds2d, grid2d):
-    gt = cf.grad_theta2(ds2d, grid2d)
-    gs = cf.grad_salt2(ds2d, grid2d)
-    gr = cf.grad_rho2(ds2d, grid2d)
+    # Projection form (Johnson et al. 2012): rho is the injectable.
+    rho = cf.potential_density(ds2d)
     assert_k0_equal(
-        cf.turner_angle(ds2d, grid2d,
-                        gradtheta2=gt, gradsalt2=gs, gradrho2=gr),
+        cf.turner_angle(ds2d, grid2d, rho=rho),
         cf.turner_angle(ds2d, grid2d),
-        name="turner_angle injection")
+        name="turner_angle rho-injection")
+    # Bounded by construction: arctan on (-90, 90) degrees.
+    tu = cf.turner_angle(ds2d, grid2d).compute()
+    finite = tu.values[np.isfinite(tu.values)]
+    assert finite.size > 0
+    assert (finite > -90.0).all() and (finite < 90.0).all()
 
 
 # ===========================================================================

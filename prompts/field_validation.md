@@ -1344,3 +1344,44 @@ magnitudes very different from Defs 2–3.
   sq-first) for the 5 grad*2 + strain_mag + okubo_weiss: absolute
   RMSE, RMSE/RMS %, and log10-space RMSE (weights the speckle
   pixels).  Regenerated (28 cells), all parse.
+
+### 2026-08-06 — Turner Def 3 (projection) IMPLEMENTED
+
+Evidence: Defs 2/3 histograms overlap; circular-diff tail enriched
+in weak |∇ρ|² (61% of >10° disagreement in weakest quartile) but
+not maskable — where they differ, Def 2 substitutes the constant-α/β
+model for the measured ∇ρ.  Decision (LH): Def 3, the literature
+definition.
+
+- native_gradient.py: NEW `calculate_grad_dot_tracer(a, b, ds, grid)`
+  (co-located staggered products; grad_squared_tracer is the a==b
+  case; rotation-invariant).
+- calculate_fields.turner_angle REWRITTEN: literal projection form
+  with measured JMD95 ∇ρ; signature `(ds_merge, grid, *, rho=None)`
+  (grad² injection kwargs REMOVED — stale callers fail loudly).
+  NO store-time mask: raw definition stored (arctan bounded; exact
+  0/0 → NaN); weak-|∇ρ|² masking is analysis/display-time
+  (FLOOR_PCT in turner_angle.ipynb) — reversible choice, flagged.
+- Dispatcher: turner no longer forces/consumes grad² channels.
+- Tests: rho-injection inert + (−90, 90) bounds; dimension-agnostic
+  + laziness suites pass.
+- Builder: turner_angle_live added to frontal live cell; consistency
+  row → store-vs-live-canonical; dep-table row → projection form.
+  All six regenerated; cells parse.
+- REQUIRED: frontal_structure store --clobber regeneration + re-run
+  (turner channel semantics changed).  After regen the
+  turner_angle.ipynb A/B's Def 1 column ≡ Def 3 (notebook becomes
+  the historical record of the decision).
+
+### 2026-08-06 — turner_angle.ipynb: Def 1 preserved as live inline
+
+LH: with the store switching to Def 3, the A/B's "Def 1 (store)"
+column would silently become Def 3 after regeneration — the
+comparison must be preserved.  Notebook rebuilt (builder): all
+three definitions now LIVE — Def 1 = legacy formula reconstructed
+inline (marked as the pre-2026-08-06 store channel, removed from
+src); Def 2 = ng.calculate_grad_dot_tracer (production function);
+Def 3 = calculate_fields.turner_angle itself (the production
+channel).  Store reader dropped (Section 1 loads grid only) — the
+notebook is self-contained and survives any future store state.
+15 cells, all parse.

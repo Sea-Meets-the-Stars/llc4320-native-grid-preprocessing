@@ -86,9 +86,9 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
 def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     """Subset: frontal_structure — scalar gradient magnitudes and Turner angle.
 
-    Gradient fields that the Turner angle depends on (gradtheta2, gradsalt2,
-    gradrho2) are computed first and forwarded so each gradient is evaluated
-    only once.
+    Turner angle uses the projection form (Johnson et al. 2012) built
+    from measured-∇ρ dot products; it is independent of the grad²
+    channels (plan 2026-08-06).
     """
     _GRAD_FNS = {
         "gradsalt2":  calculate_fields.grad_salt2,
@@ -98,13 +98,7 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
         "gradrho2":   calculate_fields.grad_rho2,
     }
 
-    # Turner angle depends on gradtheta2, gradsalt2, and gradrho2.
-    # If turner_angle is requested, ensure its dependencies are computed
-    # even if they are not individually requested as output channels.
-    turner_requested = "turner_angle" in computed_feature_channels
-    turner_deps = {"gradtheta2", "gradsalt2", "gradrho2"}
-
-    needed = set(computed_feature_channels) | (turner_deps if turner_requested else set())
+    needed = set(computed_feature_channels)
 
     results = {
         name: fn(ds_merge, grid)
@@ -112,14 +106,12 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
         if name in needed
     }
 
-    if turner_requested:
+    # Turner angle (projection form, Johnson et al. 2012) is built
+    # from measured-∇ρ dot products — it no longer consumes the
+    # grad² channels (plan 2026-08-06).
+    if "turner_angle" in needed:
         results["turner_angle"] = calculate_fields.turner_angle(
-            ds_merge,
-            grid,
-            gradtheta2=results["gradtheta2"],
-            gradsalt2=results["gradsalt2"],
-            gradrho2=results["gradrho2"],
-        )
+            ds_merge, grid)
 
     # Surface potential density [kg m-3] and buoyancy [m s-2] from the
     # single lazy implementations (JMD95 at p=0; b = G rho / RHO0).
