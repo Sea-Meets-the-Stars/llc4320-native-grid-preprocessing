@@ -415,6 +415,43 @@ for name in ("strain_mag", "okubo_weiss"):
 
 # ---------------------------------------------------------------------
 md(cells, """\
+## Section 6 — ECCO vs square-first: regional RMSE
+
+Bulk size of the discretization difference per field.  Plain RMSE
+is dominated by the large values (fronts, where the two forms
+agree); the log-space RMSE weights the small values where the
+cancellation speckle lives — expect it to be much larger.\
+""")
+
+code(cells, """\
+# Section 6: RMSE between the ECCO and sq-first variants (REGION).
+_PAIRS = ([(f, f"{f}_ecco", f"{f}_sqfirst") for f in TRACERS]
+          + [("strain_mag", "strain_mag_ecco",
+              "strain_mag_sqfirst"),
+             ("okubo_weiss", "okubo_weiss_ecco",
+              "okubo_weiss_sqfirst")])
+
+print(f"{'field':22s} {'RMSE':>11s} {'RMSE/RMS':>9s} "
+      f"{'log10-RMSE':>11s}   ({REGION})")
+for _name, _ke, _ks in _PAIRS:
+    _, _, a = live_region[_ke]
+    _, _, b = live_region[_ks]
+    m = np.isfinite(a) & np.isfinite(b)
+    rmse = float(np.sqrt(np.mean((a[m] - b[m]) ** 2)))
+    rms = float(np.sqrt(np.mean(b[m] ** 2)))
+    # log-space RMSE (positive-definite fields only).
+    mp = m & (a > 0) & (b > 0)
+    lrmse = (float(np.sqrt(np.mean(
+        (np.log10(a[mp]) - np.log10(b[mp])) ** 2)))
+        if mp.sum() else float("nan"))
+    print(f"{_name:22s} {rmse:11.3e} {100*rmse/rms:8.2f}% "
+          f"{lrmse:11.3f}")
+print("\\nlog10-RMSE in decades; driven by the speckle pixels "
+      "(small values), where the two stencils disagree most.")\
+""")
+
+# ---------------------------------------------------------------------
+md(cells, """\
 ## Findings (2026-08-05, gulf_stream)
 
 - **Confirmed**: white specks in every ECCO grad² zoom are absent

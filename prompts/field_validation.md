@@ -1328,3 +1328,19 @@ magnitudes very different from Defs 2–3.
   Pacific-centred Robinson(180), turbo cmap, fixed ±90 — the W&D
   display convention — with coastlines; caption notes it.
   All six + turner notebooks regenerated; cells parse.
+
+### 2026-08-06 — JMD95 dtype decision + sparkle RMSE cell
+
+- JMD95 stays float64 (LH asked; recommendation AGAINST float32):
+  float32 polynomial evaluation injects ~1e-4..1e-3 kg/m3
+  uncorrelated per-pixel noise into rho — invisible in rho values
+  ("minimal differences" test) but comparable to adjacent-cell
+  density DIFFERENCES at weak fronts → new speckle in gradrho2 and
+  its consumers (R_ib denominator, all Turner forms).  Pattern
+  stays compute-wide/store-narrow; reference implementation remains
+  checkable against published JMD95 values.  If retested: test on
+  the weak-gradient tail of gradrho2, not on rho.
+- Sparkle notebook: new Section 6 — regional RMSE table (ECCO vs
+  sq-first) for the 5 grad*2 + strain_mag + okubo_weiss: absolute
+  RMSE, RMSE/RMS %, and log10-space RMSE (weights the speckle
+  pixels).  Regenerated (28 cells), all parse.
