@@ -1,13 +1,6 @@
 import xarray as xr
 import dbof.utils.jmd95_xgcm_implementation as jmd95
 
-# DEPRECATED: grad_squared moved to dbof.utils.native_gradient during the
-# field migration (see prompts/field_migration.md) — it is a pure operation
-# on gradient components, so it lives with the gradient machinery.  This
-# re-export keeps old imports working; new code should import it from
-# dbof.utils.native_gradient.
-from dbof.utils.native_gradient import grad_squared  # noqa: F401
-
 def buoyancy_of_field(ds):
     """LEGACY — superseded; do not use in new code.
 

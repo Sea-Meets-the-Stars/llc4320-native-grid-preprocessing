@@ -273,9 +273,10 @@ def grad_b2(ds_merge, grid):
     """
     buoyancy = buoyancy_of_field(ds_merge)
 
-    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
-
-    gradb2 = ng.grad_squared(zonal_grad_b, merid_grad_b)
+    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
+    # 2026-08-05): components are never squared.
+    gradb2 = ng.calculate_grad_squared_tracer(
+        buoyancy, ds_merge, grid)
 
     return gradb2
 
@@ -329,16 +330,18 @@ def grad_rho2(ds_merge, grid):
 
     rho = potential_density(ds_merge)
 
-    zonal_grad_rho, merid_grad_rho = ng.calculate_native_gradient_tracer(rho, ds_merge, grid=grid)
-    gradrho2 = ng.grad_squared(zonal_grad_rho, merid_grad_rho)
+    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
+    # 2026-08-05): components are never squared.
+    gradrho2 = ng.calculate_grad_squared_tracer(
+        rho, ds_merge, grid)
     return gradrho2
 
 
 def grad_theta2(ds_merge, grid):
     """Compute the squared temperature gradient magnitude.
 
-    Computes zonal and meridional gradients on the native LLC grid, 
-    squares and sums them
+    Squares the native staggered gradients and sums them
+    (square-before-interp)
 
     Parameters
     ----------
@@ -356,15 +359,17 @@ def grad_theta2(ds_merge, grid):
     """
     theta = ds_merge.Theta
 
-    zonal_grad_theta, merid_grad_theta = ng.calculate_native_gradient_tracer(theta, ds_merge, grid=grid)
-    gradtheta2 = ng.grad_squared(zonal_grad_theta, merid_grad_theta)
+    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
+    # 2026-08-05): components are never squared.
+    gradtheta2 = ng.calculate_grad_squared_tracer(
+        theta, ds_merge, grid)
     return gradtheta2
 
 def grad_salt2(ds_merge, grid):
     """Compute the squared salinity gradient magnitude.
 
-    Computes zonal and meridional gradients on the native LLC grid, 
-    squares and sums them
+    Squares the native staggered gradients and sums them
+    (square-before-interp)
 
     Parameters
     ----------
@@ -382,15 +387,17 @@ def grad_salt2(ds_merge, grid):
     """
     salt = ds_merge.Salt
 
-    zonal_grad_salt, merid_grad_salt = ng.calculate_native_gradient_tracer(salt, ds_merge, grid=grid)
-    gradsalt2 = ng.grad_squared(zonal_grad_salt, merid_grad_salt)
+    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
+    # 2026-08-05): components are never squared.
+    gradsalt2 = ng.calculate_grad_squared_tracer(
+        salt, ds_merge, grid)
     return gradsalt2
 
 def grad_eta2(ds_merge, grid):
     """Compute the squared SSH gradient magnitude.
 
-    Computes zonal and meridional gradients on the native LLC grid, 
-    squares and sums them
+    Squares the native staggered gradients and sums them
+    (square-before-interp)
 
     Parameters
     ----------
@@ -408,8 +415,10 @@ def grad_eta2(ds_merge, grid):
     """
     eta = ds_merge.Eta
 
-    zonal_grad_eta, merid_grad_eta = ng.calculate_native_gradient_tracer(eta, ds_merge, grid=grid)
-    gradeta2 = ng.grad_squared(zonal_grad_eta, merid_grad_eta)
+    # Square-BEFORE-interp form (sparkle fix, prompts/field_validation.md
+    # 2026-08-05): components are never squared.
+    gradeta2 = ng.calculate_grad_squared_tracer(
+        eta, ds_merge, grid)
     return gradeta2
 
 def turner_angle(ds_merge, grid, *, gradtheta2=None, gradsalt2=None, gradrho2=None):
@@ -542,7 +551,7 @@ def rossby_number(ds_merge, grid, *, jacobian=None):
 
     return rossby_no
 
-def strain(ds_merge, grid, *, jacobian=None):
+def strain(ds_merge, grid, *, jacobian=None, invariants=None):
     """
     Compute strain from horizontal velocity components.
 
@@ -553,24 +562,43 @@ def strain(ds_merge, grid, *, jacobian=None):
     grid : xgcm.Grid
         Grid object relating to ds_merge.
     jacobian : VelocityJacobian, optional
-        Pre-computed velocity Jacobian.  When *None* the Jacobian is
-        computed internally (standalone mode).
+        Pre-computed velocity Jacobian (used for the SIGNED
+        components).  When *None* the Jacobian is computed
+        internally (standalone mode).
+    invariants : dict, optional
+        Pre-computed C-grid-native invariants from
+        :func:`native_gradient.kinematic_invariants` (used for the
+        MAGNITUDE).  When *None* they are computed internally.
 
     Returns
     -------
     strain_mag : xarray.DataArray
-        Strain magnitude field [s^-1].
+        Strain magnitude field [s^-1] — built square-first from the
+        C-grid-native invariants (sparkle fix,
+        prompts/field_validation.md 2026-08-05).  NOTE: therefore
+        NOT pixelwise equal to sqrt(strain_n^2 + strain_s^2), whose
+        centre-interpolated components lose grid-scale variance.
     strain_n: xarray.DataArray
-        Normal strain field [s^-1].
+        Normal strain field [s^-1] (geographic, centre-interpolated).
     strain_s: xarray.DataArray
-        Shear strain field [s^-1].
+        Shear strain field [s^-1] (geographic, centre-interpolated).
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
 
+    # Signed geographic components: ECCO path (vectors need the
+    # rotation; near-zeros are benign on signed fields).
     strain_n = jacobian.du_dx - jacobian.dv_dy
     strain_s = jacobian.du_dy + jacobian.dv_dx
-    strain_mag = np.sqrt(strain_n**2 + strain_s**2)
+
+    # Magnitude: square-first from the native-point invariants —
+    # sn at centres (no interp), ss squared AT the corners before
+    # the corner->centre move of the non-negative square.
+    if invariants is None:
+        invariants = ng.kinematic_invariants(
+            ds_merge.U, ds_merge.V, ds_merge, grid)
+    ss2_c = ng.interp_corner_squared(invariants["ss_z"] ** 2, grid)
+    strain_mag = np.sqrt(invariants["sn_c"] ** 2 + ss2_c)
 
     return strain_mag, strain_n, strain_s
 
@@ -602,9 +630,20 @@ def divergence(ds_merge, grid, *, jacobian=None):
     return div
 
 
-def okubo_weiss_parameter(ds_merge, grid, *, jacobian=None):
+def okubo_weiss_parameter(ds_merge, grid, *, invariants=None):
     """
-    Compute the Okubo-Weiss parameter.
+    Compute the Okubo-Weiss parameter W = sn^2 + ss^2 - zeta^2.
+
+    Built SQUARE-FIRST from the C-grid-native rotation invariants
+    (:func:`native_gradient.kinematic_invariants`): sn at centres
+    (zero interpolation), zeta and ss squared AT the corners before
+    the corner->centre move of the non-negative squares.  Squaring
+    centre-interpolated components manufactures near-zeros at
+    grid-scale extrema (the 'sparkle' — prompts/field_validation.md
+    2026-08-05); W is rotation-invariant so no CS/SN is needed.
+    NOTE: W therefore lives on a different stencil than the SIGNED
+    ``relative_vorticity`` channel (centre-interpolated) — state
+    this wherever the two are compared pixelwise.
 
     Parameters
     ----------
@@ -612,29 +651,27 @@ def okubo_weiss_parameter(ds_merge, grid, *, jacobian=None):
         Dataset containing U and V components on the model grid.
     grid : xgcm.Grid
         Grid object relating to ds_merge.
-    jacobian : VelocityJacobian, optional
-        Pre-computed velocity Jacobian.  Forwarded to
-        ``relative_vorticity`` and ``strain``; when *None* the Jacobian
-        is computed internally (once, then shared).
+    invariants : dict, optional
+        Pre-computed invariants from
+        :func:`native_gradient.kinematic_invariants`; when *None*
+        they are computed internally (once, then shared).
 
     Returns
     -------
     OW : xarray.DataArray
         Okubo-Weiss parameter field [s^-2].
     """
-    if jacobian is None:
-        jacobian = compute_velocity_jacobian(ds_merge, grid)
+    if invariants is None:
+        invariants = ng.kinematic_invariants(
+            ds_merge.U, ds_merge.V, ds_merge, grid)
 
-    omega = relative_vorticity(ds_merge, grid, jacobian=jacobian)
-    _, strain_n, strain_s = strain(ds_merge, grid, jacobian=jacobian)
-
-    okubo_weiss = strain_n**2 + strain_s**2 - omega**2
+    ss2_c = ng.interp_corner_squared(invariants["ss_z"] ** 2, grid)
+    zeta2_c = ng.interp_corner_squared(
+        invariants["zeta_z"] ** 2, grid)
+    okubo_weiss = invariants["sn_c"] ** 2 + ss2_c - zeta2_c
 
     return okubo_weiss
 
-# ------------------------------------------------------------------------------------
-# ------------------------------ FRONTOGENESIS ---------------------------------------
-# ------------------------------------------------------------------------------------ 
 
 def _frontogenesis_formula(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
     """Kinematic frontogenesis tendency from velocity gradient components.
@@ -924,10 +961,7 @@ def modified_okubo_weiss(ds_merge, grid, *, jacobian=None,
     """
     # Classical Okubo-Weiss W (reuse caller's if given).
     if okubo_weiss is None:
-        if jacobian is None:
-            jacobian = compute_velocity_jacobian(ds_merge, grid)
-        okubo_weiss = okubo_weiss_parameter(ds_merge, grid,
-                                            jacobian=jacobian)
+        okubo_weiss = okubo_weiss_parameter(ds_merge, grid)
     # Smaller eigenvalue l2 = W / 4.
     l2 = okubo_weiss / 4.0
 

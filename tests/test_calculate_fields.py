@@ -136,9 +136,21 @@ def test_native_gradient_tracer_dimension_agnostic(ds2d, grid2d, ds3d,
 def test_jacobian_injection_is_consistent(ds2d, grid2d):
     jac = cf.compute_velocity_jacobian(ds2d, grid2d)
     for fn in (cf.relative_vorticity, cf.divergence,
-               cf.okubo_weiss_parameter, cf.rossby_number):
+               cf.rossby_number):
         assert_k0_equal(fn(ds2d, grid2d, jacobian=jac), fn(ds2d, grid2d),
                         name=f"{fn.__name__} jacobian-injection")
+
+    # okubo_weiss and strain_mag are built from the C-grid-native
+    # invariants (sparkle fix); their injection kwarg is inert too.
+    inv = ng.kinematic_invariants(ds2d.U, ds2d.V, ds2d, grid2d)
+    assert_k0_equal(
+        cf.okubo_weiss_parameter(ds2d, grid2d, invariants=inv),
+        cf.okubo_weiss_parameter(ds2d, grid2d),
+        name="okubo_weiss invariants-injection")
+    for got, want in zip(
+            cf.strain(ds2d, grid2d, jacobian=jac, invariants=inv),
+            cf.strain(ds2d, grid2d)):
+        assert_k0_equal(got, want, name="strain invariants-injection")
 
 
 def test_frontogenesis_injection_is_consistent(ds2d, grid2d):
@@ -167,13 +179,15 @@ def test_turner_angle_injection_is_consistent(ds2d, grid2d):
 # ===========================================================================
 
 def test_grad_squared_single_implementation(ds2d, grid2d):
-    """ng owns grad_squared; pc re-exports it; the two-step workflow
-    reproduces a grad_*2 field."""
-    assert pc.grad_squared is ng.grad_squared
-    gx, gy = ng.calculate_native_gradient_tracer(
-        ds2d.Theta, ds2d, grid=grid2d)
-    assert_k0_equal(ng.grad_squared(gx, gy), cf.grad_theta2(ds2d, grid2d),
-                    name="two-step workflow vs grad_theta2")
+    """grad_*2 fields delegate to the single square-BEFORE-interp
+    implementation (sparkle fix, prompts/field_validation.md
+    2026-08-05); the old pointwise grad_squared is deleted."""
+    assert not hasattr(ng, "grad_squared")
+    assert not hasattr(pc, "grad_squared")
+    assert_k0_equal(
+        ng.calculate_grad_squared_tracer(ds2d.Theta, ds2d, grid2d),
+        cf.grad_theta2(ds2d, grid2d),
+        name="calculate_grad_squared_tracer vs grad_theta2")
 
 
 # ===========================================================================

@@ -1030,3 +1030,204 @@ Design (LH spec):
 Helper smoke-tested on synthetic gulf_stream slices (placeholder
 path, log + linear norms, zoom crop, injected speckle visible).
 All generated code cells ast-parse; ≤80-char lines throughout.
+
+### 2026-08-05 — Sparkle ROOT CAUSE identified: centre-interp cancellation
+
+LH ran the sparkle notebook (gulf_stream). Observations:
+- gradeta2 NEVER sparkles; gradtheta2 and gradb2 DO.
+- Sparkles appear at/after the squared-component stage.
+- Kinematic fields don't sparkle EXCEPT strain_mag and okubo_weiss
+  (the two involving squares).
+- Sparkles are WHITE on the log-scaled amp maps = anomalously SMALL
+  values (consistent with the earlier float32 analysis: specks are
+  ~50 quanta above the precision floor — tiny but fully resolved).
+
+Mechanism (LH hypothesis, confirmed by construction): the ECCO
+recipe computes finite differences on the staggered points,
+2-point-INTERPOLATES them to the cell centre, rotates, THEN squares.
+The 2-point mean has a null space at the grid scale: at a local
+extremum of the field the two flanking differences are equal-and-
+opposite and cancel in the average → centred |grad|² plunges orders
+of magnitude below its one-sided gradients → white speck on a log
+map. Explains every observation: Eta is smooth at grid scale (no
+grid-scale extrema) → no sparkle; Theta/b carry grid-scale variance
+(fronts, internal waves) → sparkle; ζ/δ are LINEAR in the
+interpolated Jacobian (cancellation invisible on linear scales) →
+no sparkle; strain_mag/W square the components → sparkle.  NOT a
+precision artifact (store ≡ live to ~1e-7). The specks are
+plausible-but-suppressed values: real critical points exist, but
+interp-then-square manufactures extra ones at every grid-scale
+extremum.
+
+Code: NEW `native_gradient.grad_squared_staggered(ds_value, ds_grid,
+grid)` — squares each finite difference ON its staggered point, then
+interpolates the non-negative squares to the centre
+(variance-preserving; a mean of two non-negative numbers cannot
+cancel). No CS/SN rotation needed: |grad|² is invariant under the
+orthogonal rotation. Both forms are consistent O(dx²)
+discretizations; they differ only at the 2dx scale. The ECCO-recipe
+functions are UNTOUCHED — production grad_*2 channels still use the
+standard form; whether to switch is a science decision (LH/boss)
+after the A/B.
+
+Tests: `tests/test_grad_squared_staggered.py` (3 passing) —
+linear-field exactness for BOTH forms on the rotated synthetic grid
+(also checks the rotation-invariance argument); the spike test
+DOCUMENTS the mechanism (standard form cancels at a one-pixel
+extremum, staggered form retains (δ/D)²); smooth-field median
+agreement.
+
+Notebook: builder adds a `{f}_sqfirst` LAST COLUMN to all five grad²
+chains (live-only) + sparkle_grids norm fix (non-negative fields
+with exact zeros now get LogNorm, zeros clipped to vmin = bottom
+colour, not gray). Prediction: white specks vanish in the _sqfirst
+column; any that remain are true critical points.
+
+### 2026-08-05 — DISCUSSION ONLY (no code changes): sparkle fix design
+
+A/B in the sparkle notebook CONFIRMED the centre-interp cancellation:
+ECCO rows speckled, square-first rows clean, identical frontal
+structure (gradtheta2, gulf_stream).
+
+Three design questions raised by LH, positions recorded (decisions
+pending):
+
+1. Remove `ng.grad_squared` (LH: "will never work for staggered
+   grids"). Agreed — in this codebase its only role is the flawed
+   interp-then-square composition. Proposal: promote the staggered
+   version to the NAME `grad_squared` with the new
+   `(ds_value, ds_grid, grid)` signature so stale call sites fail
+   loudly. Call sites to migrate: calculate_fields grad_{theta,salt,
+   eta,rho,b}2, CFAD balanced_richardson_number, depth_subsets
+   compute_frontal gradb2, kinetic_energy, physical_calculations
+   deprecated re-export. Consequences: stores must be regenerated
+   (consistency cells will rightly fail otherwise); grad² PDF low
+   tails change (partly cancellation specks); turner_angle inherits
+   via injected grad²s.
+
+2. Conditional inside calculate_native_gradient_tracer? Recommend
+   NO flag (return-type split, breaks ECCO-port auditability).
+   Instead: private `_staggered_diffs()` core shared by the two
+   public functions (components: interp→rotate; magnitude²:
+   square→interp). Stencils defined once.
+
+3. Jacobian/kinematic squares (strain_mag, okubo_weiss):
+   per-component square-first impossible (components at different
+   native points; tensor rotation needs co-location). Route through
+   ROTATION-INVARIANTS at native C-grid points instead: δ, σₙ at
+   centres (flux form over rA — zero interps), ζ, σₛ at corners
+   (circulation form over rAz = MITgcm momVort3). Square at native
+   points, interp only the non-negative corner squares:
+   σ² = σₙ² + i2(σₛ²);  W = σₙ² + i2(σₛ²) − i2(ζ²).  No CS/SN.
+   Signed channels (relative_vorticity, strain_n/s) keep the ECCO
+   path. Note: current calculate_jacobian is doubly interpolated
+   (velocities centred+rotated BEFORE differencing, then the
+   derivatives interpolated back) — the centred ζ is smoother than
+   the model's native (corner) vorticity. Caveat if adopted: W and
+   ζ channels then live on different stencils — state explicitly
+   wherever they're compared pixelwise.
+
+Notebook-only test cell for the kinematic A/B provided to LH
+(corner/centre invariants + stitch + 1-column 4-row comparison).
+
+### 2026-08-05 — DISCUSSION (no changes): how far does sq-first go?
+
+LH: should ALL calculations happen before interpolation (Turner,
+frontogenesis)? Resolved rule: the pathology needs a SIGNED
+staggered quantity interpolated (2-pt null at grid-scale extrema)
+AND the manufactured near-zeros becoming meaningful (squared,
+log-displayed, or in a denominator). Products require CO-LOCATED
+factors: a² always safe (sq-first); a·b across stagger points
+forces a move — move non-negative squares, never signed fields
+where avoidable.
+
+- Turner angle: NO rewrite needed — arctan of centre quantities;
+  inherits the fix entirely through sq-first grad² inputs
+  (existing injection). Its near-zero numerator = physics
+  (density compensation).
+- Frontogenesis F = Q·∇b: cannot be fully interp-free (factors on
+  4 native points; db/dx·db/dy cross term has NO native
+  co-location). F is signed on diverging scales → manufactured
+  near-zeros are benign there (same reason ζ/δ never sparkled).
+  Leave on component path; optional future term-level native-point
+  rewrite (inline — component functions destroy the staggered
+  intermediates) with its own A/B.
+- LH's inlining instinct CONFIRMED architecturally: sq-first
+  functions must own their stencils inline
+  (calculate_grad_squared_tracer, kinematic_invariants); they
+  cannot compose through calculate_jacobian /
+  calculate_native_gradient_tracer.
+- NEW concern raised: R_ib has gradb2 in the DENOMINATOR →
+  manufactured zeros = spurious huge R_ib (dark sparkle in
+  stability statistics). KE and Wstar similar. All inherit the fix
+  via sq-first gradb2 — strengthens the case for the migration.
+
+Families: sq-first = grad_*2 ×5, gradb2 (both), strain_mag,
+okubo_weiss (+ Turner/R_ib/KE/Wstar inheriting).  Component path
+unchanged = U/V, ug/vg, ∇b components, ζ, δ, strain_n/s, wind.
+Watch list = frontogenesis tendency/geo/ageo.
+
+### 2026-08-05 — IMPLEMENTED: square-before-interp is production
+
+Kinematic A/B confirmed (strain_mag AND okubo_weiss both improved
+by the C-grid-native square-first invariants). GO from LH; all
+three design decisions implemented on `field-validation`:
+
+**native_gradient.py**
+- `grad_squared` DELETED (and its deprecated re-export in
+  `physical_calculations.py`) — pointwise sum-of-squares of
+  centre-interpolated components will never be safe on a staggered
+  grid; the missing name makes stale call sites fail loudly.
+- `grad_squared_staggered` promoted to
+  `calculate_grad_squared_tracer(ds_value, ds_grid, grid)` —
+  self-contained (LH decision: no shared private helper), the ONE
+  canonical |grad s|².
+- NEW `kinematic_invariants(u, v, ds_merge, grid)` → sn_c/delta_c
+  at centres (flux form / rA, ZERO interpolation), zeta_z/ss_z at
+  corners (circulation form / rAz = MITgcm momVort3); NEW
+  `interp_corner_squared` for the non-negative corner squares.
+
+**Call sites migrated** (grep-verified zero remaining
+`ng.grad_squared`): grad_{b,rho,theta,salt,eta}2 in
+calculate_fields (log_grad_b inherits via grad_b2);
+balanced_richardson_number default gradb2 (DENOMINATOR — the
+highest-stakes case); depth_subsets KE gradb2; `strain()` magnitude
+(components stay ECCO/signed; gains `invariants=` kwarg;
+strain_mag ≠ sqrt(sn²+ss²) pixelwise — documented);
+`okubo_weiss_parameter()` rewritten on invariants (signature now
+`invariants=`, not `jacobian=`); modified_okubo_weiss (Wstar)
+inherits W via okubo_weiss_parameter (its |Q|² keeps component
+products — watch-list with frontogenesis); compute_kinematic
+dispatcher hoists shared invariants. Turner inherits via grad²
+injection, untouched.
+
+**Tests** (all passing): test_grad_squared_staggered retargeted
+(legacy ECCO recipe inlined in tests since the function is gone;
+spike-cancellation regression test kept);
+test_grad_squared_single_implementation asserts DELETION + new
+delegation; jacobian-injection test split (OW/strain on
+invariants); synthetic fixtures gained dxG/dyG/rA/rAz (uniform);
+38 laziness + CFAD + jacobian + channel-expansion suites green.
+
+**Notebook**: builder rewritten — the sparkle notebook is now the
+canonical A/B RECORD (26 cells): legacy ECCO recipe reconstructed
+INLINE (it no longer exists in src), sq-first = the production
+functions; plotting helper INLINED in the notebook (LH decision —
+diagnostic-specific; `src/dbof/plotting/sparkle_grids.py` DELETED);
+figures for 5 grad² + strain_mag + okubo_weiss; Findings section
+records the results incl. the model-axis component swap
+(corr 0.9 swapped vs 0.5 same-name on the rotated Gulf Stream
+face).
+
+**Docs**: `docs/Fields.md` Conventions gains a "Staggered-grid
+stencils" subsection (two stencil families, why, consequences,
+MITgcm horiz-grid link, pointers here + to the notebook).
+
+**REQUIRED FOLLOW-UPS**: (1) regenerate the frontal_structure and
+kinematic stores (+ any DEPTH stores with gradb2/KE/R_ib) — until
+then the store-vs-live consistency cells will rightly FAIL at O(1)
+on speckle pixels; (2) re-run the validation notebooks; expect the
+grad² PDF LOW TAILS to lift (part of the old tail was cancellation
+specks) and Bodner/Bachman comparisons to change only at speckle
+pixels; (3) note for the boss: grid-scale gradient variance is now
+retained, not filtered.

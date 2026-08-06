@@ -476,8 +476,13 @@ def balanced_richardson_number(ds_merge, grid, *, n2=None, gradb2=None):
     n2 = n2.clip(min=0.0)
     # |∇_h b|² denominator term, on the same buoyancy definition as N².
     if gradb2 is None:
-        bg = compute_buoyancy_gradients(ds_merge, grid)
-        gradb2 = ng.grad_squared(bg.zonal, bg.merid)
+        # Square-BEFORE-interp form (sparkle fix,
+        # prompts/field_validation.md 2026-08-05).  CRITICAL here:
+        # gradb2 is a DENOMINATOR — manufactured near-zeros from
+        # squaring centre-interpolated components would produce
+        # spurious huge R_ib values.
+        b = buoyancy_of_field(ds_merge)
+        gradb2 = ng.calculate_grad_squared_tracer(b, ds_merge, grid)
 
     # Coriolis parameter f(YC); f² enters the numerator.
     f = coriolis_parameter(ds_merge, grid)

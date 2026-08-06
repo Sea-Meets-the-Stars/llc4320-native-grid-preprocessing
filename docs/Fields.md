@@ -32,6 +32,42 @@ invariants are pinned by `tests/test_calculate_fields.py`.
   `SURFACE_ONLY_BASES` (`Eta`, `gradeta2`, `ug`, `vg`) only ever emit
   `_sfc`. Extra channels are emitted as-is (inherently 2D).
 
+### Staggered-grid stencils: squared fields are square-BEFORE-interp
+
+LLC4320 is an Arakawa C-grid — tracers at cell centres, `U`/`V` on
+staggered edge points, vorticity naturally on cell corners (see the
+[MITgcm horizontal-grid documentation](
+https://mitgcm.readthedocs.io/en/latest/algorithm/horiz-grid.html)).
+Two stencil families coexist in `utils/native_gradient.py`:
+
+- **Vector components** (∇b for frontogenesis, the velocity Jacobian,
+  geographic `U`/`V`) follow the ECCO recipe: finite-difference on the
+  staggered points, 2-point-interpolate to the tracer centre, rotate
+  to geographic via `CS`/`SN`
+  (`calculate_native_gradient_tracer`, `calculate_jacobian`).
+- **Squared magnitudes** (`grad*2`, `strain_mag`, `okubo_weiss`, and
+  everything built on them: `turner_angle`, `R_ib`, `KE`, `Wstar`)
+  are built **square-before-interp**: each difference is squared ON
+  its native C-grid point and only the non-negative squares are moved
+  between grid locations (`calculate_grad_squared_tracer`,
+  `kinematic_invariants` + `interp_corner_squared`).
+
+Why: the 2-point interpolation has a null space at the grid scale —
+at a local extremum the two flanking one-sided differences are
+equal-and-opposite and cancel in the average.  Squaring the
+interpolated components therefore manufactures near-zero pixels
+('sparkle' on log-scaled maps; spurious huge values where a squared
+gradient sits in a denominator, e.g. `R_ib`).  A mean of
+non-negative squares cannot cancel.  The squared magnitudes are
+rotation-invariant, so the square-first forms never apply `CS`/`SN`.
+Consequences: `strain_mag` ≠ `sqrt(strain_n² + strain_s²)`
+pixelwise, and `okubo_weiss` uses the corner (MITgcm `momVort3`)
+vorticity stencil rather than the centred `relative_vorticity`
+channel — state this wherever the channels are compared pixel by
+pixel.  A/B validation:
+`notebooks/notebooks_dev/field_validation_sparkle.ipynb`; decision
+log: `prompts/field_validation.md` (2026-08-05).
+
 ---
 
 ## Surface pipeline subsets (SURF / OSN)

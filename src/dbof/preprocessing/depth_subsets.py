@@ -357,9 +357,10 @@ def compute_energetics(ds_merge, grid, computed_feature_channels):
     b = buoyancy_of_field(ds_merge)   # lazy
     f = coriolis_parameter(ds_merge, grid)
 
-    b_x, b_y = ng.calculate_native_gradient_tracer(
-        b, ds_merge, grid=grid)                     # lazy
-    grad_b2 = ng.grad_squared(b_x, b_y)             # lazy
+    # Square-BEFORE-interp |grad b|^2 (sparkle fix,
+    # prompts/field_validation.md 2026-08-05).
+    grad_b2 = ng.calculate_grad_squared_tracer(
+        b, ds_merge, grid)                          # lazy
     grad_b_mag = np.sqrt(grad_b2)
     ke_3d = 0.5 * (mld * grad_b_mag / f)**2   # lazy
 
