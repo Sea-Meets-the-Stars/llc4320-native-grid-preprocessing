@@ -1277,3 +1277,31 @@ kernels → regenerate the two SURF stores (--clobber:
 frontal_structure, kinematic) → run the six notebooks.  Expect:
 consistency checks pass at ~1e-7; sparkle gone from grad² maps;
 grad² PDF low tails lifted vs the PR-1 figures.
+
+### 2026-08-06 — Turner-angle A/B notebook built (no code changes)
+
+Root cause of the residual Tu speckle (post-sq-first): the formula's
+numerator (linear-EOS T/S squares, constant α/β) and denominator
+(measured JMD95 gradrho2) are TWO measurement routes; at compensated
+fronts both are tiny residuals of large cancellations, their errors
+decorrelate, and the ratio's sign is a coin flip → ±90° speckle.
+Division amplifies but does not create — the closed-set form removes
+the artificial sources: measure the cross term directly
+(calculate_grad_dot_tracer: Tx·Sx on u-points, Ty·Sy on v-points —
+co-located, interp AFTER multiplying) and build BOTH parts from
+{A=α²|∇T|², B=β²|∇S|², X=αβ∇T·∇S}: N = ρ₀(B−A),
+D_lin = −ρ₀(A+B−2X) (mean of true non-negative squares — no fake
+zeros, no sign noise; Cauchy-Schwarz survives 2-pt means).  Exact
+compensation stays genuinely undefined → masked (FLOOR_PCT of
+|D_lin|, visible/tunable).  Limits preserved (+45 pure T, −45 pure
+S, ±90 near-compensation).  gradrho2 the CHANNEL is untouched
+(keeps full-EOS ρ differencing; difference to D_lin = cabbeling).
+
+NEW notebooks/notebooks_field_validation/surface_fields/
+turner_angle.ipynb (builder dev/build_turner_notebook.py, 15 cells):
+rows 1–2 = STORE Tu full/zoom, rows 3–4 = closed-set Tu (masked)
+full/zoom, fixed ±90° balance scale; plus Tu histograms (watch the
+spurious ±90° pileup shrink) and a masked-fraction printout for
+floor tuning.  calculate_grad_dot_tracer is INLINE in the notebook —
+verbatim candidate for native_gradient.py, promoted only if the A/B
+confirms.  Uses the shared live_fields plumbing.
