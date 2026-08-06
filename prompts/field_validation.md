@@ -1231,3 +1231,49 @@ grad² PDF LOW TAILS to lift (part of the old tail was cancellation
 specks) and Bodner/Bachman comparisons to change only at speckle
 pixels; (3) note for the boss: grid-scale gradient variance is now
 retained, not filtered.
+
+### 2026-08-05 — Notebooks MODULARIZED + regenerated (sq-first ready)
+
+Per LH (and the colleague-review defense): the repeated notebook
+logic now exists ONCE in src:
+
+- NEW `src/dbof/plotting/live_fields.py`: `stitch_and_slice`
+  (batch-stitch lazy live fields + slice, bounded memory),
+  `slice_store` (store channels -> regions),
+  `print_region_summary`.
+- NEW `src/dbof/plotting/validation_figures.py`:
+  `ValidationFigures` class (Figure 1 maps / Figure 2 PDFs /
+  Figure 3 literature + the Eq.-Pacific f-norm filter) and
+  `run_consistency_checks` (the pass/fail loop).  Notebooks bind
+  methods to the historical names (figure1_maps = _figs.maps) so
+  every Section 5/6 cell is unchanged.
+- Builder cells LIVE_TAIL / SLICE_HEAD+TAIL / HELPERS /
+  CONSISTENCY are now thin calls.  LOAD cell deliberately NOT
+  extracted: it defines the namespace (fs, BUCKET, zarr_dataset,
+  ...) that per-subset cells (e.g. surface_wind's reader_nf)
+  consume — configuration, not logic.
+
+Sq-first consistency updates baked into the builder:
+- frontal + kinematic live cells now also compute the LIVE FINALS
+  via the canonical functions (gradX2_live, strain_mag_live,
+  okubo_weiss_live).
+- Consistency checks updated: the old identities
+  (grad*2 = dx²+dy², strain_mag = sqrt(sn²+ss²),
+  W = σ²−ζ²) are now deliberately FALSE (different stencils) —
+  replaced by store-vs-live-canonical comparisons.  Unchanged
+  identities (ζ, σₙ, σₛ, δ, Ro, Tu-from-store-grads, density,
+  buoyancy, geostrophy, Ekman) kept.
+- Dep tables: stencil note added (frontal + kinematic).
+- Confirmed: the frontogenesis OUR-convention F cells (Bachman
+  6.1–6.3) were ALREADY baked into the builder (F_DEF_MD/CELL) —
+  the earlier "not baked in" flag was stale.
+
+All six notebooks regenerated (outputs wiped, as expected —
+re-run on the server is the next step); every code cell
+ast-parses; module code py_compiles.
+
+RE-RUN ORDER (server): push/pull `gradient-sparkles` + restart
+kernels → regenerate the two SURF stores (--clobber:
+frontal_structure, kinematic) → run the six notebooks.  Expect:
+consistency checks pass at ~1e-7; sparkle gone from grad² maps;
+grad² PDF low tails lifted vs the PR-1 figures.
