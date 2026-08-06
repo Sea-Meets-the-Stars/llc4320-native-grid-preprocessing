@@ -2,16 +2,18 @@
 Builder for
 notebooks/notebooks_field_validation/surface_fields/turner_angle.ipynb
 
-Turner-angle A/B (prompts/field_validation.md, 2026-08-05): the
-STORE channel (current formula — numerator from linear-EOS T/S
-squares, denominator from the measured JMD95 gradrho2; two
-measurement routes whose residuals decorrelate at compensated
-fronts -> +-90 deg speckle) versus the proposed CLOSED-SET form
-(numerator AND denominator from the same staggered T,S samples via
-the directly-measured cross term; undefined core masked).
+Three-definition Turner-angle comparison (prompts/field_validation.md
+2026-08-06).  The three forms are ALGEBRAICALLY IDENTICAL under the
+exact linearized EOS (substitute grad(rho) = rho0*(beta*gradS -
+alpha*gradT) into Def 3 and Defs 1-2 fall out); they differ in
+practice because the measured JMD95 grad(rho) contains EOS
+nonlinearity and locally-varying alpha/beta that the
+constant-coefficient linear model lacks — and that gap DOMINATES
+near compensation, exactly where Tu matters.
 
-Rows 1-2 = store (full + zoom); rows 3-4 = closed-set (full +
-zoom).  Same pattern as notebooks_dev/field_validation_sparkle.
+Columns: Def 1 (store channel), Def 2 (closed-set), Def 3
+(projection, Johnson et al. 2012 / Whalen & Drushka).
+Rows: full region, 200x200 km zoom.
 
 Regenerate with:  python dev/build_turner_notebook.py
 
@@ -40,42 +42,43 @@ cells = []
 
 # ---------------------------------------------------------------------
 md(cells, """\
-# Turner angle A/B — current formula (store) vs closed-set form
+# Turner angle — three definitions compared
 
-**Current (store channel):**
+**Def 1 (store channel):**
+`Tu = arctan[ρ₀(β²|∇S|² − α²|∇T|²) / (−gradrho2/ρ₀)]`
+(numerator from constant-α/β linear model; denominator the MEASURED
+JMD95 gradrho2).
 
-    Tu = arctan[ ρ₀(β²|∇S|² − α²|∇T|²) / (−gradrho2/ρ₀) ]
+**Def 2 (closed-set):** same numerator; denominator rebuilt from
+the same T,S samples via the direct cross term:
+`D = −ρ₀(α²|∇T|² + β²|∇S|² − 2αβ∇T·∇S)`.
 
-Numerator: linear-EOS model from T,S squares.  Denominator: the
-MEASURED JMD95 `gradrho2`.  Two measurement routes — at compensated
-fronts both are tiny residuals of large cancellations, their errors
-decorrelate, and the ratio's sign is a coin flip → ±90° speckle.
+**Def 3 (projection — Johnson et al. 2012; Whalen & Drushka 2025):**
+`Tu = arctan[∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T − β∇S)]`
+with ∇ρ measured (full EOS).
 
-**Closed-set (rows 3–4):** measure the cross term directly and build
-BOTH parts from the same staggered T,S samples:
+**They are mathematically equivalent** under the exact linearized
+EOS with constant α, β — substitute ∇ρ = ρ₀(β∇S − α∇T) into Def 3
+and Defs 1–2 fall out.  They differ in practice because measured
+∇ρ carries EOS nonlinearity and locally-varying α, β; away from
+compensation that gap is a small correction, but AT compensation
+the leading terms cancel and the gap dominates — the three forms
+diverge precisely where Tu is interesting.  Def 3 is the
+best-conditioned (measured ∇ρ enters LINEARLY in numerator and
+denominator, so its errors partially cancel in the ratio) and is
+the literature definition; positive angles = temperature-dominated
+(their convention, arctan on −90..90°).
 
-    A = α²|∇T|²,  B = β²|∇S|²,  X = αβ(∇T·∇S)
-    Tu = arctan[ ρ₀(B − A) / (−ρ₀(A + B − 2X)) ]
-
-`X` uses co-located native products (Tx·Sx on u-points, Ty·Sy on
-v-points; interp AFTER multiplying), so the identity
-(βS′−αT′)² = B′−2X′+A′ holds exactly per sample and survives the
-(linear) interpolation.  The denominator is a mean of true
-non-negative squares — no fake zeros, no sign noise.  What remains
-undefined is REAL: perfectly compensated water (N→0, D→0) — masked
-below a visible floor.  `gradrho2` the channel is untouched (it
-keeps the full-EOS ρ differencing; the difference to the linear
-denominator is the cabbeling content).
-
-Limits preserved: pure T front → +45°; pure S front → −45°;
-near-compensation → ±90°; exact compensation → NaN (mask).\
+All dot products here use the co-located staggered-product form
+(interp AFTER multiplying).  Undefined cores (∇ρ → 0) masked below
+a visible floor.\
 """)
 
 # ---------------------------------------------------------------------
 md(cells, """\
 ## Section 1 — LOAD the store channel + grid
 
-Rows 1–2 come from the SAVED frontal_structure store (regenerate it
+Def 1 comes from the SAVED frontal_structure store (regenerate it
 first if stale — see the frontal_structure notebook Section 1).\
 """)
 
@@ -135,15 +138,15 @@ print(f"region: {REGION}  (options: {_zoomable})")\
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 3 — Closed-set Turner angle, live
+## Section 3 — Defs 2 and 3, live
 
-The candidate `calculate_grad_dot_tracer` is defined INLINE here
-(notebook-only until the A/B is accepted); it is the verbatim
-candidate for `utils/native_gradient.py`.\
+`calculate_grad_dot_tracer` is defined INLINE (notebook-only until
+a definition is adopted); verbatim candidate for
+`utils/native_gradient.py`.\
 """)
 
 code(cells, """\
-# Section 3a: live closed-set Tu (lazy).
+# Section 3a: live closed-set (Def 2) + projection (Def 3), lazy.
 import dbof.preprocessing.calculate_fields as calculate_fields
 import dbof.utils.native_gradient as ng
 from dbof.cli.generate_global import load_snapshot
@@ -165,9 +168,7 @@ def calculate_grad_dot_tracer(da_a, da_b, ds_grid, grid):
     \"\"\"∇a·∇b with the products formed ON the staggered points.
 
     ax and bx are CO-LOCATED on the u-points (ay, by on the
-    v-points), so the products need no pre-interpolation — the
-    same-order-of-operations principle as
-    ``calculate_grad_squared_tracer`` (∇a·∇a is that function).
+    v-points), so the products need no pre-interpolation.
     Verbatim candidate for utils/native_gradient.py.
     Inputs: da_a, da_b (tracer-point DataArrays); ds_grid (dxC,
     dyC); grid (xgcm).  Outputs: ∇a·∇b at tracer points, lazy.
@@ -182,16 +183,28 @@ def calculate_grad_dot_tracer(da_a, da_b, ds_grid, grid):
 
 
 T, S = ds_merge.Theta, ds_merge.Salt
+rho = calculate_fields.potential_density(ds_merge)
+
+# -- Def 2 (closed-set, constant alpha/beta linear model) ---------
 A = ALPHA**2 * ng.calculate_grad_squared_tracer(T, ds_merge, xgrid)
 B = BETA**2 * ng.calculate_grad_squared_tracer(S, ds_merge, xgrid)
 X = ALPHA * BETA * calculate_grad_dot_tracer(T, S, ds_merge, xgrid)
+tu_closed = np.degrees(np.arctan(
+    (RHO0_REFERENCE * (B - A))
+    / (-RHO0_REFERENCE * (A + B - 2.0 * X))))
+d_closed = np.abs(A + B - 2.0 * X)      # mask variable, Def 2
 
-N = RHO0_REFERENCE * (B - A)
-D_lin = -RHO0_REFERENCE * (A + B - 2.0 * X)   # ≤ 0 by construction
-Tu_new = np.degrees(np.arctan(N / D_lin))     # mask applied later
+# -- Def 3 (projection; Johnson 2012 / Whalen & Drushka) ----------
+P_T = calculate_grad_dot_tracer(rho, T, ds_merge, xgrid)  # ∇ρ·∇T
+P_S = calculate_grad_dot_tracer(rho, S, ds_merge, xgrid)  # ∇ρ·∇S
+P_R = calculate_grad_dot_tracer(rho, rho, ds_merge,
+                                xgrid)                    # |∇ρ|²
+tu_proj = np.degrees(np.arctan(
+    (ALPHA * P_T + BETA * P_S) / (ALPHA * P_T - BETA * P_S)))
 
-live_map = {"turner_new": Tu_new, "D_lin": D_lin}
-print("lazy closed-set Tu ready")\
+live_map = {"tu_closed": tu_closed, "d_closed": d_closed,
+            "tu_proj": tu_proj, "d_proj": P_R}
+print("lazy Defs 2-3 ready")\
 """)
 
 code(cells, """\
@@ -207,69 +220,74 @@ print("sliced:", sorted(region_arrays))\
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 4 — Mask floor
+## Section 4 — Masks
 
-The closed-set Tu is undefined where the water is exactly
-compensated (D_lin → 0).  `FLOOR_PCT` masks the weakest x % of
-|D_lin| in the region — tune and re-run from here.\
+Defs 2–3 are undefined where their denominators vanish;
+`FLOOR_PCT` masks the weakest x % of each mask variable.  Def 1
+is shown unmasked (as stored).\
 """)
 
 code(cells, """\
-# Section 4: mask the undefined core (regional, tunable).
-FLOOR_PCT = 1.0    # mask the weakest x% of |D_lin| — tune me
+# Section 4: mask the undefined cores (regional, tunable).
+FLOOR_PCT = 1.0    # mask the weakest x% — tune me
 
-_x, _y, _d = region_arrays["D_lin"][REGION]
-_xn, _yn, _tu = region_arrays["turner_new"][REGION]
-_absd = np.abs(_d)
-_floor = np.nanpercentile(_absd[np.isfinite(_absd)], FLOOR_PCT)
-tu_masked = np.where(_absd > _floor, _tu, np.nan)
-_frac = 100.0 * np.mean(~np.isfinite(tu_masked)
-                        & np.isfinite(_tu))
-print(f"floor = {_floor:.3e} (P{FLOOR_PCT}); "
-      f"masked {_frac:.2f}% of ocean pixels")
-region_arrays["turner_new_masked"] = {
-    REGION: (_xn, _yn, tu_masked)}\
+
+def _masked(tu_key, d_key):
+    \"\"\"Regionally mask a Tu variant below its floor.
+    Inputs: tu_key, d_key (str).  Outputs: (x, y, arr).
+    Generated by LH and Claude
+    \"\"\"
+    x, y, tu = region_arrays[tu_key][REGION]
+    _, _, d = region_arrays[d_key][REGION]
+    d = np.abs(d)
+    floor = np.nanpercentile(d[np.isfinite(d)], FLOOR_PCT)
+    out = np.where(d > floor, tu, np.nan)
+    frac = 100.0 * np.mean(~np.isfinite(out) & np.isfinite(tu))
+    print(f"{tu_key}: floor P{FLOOR_PCT} -> masked {frac:.2f}%")
+    return x, y, out
+
+
+DEFS = {
+    "Def 1 (store)": region_arrays["turner_angle"][REGION],
+    "Def 2 (closed-set)": _masked("tu_closed", "d_closed"),
+    "Def 3 (projection, W&D)": _masked("tu_proj", "d_proj"),
+}\
 """)
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 5 — A/B figure
+## Section 5 — Maps: columns = definitions, rows = full / zoom
 
-Rows 1–2: STORE Tu (current formula), full + 200×200 km zoom.
-Rows 3–4: closed-set Tu (masked), full + zoom.  Fixed ±90° balance
-scale (zero at white) on every panel.  Look for the red/blue
-salt-and-pepper in the store rows disappearing in rows 3–4; gray
-pixels in rows 3–4 are the masked undefined core.\
+Fixed ±90° balance scale everywhere.  Gray in Defs 2–3 = masked
+undefined core.  Remember the equivalence caveat: differences
+between the columns are the EOS-nonlinearity/local-α,β content,
+concentrated near compensated water.\
 """)
 
 code(cells, """\
-# Section 5: 4-row comparison (store vs closed-set).
+# Section 5: 2x3 comparison figure.
 from dbof.plotting.pipeline_grids import LAND_COLOR
 
-ROWS = [
-    ("store (full)", "turner_angle", False),
-    ("store (zoom)", "turner_angle", True),
-    ("closed-set (full)", "turner_new_masked", False),
-    ("closed-set (zoom)", "turner_new_masked", True),
-]
-
-fig, axes = plt.subplots(4, 1, figsize=(9.5, 4 * 3.4))
+fig, axes = plt.subplots(2, 3, figsize=(5.4 * 3, 3.6 * 2))
 pm = None
-for ax, (label, fld, zoom) in zip(axes, ROWS):
-    x, y, arr = region_arrays[fld][REGION]
-    if zoom:
-        x, y, arr = regions.crop_zoom(x, y, arr, REGION,
-                                      half_km=ZOOM_HALF_KM)
-    ax.set_facecolor(LAND_COLOR)
-    pm = ax.pcolormesh(x, y, arr, cmap=cmo.balance,
-                       vmin=-90, vmax=90, shading="nearest")
-    ax.set_xticks([])
-    ax.set_yticks([])
-    ax.set_ylabel(label, fontsize=10)
-fig.colorbar(pm, ax=list(axes), orientation="horizontal",
-             shrink=0.8, pad=0.02, label="Turner angle (deg)")
-fig.suptitle(f"turner_angle \\u2014 store (rows 1-2) vs "
-             f"closed-set (rows 3-4), {REGION}", fontsize=13)
+for col, (label, (x, y, arr)) in enumerate(DEFS.items()):
+    for row, zoom in enumerate((False, True)):
+        xx, yy, aa = (regions.crop_zoom(x, y, arr, REGION,
+                                        half_km=ZOOM_HALF_KM)
+                      if zoom else (x, y, arr))
+        ax = axes[row, col]
+        ax.set_facecolor(LAND_COLOR)
+        pm = ax.pcolormesh(xx, yy, aa, cmap=cmo.balance,
+                           vmin=-90, vmax=90, shading="nearest")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        if col == 0:
+            ax.set_ylabel("zoom" if zoom else "full", fontsize=10)
+    axes[0, col].set_title(label, fontsize=11)
+fig.colorbar(pm, ax=list(axes.ravel()), orientation="horizontal",
+             shrink=0.6, pad=0.03, label="Turner angle (deg)")
+fig.suptitle(f"turner_angle \\u2014 three definitions, {REGION}",
+             fontsize=13)
 plt.show()\
 """)
 
@@ -277,20 +295,17 @@ plt.show()\
 md(cells, """\
 ## Section 6 — Distributions
 
-The speckle signature in the PDF: spurious ±90° pileup.  Expect the
-closed-set curve to keep the physical ±45° structure and shrink the
-±90° spikes to the (masked-adjacent) genuinely compensated water.\
+One line per definition.  The speckle signature is a spurious ±90°
+pileup; the definitions' magnitude offsets show up as shifted bulk
+structure.\
 """)
 
 code(cells, """\
-# Section 6: Tu histograms, store vs closed-set (same region).
-_, _, tu_store = region_arrays["turner_angle"][REGION]
+# Section 6: Tu histograms, all three definitions.
 bins = np.linspace(-90, 90, 181)
 fig, ax = plt.subplots(figsize=(9, 4))
-for arr, label, colr in [
-    (tu_store, "store (current formula)", "firebrick"),
-    (tu_masked, "closed-set (masked)", "steelblue"),
-]:
+for (label, (_, _, arr)), colr in zip(
+        DEFS.items(), ("firebrick", "seagreen", "steelblue")):
     v = arr[np.isfinite(arr)]
     ax.hist(v, bins=bins, histtype="step", density=True,
             label=f"{label}  (n={v.size})", color=colr)
@@ -309,10 +324,13 @@ md(cells, """\
 
 *(fill in after running)*
 
-- Store ±90° speckle vs closed-set:
-- Masked fraction at the chosen floor:
-- PDF ±90° pileup change:
-- Decision (adopt closed-set + mask in `calculate_fields`?):\
+- Speckle ranking (LH so far: store least sparkly; magnitudes of
+  Defs 2–3 differ strongly from Def 1 — the constant-α,β linear
+  model vs the measured full-EOS ∇ρ):
+- Def 3 is the Whalen & Drushka / Johnson et al. (2012)
+  definition — leading candidate for the production channel:
+- Masked fractions:
+- Decision:\
 """)
 
 nb = {

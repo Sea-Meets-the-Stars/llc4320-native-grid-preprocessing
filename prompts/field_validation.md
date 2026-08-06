@@ -1305,3 +1305,26 @@ spurious ±90° pileup shrink) and a masked-fraction printout for
 floor tuning.  calculate_grad_dot_tracer is INLINE in the notebook —
 verbatim candidate for native_gradient.py, promoted only if the A/B
 confirms.  Uses the shared live_fields plumbing.
+
+### 2026-08-06 — Turner: three definitions; W&D display convention
+
+LH ran the Def1-vs-Def2 A/B: Def 2 (closed-set, constant-α/β) was
+MORE speckled and magnitudes far off.  Resolution: the three Tu
+forms (store; closed-set; projection ∇ρ·(α∇T±β∇S) — Johnson et al.
+2012, used by Whalen & Drushka) are ALGEBRAICALLY IDENTICAL under
+the exact constant-coefficient linearized EOS (LH's math correct);
+they diverge in practice because measured JMD95 ∇ρ carries EOS
+nonlinearity + locally-varying α,β, and near compensation that gap
+DOMINATES.  Constant-α/β Def 2 mislocates compensation → worse.
+Def 3 best-conditioned (measured ∇ρ linear in num AND den → errors
+partially cancel) and is the literature definition → leading
+candidate.  LH observation: store (Def 1) least sparkly but
+magnitudes very different from Defs 2–3.
+
+- turner_angle.ipynb REBUILT (builder): columns = 3 definitions,
+  rows = full/zoom, fixed ±90° balance; per-def masks (FLOOR_PCT);
+  3-line histogram.
+- frontal_structure §6.1 (builder TURNER_FIG3): our panel now
+  Pacific-centred Robinson(180), turbo cmap, fixed ±90 — the W&D
+  display convention — with coastlines; caption notes it.
+  All six + turner notebooks regenerated; cells parse.
