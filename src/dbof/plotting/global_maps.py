@@ -79,7 +79,8 @@ def plot_global_field(ax, x, y, arr, field, cmap_cfg, *,
                       percentiles=(1, 99),
                       transform=None,
                       add_coastline=True,
-                      coastline_kw=None):
+                      coastline_kw=None,
+                      norm=None):
     """
     Draw one global field onto ``ax`` with the project's standard colour
     handling, and return the mappable plus its physical label.
@@ -108,6 +109,10 @@ def plot_global_field(ax, x, y, arr, field, cmap_cfg, *,
         Add a coastline feature (cartopy axes only).
     coastline_kw : dict or None
         Keyword args for the coastline feature; defaults to a thin black line.
+    norm : matplotlib.colors.Normalize or None
+        Pre-built norm override (e.g. one norm shared across a column of
+        panels — see dbof.plotting.pipeline_grids).  When given,
+        ``percentiles``/``log_scale_channels`` are ignored for this call.
 
     Returns
     -------
@@ -122,10 +127,11 @@ def plot_global_field(ax, x, y, arr, field, cmap_cfg, *,
         return None, label
 
     cmap = getattr(cmo, cmap_name, plt.cm.viridis)
-    norm = make_field_norm(arr, cmap_name,
-                           log=field in log_scale_channels,
-                           diverging_cmaps=diverging_cmaps,
-                           percentiles=percentiles)
+    if norm is None:
+        norm = make_field_norm(arr, cmap_name,
+                               log=field in log_scale_channels,
+                               diverging_cmaps=diverging_cmaps,
+                               percentiles=percentiles)
 
     kwargs = dict(cmap=cmap, norm=norm, shading="nearest")
     if transform is not None:

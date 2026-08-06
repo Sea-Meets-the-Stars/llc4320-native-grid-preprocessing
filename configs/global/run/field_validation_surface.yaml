@@ -1,0 +1,55 @@
+# ---------------------------------------------------------------------------
+# Field-validation run config (SURFACE phase).
+#
+# Consumed by the RUN cell of every notebook in
+# notebooks/notebooks_field_validation/surface_fields/.  Mirrors
+# configs/global/run/run.yaml but pins the single validation timestep
+# (20121109T12) and a dedicated run_id so validation output never
+# collides with production runs.
+#
+# Usage (from a surface_fields notebook):
+#   !generate-global \
+#       --config ../../../configs/global/run/field_validation_surface.yaml \
+#       --pipeline SURF \
+#       --subset frontal_structure \
+#       --run_id field_validation_v1
+#
+# Notes
+# -----
+# - The notebook passes --subset explicitly; active_subsets below is only
+#   the fallback when run without --subset.
+# - 2012-11-09 12:00:00 lies inside the OSN llc_surf window
+#   (2011-09-13 – 2012-11-15) but OUTSIDE the llc_wind window
+#   (2011-11-01 – 2012-07-15): surface_wind/icearea at this date need the
+#   LLC_SURF S3 forcing stores (see plan §9 verification item).
+# - Existing stores are skipped per date unless --clobber is passed, so
+#   re-running a notebook RUN cell is a cheap no-op.
+# ---------------------------------------------------------------------------
+
+# Pipeline: SURF | OSN | DEPTH
+pipeline: "SURF"
+
+run:
+  run_id: "field_validation_v1"
+  log_dir: "notebooks/notebooks_field_validation/test_logs"
+
+data:
+  # Single validation timestep — same date for surface and depth phases.
+  date_iterations:
+    - '2012-11-09 12:00:00'
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  # folder is determined automatically by the pipeline:
+  #   SURF / OSN → surface_fields/
+
+runtime:
+  zarr_async_concurrency: 8
+  dask_scheduler: "distributed"
+  dask_n_workers: 4
+  dask_threads_per_worker: 4
+
+# Fallback when --subset is not given on the command line.
+active_subsets:
+  - frontal_structure
