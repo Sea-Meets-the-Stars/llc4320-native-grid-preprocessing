@@ -1385,3 +1385,117 @@ Def 3 = calculate_fields.turner_angle itself (the production
 channel).  Store reader dropped (Section 1 loads grid only) — the
 notebook is self-contained and survives any future store state.
 15 cells, all parse.
+
+### 2026-08-06 — Function placement + JMD95 dtype (LH decisions)
+
+- JMD95 stays float64.  LH: "While the float64 won't add precision
+  to the raw data it prevents error from building up in the
+  density -> grad(density) -> grad(density)2 pathway."
+- kinematic_invariants + interp_corner_squared MOVED out of
+  native_gradient.py (LH: they are property-specific, not general
+  gradient machinery — correct).  New home: calculate_fields.py as
+  `compute_kinematic_invariants(ds_merge, grid)` (public, matching
+  the compute_velocity_jacobian / compute_buoyancy_gradients
+  shared-intermediate pattern, so strain_mag and okubo_weiss keep
+  sharing one computation via `invariants=`) and private
+  `_interp_corner_squared`.  native_gradient.py now holds ONLY
+  general gradient machinery: rotate_vector_to_geographic,
+  calculate_jacobian, calculate_native_gradient_tracer,
+  calculate_grad_squared_tracer, calculate_grad_dot_tracer.
+  Callers updated (dispatcher, tests, sparkle + validation
+  builders, Fields.md); notebooks regenerated; injection/turner/
+  grad tests pass.
+- Fields.md frontal table: turner_angle row updated to the Def-3
+  projection form.
+
+### 2026-08-06 — kinematic invariants INLINED (LH decision, final)
+
+LH: the invariant/corner-interp helpers should not exist at all —
+inline in strain_mag and okubo_weiss.  Done:
+compute_kinematic_invariants and _interp_corner_squared DELETED;
+`strain()` and `okubo_weiss_parameter()` each carry their own
+square-first stencils inline (sn on centres via rA flux form; ζ/σₛ
+on corners via rAz circulation form; squares moved corner→centre by
+two 2-pt means).  Plain-English record: the helpers were just eight
+finite differences evaluated where the C-grid provides them
+interpolation-free, plus a corner→centre average of non-negative
+squares.  Accepted trade-off (LH call): the corner stencils appear
+in both functions and are computed twice when both channels run
+(the dispatcher's shared-invariants hoist is removed; `invariants=`
+kwargs deleted from both signatures — okubo_weiss_parameter now
+takes no kwargs).  native_gradient.py holds ONLY the five general
+gradient operations.  Callers/tests/builders/Fields.md updated;
+notebooks regenerated; 8 injection/strain/turner/grad tests pass.
+
+### 2026-08-06 — Kinematic helpers: FINAL form (LH decision)
+
+After the plain-English review LH reversed the inlining: the two
+helpers DO belong in native_gradient.py, shared by strain and
+okubo_weiss with dispatcher-level reuse.  Final form:
+
+- `ng.calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid)`
+  (renamed from the unexplanatory 'kinematic_invariants'):
+  eight finite differences, each evaluated where the C-grid gives
+  it interpolation-free.  Returned dict uses LH's explanatory key
+  names: strain_normal_center, divergence_center, vorticity_corner,
+  strain_shear_corner.  Docstring is the plain-English explanation
+  (centres = differencing along own axis; corners = across;
+  momVort3).
+- `ng.interp_corner_squared(q_corner, grid)`: "average a corner
+  value onto the cell centres — AFTER squaring, so the moved
+  quantity is non-negative and cannot cancel"; docstring warns
+  against moving signed corner quantities.
+- strain()/okubo_weiss_parameter(): call the shared functions;
+  plain-English comments kept in both bodies; injectable kwarg
+  `native_sv=` (dispatcher computes once for both channels).
+- Tests (injection with new name/kwarg), builders, Fields.md
+  updated; notebooks regenerated; suites pass.  Math unchanged
+  throughout this reshuffle — no store impact.
+
+### 2026-08-06 — Basis clarification (LH question, docstring fixed)
+
+LH: are the calculate_native_strain_vorticity outputs in the MODEL
+basis, acceptable only because we consume magnitudes?  Answer —
+right, with one refinement: vorticity and divergence are TRUE
+scalars (basis-independent, no excuse needed); the two strain
+components ARE model-basis and mix under rotation at 2φ (tensor),
+so they must never feed the signed strain channels — but their sum
+of squares is invariant, which is exactly how strain_mag and W use
+them.  The old docstring line ("all four are unchanged by the
+rotation") was imprecise for σₙ/σₛ individually — rewritten with
+the correct basis caveat and the usage rule.  Co-location footnote:
+exact invariance holds for co-located components; centre-σₙ² +
+corner-interp-σₛ² is invariant to O(Δx²) like the rest of the
+discretization.
+
+### 2026-08-06 — Correction to the basis note (LH catch)
+
+LH: vorticity and strain are NOT scalars.  Correct — previous log
+entry / docstring said "true scalars"; the accurate statement:
+CS/SN is a rotation of the horizontal axes about the local
+VERTICAL, and under that specific family of rotations ζ (the
+VERTICAL COMPONENT of the vorticity pseudovector) and δ (the TRACE
+of the horizontal velocity-gradient tensor) are invariant — not
+because they are scalars.  σₙ/σₛ (deviatoric components) mix at 2φ;
+their sum of squares is invariant.  Docstring rewritten
+accordingly; practical rules unchanged.
+
+### 2026-08-06 — docs/Gradients.md + slim docstrings (LH request)
+
+Long-form explanations moved OUT of the native_gradient.py
+docstrings into NEW docs/Gradients.md: C-grid geometry (diffs land
+on centres/faces/corners), the two stencil families, the sparkle
+mechanism, velocity combinations at natural points (momVort3,
+flux/circulation forms), basis & rotation rules (LH's phrasing:
+vorticity measures horizontal rotation around the vertical axis;
+divergence measures expansion/contraction; strain pair mixes under
+any rotation — model-basis, never signed channels, sum of squares
+invariant), the co-located-products rule, and the
+channel-comparison consequences.  All seven native_gradient
+docstrings slimmed to LH's template: 2-3 line summary +
+"Applications" section (e.g. "MAGNITUDE calculations only (the
+strain pair is model-basis; vector components are not rotated)") +
+Parameters/Returns + "See docs/Gradients.md".  Module docstring
+added.  Fields.md stencil section now summarizes and points to
+Gradients.md.  Bodies (incl. ECCO step comments) untouched; tests
+pass.

@@ -526,7 +526,7 @@ def rossby_number(ds_merge, grid, *, jacobian=None):
 
     return rossby_no
 
-def strain(ds_merge, grid, *, jacobian=None, invariants=None):
+def strain(ds_merge, grid, *, jacobian=None, native_sv=None):
     """
     Compute strain from horizontal velocity components.
 
@@ -540,16 +540,11 @@ def strain(ds_merge, grid, *, jacobian=None, invariants=None):
         Pre-computed velocity Jacobian (used for the SIGNED
         components).  When *None* the Jacobian is computed
         internally (standalone mode).
-    invariants : dict, optional
-        Pre-computed C-grid-native invariants from
-        :func:`native_gradient.kinematic_invariants` (used for the
-        MAGNITUDE).  When *None* they are computed internally.
-
     Returns
     -------
     strain_mag : xarray.DataArray
-        Strain magnitude field [s^-1] — built square-first from the
-        C-grid-native invariants (sparkle fix,
+        Strain magnitude field [s^-1] — built square-first from
+        the native-point velocity gradients (sparkle fix,
         prompts/field_validation.md 2026-08-05).  NOTE: therefore
         NOT pixelwise equal to sqrt(strain_n^2 + strain_s^2), whose
         centre-interpolated components lose grid-scale variance.
@@ -566,14 +561,20 @@ def strain(ds_merge, grid, *, jacobian=None, invariants=None):
     strain_n = jacobian.du_dx - jacobian.dv_dy
     strain_s = jacobian.du_dy + jacobian.dv_dx
 
-    # Magnitude: square-first from the native-point invariants —
-    # sn at centres (no interp), ss squared AT the corners before
-    # the corner->centre move of the non-negative square.
-    if invariants is None:
-        invariants = ng.kinematic_invariants(
+    # Magnitude: square-first on the native C-grid points.  Normal
+    # strain lives on cell centres (differencing U along its own
+    # axis lands there — ZERO interpolation); shear strain lives on
+    # cell corners.  The shear is squared AT the corners, and only
+    # the non-negative square is moved to the centres (a mean of
+    # non-negatives cannot cancel — the sparkle fix,
+    # docs/Fields.md).
+    if native_sv is None:
+        native_sv = ng.calculate_native_strain_vorticity(
             ds_merge.U, ds_merge.V, ds_merge, grid)
-    ss2_c = ng.interp_corner_squared(invariants["ss_z"] ** 2, grid)
-    strain_mag = np.sqrt(invariants["sn_c"] ** 2 + ss2_c)
+    shear2_c = ng.interp_corner_squared(
+        native_sv["strain_shear_corner"] ** 2, grid)
+    strain_mag = np.sqrt(
+        native_sv["strain_normal_center"] ** 2 + shear2_c)
 
     return strain_mag, strain_n, strain_s
 
@@ -605,12 +606,12 @@ def divergence(ds_merge, grid, *, jacobian=None):
     return div
 
 
-def okubo_weiss_parameter(ds_merge, grid, *, invariants=None):
+def okubo_weiss_parameter(ds_merge, grid, *, native_sv=None):
     """
     Compute the Okubo-Weiss parameter W = sn^2 + ss^2 - zeta^2.
 
-    Built SQUARE-FIRST from the C-grid-native rotation invariants
-    (:func:`native_gradient.kinematic_invariants`): sn at centres
+    Built SQUARE-FIRST from the native-point velocity gradients
+    (:func:`native_gradient.calculate_native_strain_vorticity`): sn at centres
     (zero interpolation), zeta and ss squared AT the corners before
     the corner->centre move of the non-negative squares.  Squaring
     centre-interpolated components manufactures near-zeros at
@@ -626,24 +627,26 @@ def okubo_weiss_parameter(ds_merge, grid, *, invariants=None):
         Dataset containing U and V components on the model grid.
     grid : xgcm.Grid
         Grid object relating to ds_merge.
-    invariants : dict, optional
-        Pre-computed invariants from
-        :func:`native_gradient.kinematic_invariants`; when *None*
-        they are computed internally (once, then shared).
-
     Returns
     -------
     OW : xarray.DataArray
         Okubo-Weiss parameter field [s^-2].
     """
-    if invariants is None:
-        invariants = ng.kinematic_invariants(
+    # Square-first on the native C-grid points: normal strain on
+    # cell centres (zero interpolation); vorticity and shear strain
+    # on cell corners (MITgcm's own momVort3 stencil); each squared
+    # AT its native point, and only the non-negative squares are
+    # moved corner -> centre (a mean of non-negatives cannot cancel
+    # — the sparkle fix, docs/Fields.md).
+    if native_sv is None:
+        native_sv = ng.calculate_native_strain_vorticity(
             ds_merge.U, ds_merge.V, ds_merge, grid)
-
-    ss2_c = ng.interp_corner_squared(invariants["ss_z"] ** 2, grid)
-    zeta2_c = ng.interp_corner_squared(
-        invariants["zeta_z"] ** 2, grid)
-    okubo_weiss = invariants["sn_c"] ** 2 + ss2_c - zeta2_c
+    shear2_c = ng.interp_corner_squared(
+        native_sv["strain_shear_corner"] ** 2, grid)
+    vort2_c = ng.interp_corner_squared(
+        native_sv["vorticity_corner"] ** 2, grid)
+    okubo_weiss = (native_sv["strain_normal_center"] ** 2
+                   + shear2_c - vort2_c)
 
     return okubo_weiss
 

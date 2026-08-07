@@ -1563,7 +1563,7 @@ SPECS["kinematic"] = dict(
 | rossby_number | — | Ro = ζ/f | relative_vorticity, coriolis_f | `calculate_fields.rossby_number` |
 | okubo_weiss | s⁻² | W = σₙ² + σₛ² − ζ² | strain_mag, relative_vorticity | `calculate_fields.okubo_weiss_parameter` |
 
-**Stencil note (sparkle fix, 2026-08-05)** — the squared magnitudes (strain_mag, okubo_weiss) are built SQUARE-BEFORE-INTERP from the native staggered differences (`ng.calculate_grad_squared_tracer`, `ng.kinematic_invariants` — ζ², σₛ² on the corner (momVort3) points); the displayed gradient components are the geographic (centre-interpolated) vectors — physically the same chain, but the finals are NOT pixelwise combinations of them (see docs/Fields.md).
+**Stencil note (sparkle fix, 2026-08-05)** — the squared magnitudes (strain_mag, okubo_weiss) are built SQUARE-BEFORE-INTERP from the native staggered differences (`ng.calculate_grad_squared_tracer`, `ng.calculate_native_strain_vorticity` — ζ², σₛ² on the corner (momVort3) points); the displayed gradient components are the geographic (centre-interpolated) vectors — physically the same chain, but the finals are NOT pixelwise combinations of them (see docs/Fields.md).
 
 
 Live-plotted intermediates: rotated tracer-point `U`, `V`
@@ -1611,12 +1611,8 @@ bg = calculate_fields.compute_buoyancy_gradients(ds_merge, xgrid)
 # Extra slice region for the Bachman/Balwada comparisons.
 EXTRA_REGIONS = ["kerguelen"]
 
-# C-grid-native invariants for the squared fields (sparkle fix).
-import dbof.utils.native_gradient as ng
-inv = ng.kinematic_invariants(ds_merge.U, ds_merge.V, ds_merge,
-                              xgrid)
 s_mag_live, _, _ = calculate_fields.strain(
-    ds_merge, xgrid, jacobian=J, invariants=inv)
+    ds_merge, xgrid, jacobian=J)
 
 live_map = {
     "U": u_east, "V": v_north,
@@ -1629,7 +1625,7 @@ live_map = {
     # components; see docs/Fields.md).
     "strain_mag_live": s_mag_live,
     "okubo_weiss_live": calculate_fields.okubo_weiss_parameter(
-        ds_merge, xgrid, invariants=inv),
+        ds_merge, xgrid),
 }\
 """ + LIVE_TAIL,
     chains={

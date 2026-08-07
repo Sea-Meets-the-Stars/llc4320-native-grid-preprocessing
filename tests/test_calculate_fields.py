@@ -140,17 +140,18 @@ def test_jacobian_injection_is_consistent(ds2d, grid2d):
         assert_k0_equal(fn(ds2d, grid2d, jacobian=jac), fn(ds2d, grid2d),
                         name=f"{fn.__name__} jacobian-injection")
 
-    # okubo_weiss and strain_mag are built from the C-grid-native
-    # invariants (sparkle fix); their injection kwarg is inert too.
-    inv = ng.kinematic_invariants(ds2d.U, ds2d.V, ds2d, grid2d)
+    # strain_mag and okubo_weiss share the native-point velocity
+    # gradients (sparkle fix); the injection kwarg is inert.
+    nsv = ng.calculate_native_strain_vorticity(
+        ds2d.U, ds2d.V, ds2d, grid2d)
     assert_k0_equal(
-        cf.okubo_weiss_parameter(ds2d, grid2d, invariants=inv),
+        cf.okubo_weiss_parameter(ds2d, grid2d, native_sv=nsv),
         cf.okubo_weiss_parameter(ds2d, grid2d),
-        name="okubo_weiss invariants-injection")
+        name="okubo_weiss native_sv-injection")
     for got, want in zip(
-            cf.strain(ds2d, grid2d, jacobian=jac, invariants=inv),
+            cf.strain(ds2d, grid2d, jacobian=jac, native_sv=nsv),
             cf.strain(ds2d, grid2d)):
-        assert_k0_equal(got, want, name="strain invariants-injection")
+        assert_k0_equal(got, want, name="strain native_sv-injection")
 
 
 def test_frontogenesis_injection_is_consistent(ds2d, grid2d):

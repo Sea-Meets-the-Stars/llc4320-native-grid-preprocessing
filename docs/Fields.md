@@ -34,6 +34,9 @@ invariants are pinned by `tests/test_calculate_fields.py`.
 
 ### Staggered-grid stencils: squared fields are square-BEFORE-interp
 
+(Summary — the full geometry, 'sparkle' mechanism, basis/rotation
+rules and usage limits live in [Gradients.md](Gradients.md).)
+
 LLC4320 is an Arakawa C-grid — tracers at cell centres, `U`/`V` on
 staggered edge points, vorticity naturally on cell corners (see the
 [MITgcm horizontal-grid documentation](
@@ -49,8 +52,10 @@ Two stencil families coexist in `utils/native_gradient.py`:
   everything built on them: `turner_angle`, `R_ib`, `KE`, `Wstar`)
   are built **square-before-interp**: each difference is squared ON
   its native C-grid point and only the non-negative squares are moved
-  between grid locations (`calculate_grad_squared_tracer`,
-  `kinematic_invariants` + `interp_corner_squared`).
+  between grid locations (`native_gradient.calculate_grad_squared_tracer` for tracers;
+  `native_gradient.calculate_native_strain_vorticity` +
+  `interp_corner_squared` for the kinematic pair, shared by `strain`
+  and `okubo_weiss_parameter` via the `native_sv=` kwarg).
 
 Why: the 2-point interpolation has a null space at the grid scale —
 at a local extremum the two flanking one-sided differences are
@@ -112,7 +117,7 @@ All surface subsets are 2D (k = 0 input data, no depth suffixes).
 | `gradtheta2` | `grad_theta2` | \|∇θ\|² | (°C m⁻¹)² |
 | `gradeta2` | `grad_eta2` | \|∇η\|² | (m m⁻¹)² |
 | `gradrho2` | `grad_rho2` | \|∇ρ\|² (potential density) | (kg m⁻⁴)² |
-| `turner_angle` | `turner_angle` | Tu_h = arctan(ρ₀(β²\|∇S\|² − α²\|∇θ\|²) / (−\|∇ρ\|²/ρ₀)); NaN where \|∇ρ\|² = 0 | degrees |
+| `turner_angle` | `turner_angle` | Tu_h = arctan(∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T − β∇S)) — projection form (Johnson et al. 2012; Whalen & Drushka 2025), measured ∇ρ, co-located staggered dot products; NaN at exact 0/0; mask weak \|∇ρ\|² at display time | degrees |
 | `density` | `potential_density_anomaly` | Potential density anomaly σ₀ = ρ_θ(p=0) − 1000 | kg m⁻³ |
 | `buoyancy` | `buoyancy_of_field` | b = g·σ₀/ρ₀ | m s⁻² |
 

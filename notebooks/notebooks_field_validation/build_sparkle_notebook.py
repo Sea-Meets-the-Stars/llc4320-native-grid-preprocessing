@@ -49,7 +49,7 @@ a precision artifact (store ≡ live to ~1e-7).
 
 The fix (now the production implementation,
 `native_gradient.calculate_grad_squared_tracer` and
-`native_gradient.kinematic_invariants`): square each difference ON
+`ng.calculate_native_strain_vorticity`): square each difference ON
 its native C-grid point, then move only the non-negative squares —
 a mean of non-negatives cannot cancel.  |grad|², σ², ζ², W are
 rotation-invariant, so no CS/SN is needed.  See
@@ -213,14 +213,10 @@ _zeta = jac.dv_dx - jac.du_dy
 live_map["strain_mag_ecco"] = np.sqrt(_sn ** 2 + _ss ** 2)
 live_map["okubo_weiss_ecco"] = _sn ** 2 + _ss ** 2 - _zeta ** 2
 
-inv = ng.kinematic_invariants(ds_merge.U, ds_merge.V, ds_merge,
-                              xgrid)
-_mag, _, _ = calculate_fields.strain(ds_merge, xgrid, jacobian=jac,
-                                     invariants=inv)
+_mag, _, _ = calculate_fields.strain(ds_merge, xgrid, jacobian=jac)
 live_map["strain_mag_sqfirst"] = _mag
 live_map["okubo_weiss_sqfirst"] = (
-    calculate_fields.okubo_weiss_parameter(ds_merge, xgrid,
-                                           invariants=inv))
+    calculate_fields.okubo_weiss_parameter(ds_merge, xgrid))
 print(f"{len(live_map)} lazy live fields")\
 """)
 

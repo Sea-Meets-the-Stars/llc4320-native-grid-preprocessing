@@ -1,19 +1,23 @@
+"""
+native_gradient.py
+------------------
+Horizontal differencing on the native LLC C-grid — the single home
+of the gradient machinery.  Two stencil families: vector COMPONENTS
+(ECCO recipe: diff -> interp to centre -> CS/SN rotate) and squared
+MAGNITUDES (square/multiply on the staggered points BEFORE moving).
+
+Geometry, basis/rotation rules, and usage limits live in
+docs/Gradients.md.
+"""
+
 def rotate_vector_to_geographic(u_x, v_y, ds_merge, grid, *, interpolate=True):
-    """Rotate a model-grid vector into geographic (east/north) components.
+    """Rotate a model-grid vector into geographic (east/north)
+    components: interp to tracer points, then u_east = u·CS − v·SN,
+    v_north = u·SN + v·CS.  See docs/Gradients.md.
 
-    The LLC grid stores horizontal vector components on the staggered C-grid
-    (``u`` on the west cell face / ``i_g``, ``v`` on the south face / ``j_g``)
-    and on model-relative axes that are rotated relative to true east/north.
-    This helper performs the two steps needed to make such a vector physically
-    interpretable on a single native face (chunk, tile, or global):
-
-    1. interpolate the components to the tracer (cell-centre) points, and
-    2. rotate from the model ``(x, y)`` basis to the geographic
-       ``(east, north)`` basis using the grid rotation coefficients
-       ``CS``/``SN``::
-
-           u_east  = u*CS - v*SN
-           v_north = u*SN + v*CS
+    Applications
+    ------------
+    Signed VECTOR fields (U/V, wind stress, gradients-as-vectors).
 
     Parameters
     ----------
@@ -47,11 +51,17 @@ def rotate_vector_to_geographic(u_x, v_y, ds_merge, grid, *, interpolate=True):
 
 
 def calculate_jacobian(u_x, v_y, ds_merge, grid):
-    """
-       Compute zonal and meridional spatial derivatives of horizontal velocity components on a curvilinear grid.
-       See https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html#Part-2:-calculate-the-zonal-and-meridional-gradients-of-the-zonal-and-meridional-flow-fields
+    """Velocity-gradient tensor (ECCO recipe: rotate, diff, interp
+    to centres, rotate) — geographic, signed, centre-interpolated.
+    See docs/Gradients.md.
 
-       Parameters
+    Applications
+    ------------
+    Signed COMPONENT fields (ζ, δ, strain_n/s, frontogenesis Q) —
+    NOT for squared magnitudes (use
+    calculate_native_strain_vorticity).
+
+    Parameters
        ----------
        u_x : xarray.DataArray
            Zonal velocity component defined in the model x-direction.
@@ -114,14 +124,16 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
     return du_lambda_dlambda, du_lambda_dphi, dv_phi_dlambda, dv_phi_dphi
 
 
-
 def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
-    """Compute zonal and meridional gradients of a tracer on the native LLC grid.
+    """Geographic (zonal, meridional) tracer-gradient COMPONENTS
+    (ECCO recipe: diff, interp to centres, CS/SN rotate).  See
+    docs/Gradients.md.
 
-    Calculates finite-difference gradients in model (x, y) directions,
-    interpolates them to cell centers, then rotates from model coordinates
-    to geographic (zonal/meridional) coordinates using the grid rotation
-    coefficients CS and SN.
+    Applications
+    ------------
+    Signed VECTOR uses only (e.g. ∇b for frontogenesis).  Never
+    square these — use calculate_grad_squared_tracer /
+    calculate_grad_dot_tracer.
 
     Parameters
     ----------
@@ -211,30 +223,13 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
 
 
 def calculate_grad_squared_tracer(ds_value, ds_grid, grid):
-    """|grad s|^2 with squaring BEFORE the centre interpolation.
+    """|∇s|² — squared on the staggered points BEFORE the centre
+    interpolation (sparkle-safe; rotation-free).  THE canonical
+    |∇s|² for every ``grad_*2`` field.  See docs/Gradients.md.
 
-    THE canonical |grad s|^2 for every ``grad_*2`` field.  The
-    ECCO recipe (``calculate_native_gradient_tracer``) computes the finite differences on the staggered points,
-    interpolates them to the cell centre (2-point mean), rotates,
-    and squares.  The 2-point mean has a null space at the grid
-    scale: at a local extremum of ``s`` the two flanking
-    differences are equal-and-opposite and CANCEL in the average,
-    so the centred |grad s|^2 can be orders of magnitude below its
-    one-sided gradients — the white 'sparkle' on log-scaled maps.
-
-    This version squares each component ON its native staggered
-    point (where the finite difference is defined) and interpolates
-    the non-negative squares to the centre — a mean of two
-    non-negative numbers cannot cancel, so grid-scale gradient
-    variance is retained (variance-preserving form).
-
-    No CS/SN rotation is needed: |grad s|^2 is invariant under the
-    orthogonal model->geographic rotation (zonal^2 + merid^2 =
-    x_M^2 + y_M^2 pointwise), so squaring before rotation is exact.
-
-    Both forms are consistent O(dx^2) discretizations of the same
-    continuum quantity; they differ only in how they treat the
-    2*dx scale.
+    Applications
+    ------------
+    MAGNITUDE calculations only (no signed components exist here).
 
     Parameters
     ----------
@@ -269,111 +264,16 @@ def calculate_grad_squared_tracer(ds_value, ds_grid, grid):
     return out
 
 
-def kinematic_invariants(u_x, v_y, ds_merge, grid):
-    """C-grid-native rotation invariants of the velocity gradient.
-
-    Each quantity is computed ON its natural C-grid point and NEVER
-    interpolated (see
-    https://mitgcm.readthedocs.io/en/latest/algorithm/horiz-grid.html):
-
-    - ``sn_c``    normal strain  du/dx - dv/dy   (centres, flux
-      form over ``rA``);
-    - ``delta_c`` divergence     du/dx + dv/dy   (centres);
-    - ``zeta_z``  vorticity      dv/dx - du/dy   (corners,
-      circulation form over ``rAz`` -- MITgcm's own momVort3);
-    - ``ss_z``    shear strain   dv/dx + du/dy   (corners).
-
-    All four are invariant under the CS/SN model->geographic
-    rotation, so no rotation is applied.  Squared kinematic fields
-    (strain magnitude, Okubo-Weiss) must be built from THESE, squared
-    at their native points, with only the non-negative squares moved
-    between grid locations (``interp_corner_squared``) -- squaring
-    centre-interpolated components manufactures near-zeros at
-    grid-scale extrema (the 'sparkle';
-    prompts/field_validation.md, 2026-08-05).
-
-    A/B-validated against the interpolate-then-square recipe in
-    notebooks/notebooks_dev/field_validation_sparkle.ipynb.
-
-    Parameters
-    ----------
-    u_x, v_y : xarray.DataArray
-        RAW staggered model-axis velocities (U on ``i_g``, V on
-        ``j_g``) -- NOT the rotated/centred versions.
-    ds_merge : xarray.Dataset
-        Grid metrics: ``dxC``, ``dyC``, ``dxG``, ``dyG``, ``rA``,
-        ``rAz``.
-    grid : xgcm.Grid
-        Grid object used for the difference stencils.
-
-    Returns
-    -------
-    dict[str, xarray.DataArray]
-        ``{'sn_c', 'delta_c', 'zeta_z', 'ss_z'}`` [s^-1], lazy.
-
-    Generated by LH and Claude
-    """
-    dyG, dxG, rA = ds_merge.dyG, ds_merge.dxG, ds_merge.rA
-    dxC, dyC, rAz = ds_merge.dxC, ds_merge.dyC, ds_merge.rAz
-
-    # Centre invariants (flux form over the tracer cell area).
-    sn_c = (grid.diff(u_x * dyG, 'X')
-            - grid.diff(v_y * dxG, 'Y')) / rA
-    delta_c = (grid.diff(u_x * dyG, 'X')
-               + grid.diff(v_y * dxG, 'Y')) / rA
-
-    # Corner invariants (circulation form over the vorticity cell).
-    zeta_z = (grid.diff(v_y * dyC, 'X')
-              - grid.diff(u_x * dxC, 'Y')) / rAz
-    ss_z = (grid.diff(v_y * dyC, 'X')
-            + grid.diff(u_x * dxC, 'Y')) / rAz
-
-    return {"sn_c": sn_c, "delta_c": delta_c,
-            "zeta_z": zeta_z, "ss_z": ss_z}
-
-
-def interp_corner_squared(q_z, grid):
-    """Corner -> centre interpolation of an ALREADY-SQUARED field.
-
-    For non-negative corner quantities (``zeta_z**2``, ``ss_z**2``)
-    only: a mean of non-negative numbers cannot cancel, so moving
-    the SQUARES preserves grid-scale variance where moving the
-    signed fields would not.
-
-    Parameters
-    ----------
-    q_z : xarray.DataArray
-        Non-negative field on corner points ``(j_g, i_g)``.
-    grid : xgcm.Grid
-        Grid object used for the interpolation.
-
-    Returns
-    -------
-    xarray.DataArray
-        The field on tracer points ``(j, i)``, lazy.
-
-    Generated by LH and Claude
-    """
-    return grid.interp(grid.interp(q_z, 'X', boundary='fill'),
-                       'Y', boundary='fill')
-
-
 def calculate_grad_dot_tracer(da_a, da_b, ds_grid, grid):
-    """Dot product of two tracer gradients, formed on the staggered
-    points.
+    """∇a·∇b — products formed on the staggered points where the
+    factors are co-located, moved to the centre afterwards
+    (sparkle-safe; rotation-free; equals
+    calculate_grad_squared_tracer when a is b).  See
+    docs/Gradients.md.
 
-    ax and bx are CO-LOCATED on the u-points (ay, by on the
-    v-points), so the products are formed where their factors
-    natively live and only the products are moved to the centre —
-    the same order-of-operations principle as
-    :func:`calculate_grad_squared_tracer` (which is this function
-    with ``da_a is da_b``).  No CS/SN rotation is needed: the dot
-    product is rotation-invariant.
-
-    A/B-validated in
-    notebooks/notebooks_field_validation/surface_fields/
-    turner_angle.ipynb (Turner-angle definition comparison,
-    prompts/field_validation.md 2026-08-06).
+    Applications
+    ------------
+    Consistent gradient dot products (e.g. the Turner angle).
 
     Parameters
     ----------
@@ -398,3 +298,85 @@ def calculate_grad_dot_tracer(da_a, da_b, ds_grid, grid):
     by = grid.diff(da_b, 'Y') / ds_grid.dyC
     return (grid.interp(ax * bx, 'X', boundary='fill')
             + grid.interp(ay * by, 'Y', boundary='fill'))
+
+
+def calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid):
+    """Velocity-gradient combinations, each at its natural C-grid
+    point in model-basis — no interpolation or rotation anywhere.
+    See docs/Gradients.md.
+
+    Applications
+    ------------
+    MAGNITUDE calculations only (the strain pair is model-basis;
+    vector components are not rotated).
+
+    Parameters
+    ----------
+    u_x, v_y : xarray.DataArray
+        RAW staggered model-axis velocities (U on ``i_g``, V on
+        ``j_g``) — NOT the rotated/centred versions.
+    ds_grid : xarray.Dataset
+        Grid metrics: ``dxC``, ``dyC``, ``dxG``, ``dyG``, ``rA``,
+        ``rAz``.
+    grid : xgcm.Grid
+        Grid object used for the difference stencils.
+
+    Returns
+    -------
+    dict[str, xarray.DataArray]
+        ``strain_normal_center`` and ``divergence_center`` (cell
+        centres); ``vorticity_corner`` and ``strain_shear_corner``
+        (cell corners).  All [s^-1], lazy.
+
+    Generated by LH and Claude
+    """
+    dyG, dxG, rA = ds_grid.dyG, ds_grid.dxG, ds_grid.rA
+    dxC, dyC, rAz = ds_grid.dxC, ds_grid.dyC, ds_grid.rAz
+
+    # Cell centres: differencing each velocity along ITS OWN axis
+    # lands here — zero interpolation (flux form over rA).
+    strain_normal_center = (grid.diff(u_x * dyG, 'X')
+                            - grid.diff(v_y * dxG, 'Y')) / rA
+    divergence_center = (grid.diff(u_x * dyG, 'X')
+                         + grid.diff(v_y * dxG, 'Y')) / rA
+
+    # Cell corners: differencing each velocity across the OTHER
+    # axis lands here — zero interpolation (circulation form over
+    # rAz; the vorticity is MITgcm's momVort3).
+    vorticity_corner = (grid.diff(v_y * dyC, 'X')
+                        - grid.diff(u_x * dxC, 'Y')) / rAz
+    strain_shear_corner = (grid.diff(v_y * dyC, 'X')
+                           + grid.diff(u_x * dxC, 'Y')) / rAz
+
+    return {"strain_normal_center": strain_normal_center,
+            "divergence_center": divergence_center,
+            "vorticity_corner": vorticity_corner,
+            "strain_shear_corner": strain_shear_corner}
+
+
+def interp_corner_squared(q_corner, grid):
+    """Average a corner value onto the cell centres (2-pt mean in
+    x, then y) — for ALREADY-SQUARED quantities only.  See
+    docs/Gradients.md.
+
+    Applications
+    ------------
+    Non-negative (squared) corner fields only; never signed ones.
+
+    Parameters
+    ----------
+    q_corner : xarray.DataArray
+        Non-negative field on corner points ``(j_g, i_g)``, e.g.
+        ``vorticity_corner ** 2``.
+    grid : xgcm.Grid
+        Grid object used for the interpolation.
+
+    Returns
+    -------
+    xarray.DataArray
+        The field on tracer points ``(j, i)``, lazy.
+
+    Generated by LH and Claude
+    """
+    return grid.interp(grid.interp(q_corner, 'X', boundary='fill'),
+                       'Y', boundary='fill')

@@ -137,12 +137,12 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     requested = set(computed_feature_channels)
     jac = calculate_fields.compute_velocity_jacobian(ds_merge, grid)
 
-    # C-grid-native invariants, shared by the SQUARED fields
-    # (strain_mag, okubo_weiss) — computed once (sparkle fix,
-    # prompts/field_validation.md 2026-08-05).
-    inv = None
+    # Native-point velocity gradients, shared by the SQUARED fields
+    # (strain_mag, okubo_weiss) — computed once (sparkle fix; see
+    # ng.calculate_native_strain_vorticity).
+    nsv = None
     if {'strain_mag', 'okubo_weiss'} & requested:
-        inv = ng.kinematic_invariants(
+        nsv = ng.calculate_native_strain_vorticity(
             ds_merge.U, ds_merge.V, ds_merge, grid)
 
     results = {}
@@ -154,7 +154,7 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     if {'strain_n', 'strain_s', 'strain_mag'} & requested:
         strain_mag, strain_n, strain_s = (
             calculate_fields.strain(ds_merge, grid, jacobian=jac,
-                                    invariants=inv))
+                                    native_sv=nsv))
         if 'strain_n' in requested:
             results['strain_n'] = strain_n
         if 'strain_s' in requested:
@@ -177,7 +177,7 @@ def compute_kinematic(ds_merge, grid, computed_feature_channels):
     if 'okubo_weiss' in requested:
         results['okubo_weiss'] = (
             calculate_fields.okubo_weiss_parameter(ds_merge, grid,
-                                                   invariants=inv))
+                                                   native_sv=nsv))
 
     return results
 
