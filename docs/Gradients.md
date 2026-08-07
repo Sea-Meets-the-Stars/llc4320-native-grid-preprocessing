@@ -39,6 +39,42 @@ and is the right tool whenever the **signed vector** is needed:
 geographic `U`/`V`, ∇b for frontogenesis, the signed strain
 channels, geostrophic shear.
 
+> **Note on wind stress (`oceTAUX`/`oceTAUY`):** in the Arakawa
+> C-grid, wind stress acts on horizontal velocities which are
+> staggered relative to the tracer cells, with indexing such that
+> +oceTAUY(i, j_g) corresponds to +y momentum fluxes at the 'v'
+> edge of the tracer cell at (i, j, k=0) (and +oceTAUX(i_g, j) to
+> +x fluxes at the 'u' edge).  Also, the model +y direction does
+> not necessarily correspond to the geographical north–south
+> direction, because the x and y axes of the model's curvilinear
+> lat-lon-cap (llc) grid have arbitrary orientations which vary
+> within and across tiles.  This is why the `oceTAUX`/`oceTAUY`
+> output channels go through `rotate_vector_to_geographic`
+> (interp to tracer points + CS/SN rotation) exactly like `U`/`V`,
+> and are eastward/northward stress in the stores.
+>
+> *Provenance:* the note above is adapted from the model output
+> metadata (`comments_2` of `oceTAUX`/`oceTAUY`).  Beware that in
+> the metadata itself, `oceTAUY`'s `comments_2` carries a
+> copy-paste indexing typo — it says `+oceTAUY(i_g, j)`, which
+> contradicts its own dims declaration `oceTAUY(time, j_g, i)` and
+> `comments_1` ("centered over the 'v' side"); the dims are
+> authoritative.
+>
+> *ECCO-tutorial caveat:* the [ECCO gradient tutorial](
+> https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html)
+> states that "surface winds/wind stress are located at the grid
+> cell centers" — that refers to ECCO's ATMOSPHERIC forcing fields
+> (`EXFuwind`/`EXFvwind`), which are indeed cell-centred.  The
+> ocean-stress output `oceTAUX`/`oceTAUY` is EDGE-located (see the
+> dims above), so the tutorial's closing exercise ("replace
+> EXFuwind/EXFvwind with oceTAUX/oceTAUY" in the centre-based curl
+> recipe) is misleading if followed naively.  Our
+> `wind_stress_curl` does the right thing: it feeds the RAW
+> staggered τ into `calculate_jacobian`, whose first step
+> interpolates from the u/v edges before rotating and
+> differencing.
+
 **2. Squared magnitudes — square/multiply BEFORE interpolating**
 (`calculate_grad_squared_tracer`, `calculate_grad_dot_tracer`,
 `calculate_native_strain_vorticity` + `interp_corner_squared`):

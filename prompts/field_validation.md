@@ -1499,3 +1499,29 @@ Parameters/Returns + "See docs/Gradients.md".  Module docstring
 added.  Fields.md stencil section now summarizes and points to
 Gradients.md.  Bodies (incl. ECCO step comments) untouched; tests
 pass.
+
+### 2026-08-06 — Gradients.md: wind-stress staggering note (LH)
+
+Added LH's note on oceTAUX/oceTAUY C-grid staggering + arbitrary
+llc axis orientation to docs/Gradients.md (under the ECCO-recipe
+family), with one correction to the quoted indexing: the 'v' edge
+of tracer cell (i,j) is (i, j_g) — oceTAUY lives there; oceTAUX at
+(i_g, j) on the 'u' edge (the paste had these crossed).  Closing
+sentence ties it to why the output channels go through
+rotate_vector_to_geographic.
+
+### 2026-08-06 — Wind-stress staggering: metadata typo + tutorial
+caveat documented (LH)
+
+Confirmed against the verbatim model metadata: oceTAUY's comments_2
+carries a copy-paste indexing typo ("+oceTAUY(i_g,j)") that
+contradicts its own dims declaration (time, j_g, i) and comments_1
+('v' side) — dims are authoritative.  Also documented the
+ECCO-tutorial confusion LH identified: the tutorial's "wind stress
+at cell centers" refers to ECCO's ATMOSPHERIC EXF forcing fields;
+LLC4320's oceTAUX/oceTAUY ocean-stress output is EDGE-located, so
+the tutorial's closing exercise (swap EXFuwind→oceTAUX in the
+centre-based curl recipe) is misleading if followed naively.
+Verified our wind_stress_curl is correct: raw staggered τ →
+calculate_jacobian (interp from u/v edges → rotate → diff).  All
+three points added to the Gradients.md wind-stress note.
