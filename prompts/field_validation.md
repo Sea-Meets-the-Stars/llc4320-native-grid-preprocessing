@@ -1525,3 +1525,17 @@ centre-based curl recipe) is misleading if followed naively.
 Verified our wind_stress_curl is correct: raw staggered τ →
 calculate_jacobian (interp from u/v edges → rotate → diff).  All
 three points added to the Gradients.md wind-stress note.
+
+### 2026-08-06 — depth_subsets turner_angle caller fixed (LH catch)
+
+The DEPTH frontal dispatcher still called turner_angle with the
+deleted grad² injection kwargs (would have TypeError'd on the next
+DEPTH run — the loud-failure design working, but caught by review
+first) and still FORCED gradtheta2/gradsalt2/gradrho2 computation
+for Turner's sake.  Fixed: turner_angle(ds_merge, grid) (projection
+form computes its own rho; dimension-agnostic so the 3D case works
+unchanged); grad² bases now computed only when directly requested.
+Repo-wide grep confirms no stale grad²-kwarg callers remain.  CFAD +
+channel-expansion suites pass.  NOTE: the DEPTH frontal_structure
+store's turner_angle_* channels change semantics too — add the
+DEPTH store to the regeneration list alongside the SURF ones.

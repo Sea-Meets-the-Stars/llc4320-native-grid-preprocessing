@@ -58,8 +58,7 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
     Applications
     ------------
     Signed COMPONENT fields (ζ, δ, strain_n/s, frontogenesis Q) —
-    NOT for squared magnitudes (use
-    calculate_native_strain_vorticity).
+    NOT for squared magnitudes (use calculate_native_strain_vorticity).
 
     Parameters
        ----------
@@ -224,7 +223,7 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
 
 def calculate_grad_squared_tracer(ds_value, ds_grid, grid):
     """|∇s|² — squared on the staggered points BEFORE the centre
-    interpolation (sparkle-safe; rotation-free).  THE canonical
+    interpolation (rotation-free).  THE canonical
     |∇s|² for every ``grad_*2`` field.  See docs/Gradients.md.
 
     Applications
@@ -267,9 +266,8 @@ def calculate_grad_squared_tracer(ds_value, ds_grid, grid):
 def calculate_grad_dot_tracer(da_a, da_b, ds_grid, grid):
     """∇a·∇b — products formed on the staggered points where the
     factors are co-located, moved to the centre afterwards
-    (sparkle-safe; rotation-free; equals
-    calculate_grad_squared_tracer when a is b).  See
-    docs/Gradients.md.
+    (rotation-free; equals calculate_grad_squared_tracer when a is b).  
+    See docs/Gradients.md.
 
     Applications
     ------------

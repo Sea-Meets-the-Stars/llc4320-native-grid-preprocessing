@@ -86,9 +86,6 @@ def compute_surface_wind(ds_merge, grid, computed_feature_channels):
 def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
     """Subset: frontal_structure — scalar gradient magnitudes and Turner angle.
 
-    Turner angle uses the projection form (Johnson et al. 2012) built
-    from measured-∇ρ dot products; it is independent of the grad²
-    channels (plan 2026-08-06).
     """
     _GRAD_FNS = {
         "gradsalt2":  calculate_fields.grad_salt2,
@@ -106,9 +103,7 @@ def compute_frontal_structure(ds_merge, grid, computed_feature_channels):
         if name in needed
     }
 
-    # Turner angle (projection form, Johnson et al. 2012) is built
-    # from measured-∇ρ dot products — it no longer consumes the
-    # grad² channels (plan 2026-08-06).
+    # Turner angle 
     if "turner_angle" in needed:
         results["turner_angle"] = calculate_fields.turner_angle(
             ds_merge, grid)

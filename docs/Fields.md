@@ -2,20 +2,12 @@
 
 Reference list of every output field, organised by subset. Pipeline
 mechanics (running subsets, depth-suffix expansion, re-run behaviour) live
-in `Global_Maps.md`; this document is the field-level reference and the
-checklist for the per-subset verification notebooks (planned; one notebook
-per subset).
+in `Global_Maps.md`; this document is the field-level.
 
 Function names refer to `preprocessing/calculate_fields.py` (single
 lazy, dimension-agnostic implementations — the same functions serve 2D
 and 3D inputs), `preprocessing/calculate_fields_at_depth.py`
 (vertical-structure fields only), and inline in the subset dispatchers.
-There is exactly ONE implementation per field (field migration,
-`prompts/field_migration.md` — complete).  Conventions: the single
-reference density RHO0_REFERENCE = 1000 kg/m³ and g = 9.81 m/s² apply
-throughout; buoyancy is anomaly-based (b = g·σ₀/ρ₀); the `density`
-channel is the potential density ANOMALY σ₀ (not σ₀ + 1000).  These
-invariants are pinned by `tests/test_calculate_fields.py`.
 
 ## Conventions
 
@@ -24,54 +16,16 @@ invariants are pinned by `tests/test_calculate_fields.py`.
   coefficients.
 - Density is potential density: JMD95 evaluated at p = 0 with potential
   temperature (surface-referenced; equals in-situ density at the surface
-  only).  The output channel carries the anomaly σ₀ = ρ_θ − 1000.
+  only).  The `density` channel is the potential density ANOMALY σ₀ = ρ_θ − 1000.
 - Buoyancy is b = g·σ₀/ρ₀ (anomaly-based; constant offsets vanish under
   the gradients/derivatives that consume it).
+- Reference density RHO0_REFERENCE = 1000 kg/m³ and g = 9.81 m/s² apply throughout
 - In the DEPTH pipeline, each base field is expanded across the active
   depth suffixes (`sfc`, `z25m`, `mld`, `mld_mean` by default). Bases in
   `SURFACE_ONLY_BASES` (`Eta`, `gradeta2`, `ug`, `vg`) only ever emit
   `_sfc`. Extra channels are emitted as-is (inherently 2D).
-
-### Staggered-grid stencils: squared fields are square-BEFORE-interp
-
-(Summary — the full geometry, 'sparkle' mechanism, basis/rotation
-rules and usage limits live in [Gradients.md](Gradients.md).)
-
-LLC4320 is an Arakawa C-grid — tracers at cell centres, `U`/`V` on
-staggered edge points, vorticity naturally on cell corners (see the
-[MITgcm horizontal-grid documentation](
-https://mitgcm.readthedocs.io/en/latest/algorithm/horiz-grid.html)).
-Two stencil families coexist in `utils/native_gradient.py`:
-
-- **Vector components** (∇b for frontogenesis, the velocity Jacobian,
-  geographic `U`/`V`) follow the ECCO recipe: finite-difference on the
-  staggered points, 2-point-interpolate to the tracer centre, rotate
-  to geographic via `CS`/`SN`
-  (`calculate_native_gradient_tracer`, `calculate_jacobian`).
-- **Squared magnitudes** (`grad*2`, `strain_mag`, `okubo_weiss`, and
-  everything built on them: `turner_angle`, `R_ib`, `KE`, `Wstar`)
-  are built **square-before-interp**: each difference is squared ON
-  its native C-grid point and only the non-negative squares are moved
-  between grid locations (`native_gradient.calculate_grad_squared_tracer` for tracers;
-  `native_gradient.calculate_native_strain_vorticity` +
-  `interp_corner_squared` for the kinematic pair, shared by `strain`
-  and `okubo_weiss_parameter` via the `native_sv=` kwarg).
-
-Why: the 2-point interpolation has a null space at the grid scale —
-at a local extremum the two flanking one-sided differences are
-equal-and-opposite and cancel in the average.  Squaring the
-interpolated components therefore manufactures near-zero pixels
-('sparkle' on log-scaled maps; spurious huge values where a squared
-gradient sits in a denominator, e.g. `R_ib`).  A mean of
-non-negative squares cannot cancel.  The squared magnitudes are
-rotation-invariant, so the square-first forms never apply `CS`/`SN`.
-Consequences: `strain_mag` ≠ `sqrt(strain_n² + strain_s²)`
-pixelwise, and `okubo_weiss` uses the corner (MITgcm `momVort3`)
-vorticity stencil rather than the centred `relative_vorticity`
-channel — state this wherever the channels are compared pixel by
-pixel.  A/B validation:
-`notebooks/notebooks_dev/field_validation_sparkle.ipynb`; decision
-log: `prompts/field_validation.md` (2026-08-05).
+- Information about calcultaing gradients on the LLC4320 Arakawa C-grid
+  lives in [Gradients.md](Gradients.md).
 
 ---
 
@@ -268,10 +222,9 @@ Identical channel list to the SURF `surface_wind` subset (including
 
 ---
 
-## Verification notebooks (planned)
+## Verification notebooks 
 
 One notebook per subset, verifying each channel against: expected units
 and magnitude ranges, known spatial structure (e.g. equatorial NaN bands
-for f-normalised fields, sign conventions for vorticity/OW), and — after
-the field migration — the expected ~2.6% rescaling of buoyancy-based
-dimensional fields under RHO0 = 1000 / g = 9.81.
+for f-normalised fields, sign conventions for vorticity/OW). These notebooks
+live at `notebooks/notebooks_field_validation/`

@@ -529,6 +529,8 @@ def rossby_number(ds_merge, grid, *, jacobian=None):
 def strain(ds_merge, grid, *, jacobian=None, native_sv=None):
     """
     Compute strain from horizontal velocity components.
+    See Gradients.md for information on signed geographic 
+    versus magnitude calculations.
 
     Parameters
     ----------
@@ -556,18 +558,11 @@ def strain(ds_merge, grid, *, jacobian=None, native_sv=None):
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
 
-    # Signed geographic components: ECCO path (vectors need the
-    # rotation; near-zeros are benign on signed fields).
+    # Signed geographic components: ECCO path
     strain_n = jacobian.du_dx - jacobian.dv_dy
     strain_s = jacobian.du_dy + jacobian.dv_dx
 
-    # Magnitude: square-first on the native C-grid points.  Normal
-    # strain lives on cell centres (differencing U along its own
-    # axis lands there — ZERO interpolation); shear strain lives on
-    # cell corners.  The shear is squared AT the corners, and only
-    # the non-negative square is moved to the centres (a mean of
-    # non-negatives cannot cancel — the sparkle fix,
-    # docs/Fields.md).
+    # Magnitude: squared components path
     if native_sv is None:
         native_sv = ng.calculate_native_strain_vorticity(
             ds_merge.U, ds_merge.V, ds_merge, grid)
@@ -608,18 +603,10 @@ def divergence(ds_merge, grid, *, jacobian=None):
 
 def okubo_weiss_parameter(ds_merge, grid, *, native_sv=None):
     """
-    Compute the Okubo-Weiss parameter W = sn^2 + ss^2 - zeta^2.
+    Compute the Okubo-Weiss parameter,
+    W = strain_normal^2 + strain_shear^2 - vorticity^2.
 
-    Built SQUARE-FIRST from the native-point velocity gradients
-    (:func:`native_gradient.calculate_native_strain_vorticity`): sn at centres
-    (zero interpolation), zeta and ss squared AT the corners before
-    the corner->centre move of the non-negative squares.  Squaring
-    centre-interpolated components manufactures near-zeros at
-    grid-scale extrema (the 'sparkle' — prompts/field_validation.md
-    2026-08-05); W is rotation-invariant so no CS/SN is needed.
-    NOTE: W therefore lives on a different stencil than the SIGNED
-    ``relative_vorticity`` channel (centre-interpolated) — state
-    this wherever the two are compared pixelwise.
+    See Gradients.md for information on okubo-weiss calculation.
 
     Parameters
     ----------
@@ -632,21 +619,16 @@ def okubo_weiss_parameter(ds_merge, grid, *, native_sv=None):
     OW : xarray.DataArray
         Okubo-Weiss parameter field [s^-2].
     """
-    # Square-first on the native C-grid points: normal strain on
-    # cell centres (zero interpolation); vorticity and shear strain
-    # on cell corners (MITgcm's own momVort3 stencil); each squared
-    # AT its native point, and only the non-negative squares are
-    # moved corner -> centre (a mean of non-negatives cannot cancel
-    # — the sparkle fix, docs/Fields.md).
+    # Square-first on the native C-grid points
     if native_sv is None:
         native_sv = ng.calculate_native_strain_vorticity(
             ds_merge.U, ds_merge.V, ds_merge, grid)
-    shear2_c = ng.interp_corner_squared(
+    shear2_corner = ng.interp_corner_squared(
         native_sv["strain_shear_corner"] ** 2, grid)
-    vort2_c = ng.interp_corner_squared(
+    vort2_corner = ng.interp_corner_squared(
         native_sv["vorticity_corner"] ** 2, grid)
     okubo_weiss = (native_sv["strain_normal_center"] ** 2
-                   + shear2_c - vort2_c)
+                   + shear2_corner - vort2_corner)
 
     return okubo_weiss
 
@@ -852,10 +834,6 @@ def ekman_pumping(ds_merge, grid, rho0=RHO0_REFERENCE):
 
 def ekman_transport(ds_merge, grid, rho0=RHO0_REFERENCE):
     """Lazy Ekman transport (u_E, v_E) — depth-integrated tau / (rho0 f).
-
-    Moved from ``calculate_fields_at_depth`` during the field migration;
-    now uses the single public :func:`geographic_wind_stress` (the private
-    ``_wind_stress_geographic`` duplicate was deleted).
     https://sam.ucsd.edu/ltalley/sio210/dynamics_ekman/index.html
 
     Parameters
@@ -902,13 +880,6 @@ def modified_okubo_weiss(ds_merge, grid, *, jacobian=None,
 
         Q1 = -(du/dx db/dx + dv/dx db/dy)
         Q2 = -(du/dy db/dx + dv/dy db/dy),   |Q|^2 = Q1^2 + Q2^2.
-
-    Moved (suffix-free) from ``calculate_fields_at_depth`` during the
-    field migration: horizontal math only, so dimension-agnostic.  The
-    buoyancy gradient now comes from the single
-    :func:`compute_buoyancy_gradients` (the private phys-gradient helper
-    was deleted — with one project-wide buoyancy definition the two
-    routes are identical).
 
     Parameters
     ----------

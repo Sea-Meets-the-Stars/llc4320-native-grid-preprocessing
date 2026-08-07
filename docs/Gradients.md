@@ -2,13 +2,8 @@
 
 Reference documentation for `src/dbof/utils/native_gradient.py` — the
 single home of all horizontal differencing on the LLC4320 C-grid.
-The function docstrings are deliberately short; the reasoning,
-geometry, and usage rules live here.
 
-Companions: [Fields.md](Fields.md) (per-channel reference),
-`prompts/field_validation.md` (decision log), and the A/B notebooks
-(`notebooks/notebooks_dev/field_validation_sparkle.ipynb`,
-`notebooks/notebooks_field_validation/surface_fields/turner_angle.ipynb`).
+Companions: [Fields.md](Fields.md) (per-channel reference).
 
 ---
 
@@ -161,9 +156,20 @@ such quantities cannot be made fully cancellation-free.
 ## Consequences to state when comparing channels
 
 - `strain_mag` ≠ `sqrt(strain_n² + strain_s²)` pixelwise (different
-  stencils by design).
+  stencils by design). 
+    - strain_mag: Normal strain lives on cell centres (differencing U along its own
+      axis lands there — ZERO interpolation); shear strain lives on
+      cell corners.  The shear is squared AT the corners, and only
+      the non-negative square is moved to the centres (a mean of
+      non-negatives cannot cancel). 
+    - Signed geographic components, strain_n² & strain_s²: ECCO path 
+      (vectors need the rotation; near-zeros are benign on signed fields).
 - `okubo_weiss` uses the corner (`momVort3`) vorticity stencil, not
   the centred `relative_vorticity` channel.
+    - normal strain on cell centres (zero interpolation); 
+      vorticity and shear strain on cell corners (MITgcm's own momVort3 stencil); 
+      each squared AT its native point, and only the non-negative squares are
+      moved corner -> centre.
 - `turner_angle` (projection form, Johnson et al. 2012 / Whalen &
   Drushka 2025) is built from measured-∇ρ dot products and is
   independent of the `grad*2` channels; `gradrho2` keeps full-EOS ρ
