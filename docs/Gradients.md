@@ -7,6 +7,7 @@ Companions: [Fields.md](Fields.md) (per-channel reference).
 
 ---
 
+
 ## The C-grid, in one paragraph
 
 LLC4320 is an Arakawa C-grid ([MITgcm horizontal-grid
@@ -18,7 +19,23 @@ quantity by half a cell: differencing a centre field lands on a face;
 differencing a face field lands on a centre or a corner, depending on
 the direction.  Every design rule below follows from that one fact.
 
-## Two stencil families
+## Gradient Artifacts
+
+Averaging/interpolating a signed gradient onto the cell centres can erase real
+grid-scale bumps (the slopes on either side of a bump are equal and
+opposite, and average to zero).  Whether that erasure ever becomes a
+visible artifact — and whether we can do anything about it — depends
+entirely on what you are computing:
+
+| What you're computing | Can the artifact be avoided? | What we do |
+|---|---|---|
+| **Magnitudes and same-direction products** — `grad*2`, `strain_mag`, `okubo_weiss`, `∇a·∇b` | **Yes, completely.** Square/multiply at the staggered points *first*; an average of positive numbers cannot cancel. Any small values that remain are real features. | `calculate_grad_squared_tracer`, `calculate_grad_dot_tracer`, `calculate_native_strain_vorticity` + `interp_corner_squared` |
+| **Signed vector components** — geographic `U`/`V`, ζ, δ, `strain_n`/`strain_s`, ∇b for frontogenesis | **No — but it's harmless.** The averaging still smooths grid-scale bumps, but a near-zero in a signed field on a linear colour scale is invisible and does no damage downstream. | The ECCO recipe: `calculate_native_gradient_tracer`, `calculate_jacobian` |
+| **Cross-direction products** — e.g. `b_x·b_y` inside frontogenesis | **No — genuinely stuck.** The two factors never share a grid point, so at least one must be averaged (while still signed) before multiplying. The artifact can be minimized, never removed. | Component path for now (watch-list; see `prompts/field_validation.md`) |
+
+Everything below is the detail behind this table.
+
+## The two recipes: signed components vs squared magnitudes
 
 **1. Vector components — the ECCO recipe** (`rotate_vector_to_geographic`,
 `calculate_native_gradient_tracer`, `calculate_jacobian`): difference
@@ -74,84 +91,98 @@ channels, geostrophic shear.
 (`calculate_grad_squared_tracer`, `calculate_grad_dot_tracer`,
 `calculate_native_strain_vorticity` + `interp_corner_squared`):
 form squares and products **on** the staggered points where their
-factors natively live, and move only the (non-negative) results.
+gradients natively live, and move only the already-squared (non-negative) 
+results to the cell centers.
 
-## Why two families: the 'sparkle' mechanism
+## Why two recipes: the 'sparkle' mechanism
 
-The 2-point interpolation of the ECCO recipe has a null space at the
-grid scale: at a local extremum of a field, the two flanking one-sided
-differences are equal-and-opposite and **cancel in the average**.  The
-interpolated component is fine for signed uses (a near-zero is an
-unremarkable mid-scale value), but *squaring* it manufactures pixels
-orders of magnitude below their neighbours — white 'sparkle' on
-log-scaled maps, and spurious huge values wherever a squared gradient
-sits in a denominator (`R_ib`).  A mean of **non-negative** squares
-cannot cancel, so squaring first preserves grid-scale gradient
-variance (the variance-preserving form).  Both families are consistent
-O(Δx²) discretizations of the same continuum quantities; they differ
-only in how they treat the 2Δx scale.  A/B evidence:
-`field_validation_sparkle.ipynb`; float32 round-tripping was ruled out
-first (store ≡ live to ~1e-7).
+Interpolating a value from the staggered points to a cell center means averaging
+the two neighboring values. This can become problematic if one is sitting at 
+a local minima or maxima in a field. This leads to a case where, for example,
+the slope in the left side is +a, the slope on the right side is -a, and averaging
+the two gives zero. This erases a real gradient that exists on either side 
+of the cell. For a signed field this hardly matters: one near-zero pixel among many mid-range values is
+invisible. But square that averaged value and the erasure
+becomes glaring — the pixel is now orders of magnitude smaller than
+its neighbours, which shows up as white speckle ('sparkle') on a
+log-scale map, and as absurdly large values anywhere a squared
+gradient sits in a denominator (R_ib).
+
+Squaring first avoids the trap entirely: (+a)² and (−a)² are both
+positive, and an average of positive numbers can't cancel to zero.
+That's the whole fix. Both orders of operation are legitimate
+approximations of the same physics — they only disagree about
+features at the very smallest (two-grid-cell) scale, which the
+average-first version silently erases and the square-first version
+keeps. Evidence: field_validation_sparkle.ipynb (side-by-side
+A/B); float32 precision was ruled out as the cause first (store and
+full-precision recompute agree to ~1e-7).
 
 ## Velocity combinations at their natural points
 
-`calculate_native_strain_vorticity` is eight finite differences,
-bundled.  On the C-grid some velocity-derivative combinations can be
-computed **without any interpolation** if they are evaluated at the
-right spot: differencing U along x lands naturally on cell CENTERS,
-so normal strain (∂u/∂x − ∂v/∂y) and divergence (∂u/∂x + ∂v/∂y) are
-"free" there (flux form over `rA`); differencing U along y lands on
-cell CORNERS, so vorticity (∂v/∂x − ∂u/∂y) and shear strain
-(∂v/∂x + ∂u/∂y) are free THERE (circulation form over `rAz`).  The
-corner vorticity is MITgcm's own `momVort3` stencil.
+`calculate_native_strain_vorticity` is just eight finite
+differences, bundled. The trick is where each one is evaluated.
+On the C-grid, taking a difference moves you half a cell — so if
+you pick the right combination, the result lands exactly on a grid
+point and no interpolation is needed at all:
+  - differencing U along its own axis (x) lands on the cell
+  centres — so normal strain (∂u/∂x − ∂v/∂y) and divergence
+  (∂u/∂x + ∂v/∂y) come out there for free;
+  - differencing U across the other axis (y) lands on the cell
+  corners — so vorticity (∂v/∂x − ∂u/∂y) and shear strain
+  (∂v/∂x + ∂u/∂y) come out there for free. The corner vorticity
+  is the same stencil MITgcm itself uses (momVort3).
 
-`interp_corner_squared` then averages a corner value onto the cell
-centres (a 2-point mean in x, then in y).  Use it **after** squaring:
-the moved quantity is non-negative and cannot cancel.  Never move
-signed corner quantities with it expecting their grid-scale structure
-to survive — that reintroduces the null space.
+`interp_corner_squared` then moves a corner value to the cell
+centres by simple averaging. Use it only after squaring — an
+average of positive numbers can't cancel. Moving a signed corner
+quantity with it walks straight back into the trap above.
 
 ## Basis and rotation rules
 
 `CS`/`SN` rotate the model's horizontal x/y axes into geographic
-east/north — a rotation **about the local vertical axis**.  The
-native-point outputs behave differently under it (none of them is a
-scalar in the general 3D sense — vorticity is a pseudovector, strain
-a tensor):
+east/north — a rotation **about the local vertical axis**.   
+The four native-point outputs react differently to that rotation:
 
 - **vorticity** measures horizontal rotation around the vertical
   axis — the vertical component of the vorticity vector — and is
-  unchanged by a rotation about that same axis;
+  unchanged by a rotation about that same axis (spinning doesn't 
+  care which way your map is turned — same number in any basis.);
 - **divergence** measures horizontal expansion/contraction — the
-  trace of the horizontal velocity-gradient tensor — likewise
+  trace of the horizontal velocity-gradient tensor, or how fast 
+  the water spreads apart or squeezes together — likewise
   unchanged;
-- **normal and shear strain** are the deviatoric tensor components:
-  any rotation of the axes mixes the two into each other (at angle
-  2φ), so the native-point pair is **model-basis** and must NEVER be
+- **normal and shear strain** describe stretching along particular
+  directions — turn the map and what looked like "stretching
+  north–south" becomes partly "shearing", and vice versa.
+  So the native-point pair is **model-basis** and must NEVER be
   output as the signed strain channels (`strain_n`/`strain_s` come
-  from the rotated Jacobian).  Their **sum of squares**, however, is
-  invariant under the rotation — which is exactly how `strain_mag`
-  and `okubo_weiss` consume them.
+  from the rotated Jacobian).  The total amount of stretching (the 
+  **sum of squares**), however, is invariant under the rotation — 
+  which is exactly how `strain_mag` and `okubo_weiss` consume them.
 
-The same logic covers the tracer functions: |∇s|² and ∇a·∇b are
-rotation-invariant (vector norms and dot products), so
+The same logic covers the tracer functions: the length of a gradient
+vector (|∇s|²) and their projection/dot products (∇a·∇b) are
+rotation-invariant, so
 `calculate_grad_squared_tracer` and `calculate_grad_dot_tracer` never
-apply `CS`/`SN`; the individual *geographic* component squares cannot
-be produced square-first at all (the rotation cross term is destroyed
-by squaring — verified empirically: on a rotated face the model-axis
-squares appear swapped relative to the geographic ones).
+apply `CS`/`SN`. What you cannot get from the square-first route is
+the individual *geographic* component squares (east2, north2) separately, 
+as squaring throws away direction information needed by the rotation.
+(This is verified empirically in `field_validation_sparkles.ipynb`, where
+the model-axis squares come out squapped relative to the geographic ones
+on a rotated face).
 
 ## Products need co-located factors
 
-A product can only be formed where both factors live.  `a²` is always
-safe (a factor is co-located with itself).  For two *different*
+You can only multiply two numbers that live at the same locations.  
+`a²` is always safe (a factor is co-located with itself).  For two *different*
 fields, the same-direction gradient products are co-located
 (`a_x·b_x` on the u-points, `a_y·b_y` on the v-points) — that is
 `calculate_grad_dot_tracer`, used by the Turner angle so its
 numerator and denominator come from one consistent measurement route.
 Cross-direction products (e.g. `b_x·b_y` in frontogenesis) have no
-native co-location; at best each factor takes one 2-point interp —
-such quantities cannot be made fully cancellation-free.
+native co-location; at best at least one must be averaged/interpolated
+before multiplying. These quantities can never be made fully cancellation-free.
 
 ## Consequences to state when comparing channels
 

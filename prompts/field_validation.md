@@ -134,7 +134,7 @@ column order).  Units per ``docs/Fields.md``; labels/cmaps per
 COMPLETE (verbatim from ``subset_definitions.py``), one line per
 channel — not examples.
 
-Plotting-intermediates convention (SUPERSEDED 2026-08-01, supervisor
+Plotting-intermediates convention (SUPERSEDED 2026-08-01,
 request — see Logs): intermediates are never saved in the product
 stores; they are always computed live from raw in the notebook.
 EVERY computed step is now PLOTTED as its own chain column, including
@@ -149,7 +149,7 @@ are plotted in kinematic only (frontogenesis references them);
 ∇b components are plotted in frontal_structure and frontogenesis
 (their consumers).  [Earlier convention — components tabled only,
 validated implicitly via the spanning finals — was reversed by
-supervisor request; the spanning argument remains in the dependency
+ request; the spanning argument remains in the dependency
 tables as rationale for which notebook plots which components.]
 
 **stratification** (DEPTH; raw: Theta, Salt)
@@ -454,7 +454,7 @@ Template accommodations (subset-specific complications):
 - W at k_l=0 (surface interface) is ~0 by construction — noted in
   native_fields_depth and buoyancy_fluxes.
 
-## 8. Notebook placement (supervisor request vs central directory)
+## 8. Notebook placement (request vs central directory)
 
 RECOMMENDATION: keep all notebooks centralized in
 ``notebooks/notebooks_field_validation/``, organized into the two
@@ -728,14 +728,14 @@ complete pending review; next: item 5 cross-reference plumbing
 
 ### 2026-08-01 — Component-level intermediates + PR strategy
 
-Supervisor request: show EVERY computed step (e.g. Theta → ∇Θ →
+Show EVERY computed step (e.g. Theta → ∇Θ →
 |∇Θ|²).  Decision (LH): global stores stay intermediate-free; for
 the SURFACE phase all intermediates are computed LIVE in the
 notebooks (no tiles needed); depth-resolved intermediates come via
-the tiles route AFTER Tuesday.
+the tiles route AFTER surface.
 
-PR strategy agreed: (1) surface field-validation PR first (Tuesday
-target); (2) ``tiles-fields-v2`` as its own PR — PORTED fresh onto
+PR strategy agreed: (1) surface field-validation PR first; 
+(2) ``tiles-fields-v2`` as its own PR — PORTED fresh onto
 current main, not rebased from the stale ``tiles-fields`` branch;
 (3) depth-validation work stacked on top (merge tiles-fields-v2
 into the working branch locally while its PR is in review).
@@ -985,9 +985,9 @@ RUN cell, which is exactly its purpose.
   divergence risk).  If later extracted: destination is
   ``src/dbof/plotting/live_fields.py``, NOT the notebooks folder.
 
-### 2026-08-05 — Sparkle diagnostic notebook (boss request)
+### 2026-08-05 — Sparkle diagnostic notebook 
 
-Boss is worried about the pixel 'sparkle' in the grad(x)² (and
+Worries about the pixel 'sparkle' in the grad(x)² (and
 possibly kinematic) fields.  The consistency checks already rule out
 the float32→64→32 round-trip (residuals ~1e-7 relative = pure
 rounding; a real stencil/metric/rotation bug would be O(1) relative),
@@ -1067,7 +1067,7 @@ cancel). No CS/SN rotation needed: |grad|² is invariant under the
 orthogonal rotation. Both forms are consistent O(dx²)
 discretizations; they differ only at the 2dx scale. The ECCO-recipe
 functions are UNTOUCHED — production grad_*2 channels still use the
-standard form; whether to switch is a science decision (LH/boss)
+standard form; whether to switch is a science decision (LH)
 after the A/B.
 
 Tests: `tests/test_grad_squared_staggered.py` (3 passing) —
@@ -1229,13 +1229,12 @@ then the store-vs-live consistency cells will rightly FAIL at O(1)
 on speckle pixels; (2) re-run the validation notebooks; expect the
 grad² PDF LOW TAILS to lift (part of the old tail was cancellation
 specks) and Bodner/Bachman comparisons to change only at speckle
-pixels; (3) note for the boss: grid-scale gradient variance is now
+pixels; (3) note: grid-scale gradient variance is now
 retained, not filtered.
 
 ### 2026-08-05 — Notebooks MODULARIZED + regenerated (sq-first ready)
 
-Per LH (and the colleague-review defense): the repeated notebook
-logic now exists ONCE in src:
+Per LH: the repeated notebook logic now exists ONCE in src:
 
 - NEW `src/dbof/plotting/live_fields.py`: `stitch_and_slice`
   (batch-stitch lazy live fields + slice, bounded memory),
@@ -1331,7 +1330,7 @@ magnitudes very different from Defs 2–3.
 
 ### 2026-08-06 — JMD95 dtype decision + sparkle RMSE cell
 
-- JMD95 stays float64 (LH asked; recommendation AGAINST float32):
+- JMD95 stays float64:
   float32 polynomial evaluation injects ~1e-4..1e-3 kg/m3
   uncorrelated per-pixel noise into rho — invisible in rho values
   ("minimal differences" test) but comparable to adjacent-cell
@@ -1408,28 +1407,9 @@ notebook is self-contained and survives any future store state.
 - Fields.md frontal table: turner_angle row updated to the Def-3
   projection form.
 
-### 2026-08-06 — kinematic invariants INLINED (LH decision, final)
-
-LH: the invariant/corner-interp helpers should not exist at all —
-inline in strain_mag and okubo_weiss.  Done:
-compute_kinematic_invariants and _interp_corner_squared DELETED;
-`strain()` and `okubo_weiss_parameter()` each carry their own
-square-first stencils inline (sn on centres via rA flux form; ζ/σₛ
-on corners via rAz circulation form; squares moved corner→centre by
-two 2-pt means).  Plain-English record: the helpers were just eight
-finite differences evaluated where the C-grid provides them
-interpolation-free, plus a corner→centre average of non-negative
-squares.  Accepted trade-off (LH call): the corner stencils appear
-in both functions and are computed twice when both channels run
-(the dispatcher's shared-invariants hoist is removed; `invariants=`
-kwargs deleted from both signatures — okubo_weiss_parameter now
-takes no kwargs).  native_gradient.py holds ONLY the five general
-gradient operations.  Callers/tests/builders/Fields.md updated;
-notebooks regenerated; 8 injection/strain/turner/grad tests pass.
-
 ### 2026-08-06 — Kinematic helpers: FINAL form (LH decision)
 
-After the plain-English review LH reversed the inlining: the two
+After the plain-English review: the two
 helpers DO belong in native_gradient.py, shared by strain and
 okubo_weiss with dispatcher-level reuse.  Final form:
 
@@ -1452,33 +1432,6 @@ okubo_weiss with dispatcher-level reuse.  Final form:
   updated; notebooks regenerated; suites pass.  Math unchanged
   throughout this reshuffle — no store impact.
 
-### 2026-08-06 — Basis clarification (LH question, docstring fixed)
-
-LH: are the calculate_native_strain_vorticity outputs in the MODEL
-basis, acceptable only because we consume magnitudes?  Answer —
-right, with one refinement: vorticity and divergence are TRUE
-scalars (basis-independent, no excuse needed); the two strain
-components ARE model-basis and mix under rotation at 2φ (tensor),
-so they must never feed the signed strain channels — but their sum
-of squares is invariant, which is exactly how strain_mag and W use
-them.  The old docstring line ("all four are unchanged by the
-rotation") was imprecise for σₙ/σₛ individually — rewritten with
-the correct basis caveat and the usage rule.  Co-location footnote:
-exact invariance holds for co-located components; centre-σₙ² +
-corner-interp-σₛ² is invariant to O(Δx²) like the rest of the
-discretization.
-
-### 2026-08-06 — Correction to the basis note (LH catch)
-
-LH: vorticity and strain are NOT scalars.  Correct — previous log
-entry / docstring said "true scalars"; the accurate statement:
-CS/SN is a rotation of the horizontal axes about the local
-VERTICAL, and under that specific family of rotations ζ (the
-VERTICAL COMPONENT of the vorticity pseudovector) and δ (the TRACE
-of the horizontal velocity-gradient tensor) are invariant — not
-because they are scalars.  σₙ/σₛ (deviatoric components) mix at 2φ;
-their sum of squares is invariant.  Docstring rewritten
-accordingly; practical rules unchanged.
 
 ### 2026-08-06 — docs/Gradients.md + slim docstrings (LH request)
 
@@ -1539,3 +1492,4 @@ Repo-wide grep confirms no stale grad²-kwarg callers remain.  CFAD +
 channel-expansion suites pass.  NOTE: the DEPTH frontal_structure
 store's turner_angle_* channels change semantics too — add the
 DEPTH store to the regeneration list alongside the SURF ones.
+
