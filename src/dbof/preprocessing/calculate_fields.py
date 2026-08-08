@@ -334,9 +334,6 @@ def grad_rho2(ds_merge, grid):
 def grad_theta2(ds_merge, grid):
     """Compute the squared temperature gradient magnitude.
 
-    Squares the native staggered gradients and sums them
-    (square-before-interp)
-
     Parameters
     ----------
     ds_merge : xarray.Dataset
@@ -359,9 +356,6 @@ def grad_theta2(ds_merge, grid):
 def grad_salt2(ds_merge, grid):
     """Compute the squared salinity gradient magnitude.
 
-    Squares the native staggered gradients and sums them
-    (square-before-interp)
-
     Parameters
     ----------
     ds_merge : xarray.Dataset
@@ -383,9 +377,6 @@ def grad_salt2(ds_merge, grid):
 
 def grad_eta2(ds_merge, grid):
     """Compute the squared SSH gradient magnitude.
-
-    Squares the native staggered gradients and sums them
-    (square-before-interp)
 
     Parameters
     ----------
@@ -430,7 +421,7 @@ def turner_angle(ds_merge, grid, *, rho=None):
     if rho is None:
         rho = potential_density(ds_merge)
 
-    # Measured-∇ρ projections onto the T and S gradients (all dot
+    # ∇ρ projections onto the T and S gradients (all dot
     # products on native staggered points; rotation-invariant).
     p_t = ng.calculate_grad_dot_tracer(rho, ds_merge.Theta,
                                        ds_merge, grid)

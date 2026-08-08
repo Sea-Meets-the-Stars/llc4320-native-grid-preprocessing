@@ -1,14 +1,12 @@
 # Gradients on the Native LLC Grid
 
-Reference documentation for `src/dbof/utils/native_gradient.py` — the
-single home of all horizontal differencing on the LLC4320 C-grid.
-
-Companions: [Fields.md](Fields.md) (per-channel reference).
+Reference for `src/dbof/utils/native_gradient.py` — all horizontal
+differencing on the LLC4320 C-grid.  Companion:
+[Fields.md](Fields.md) (per-channel reference).
 
 ---
 
-
-## The C-grid, in one paragraph
+## The C-grid
 
 LLC4320 is an Arakawa C-grid ([MITgcm horizontal-grid
 documentation](https://mitgcm.readthedocs.io/en/latest/algorithm/horiz-grid.html)):
@@ -17,194 +15,117 @@ tracers live at cell **centres** `(j, i)`, `U` on the west cell faces
 on cell **corners** `(j_g, i_g)`.  A finite difference moves a
 quantity by half a cell: differencing a centre field lands on a face;
 differencing a face field lands on a centre or a corner, depending on
-the direction.  Every design rule below follows from that one fact.
+the direction.  
 
-## Gradient Artifacts
+## Gradient / Interpolation artifacts
 
-Averaging/interpolating a signed gradient onto the cell centres can erase real
-grid-scale bumps (the slopes on either side of a bump are equal and
-opposite, and average to zero).  Whether that erasure ever becomes a
-visible artifact — and whether we can do anything about it — depends
-entirely on what you are computing:
+Any time we interpolate a gradient we run the risk of getting an
+artifact.  This comes from the case where we have an extrema at a
+given cell, which would cause, for example, slopes on either side of
+that cell to be −a / +a.  Any interpolation at this point would
+average together these two slopes and produce zero.  Taking the
+square then magnifies that artifact.
 
-| What you're computing | Can the artifact be avoided? | What we do |
-|---|---|---|
-| **Magnitudes and same-direction products** — `grad*2`, `strain_mag`, `okubo_weiss`, `∇a·∇b` | **Yes, completely.** Square/multiply at the staggered points *first*; an average of positive numbers cannot cancel. Any small values that remain are real features. | `calculate_grad_squared_tracer`, `calculate_grad_dot_tracer`, `calculate_native_strain_vorticity` + `interp_corner_squared` |
-| **Signed vector components** — geographic `U`/`V`, ζ, δ, `strain_n`/`strain_s`, ∇b for frontogenesis | **No — but it's harmless.** The averaging still smooths grid-scale bumps, but a near-zero in a signed field on a linear colour scale is invisible and does no damage downstream. | The ECCO recipe: `calculate_native_gradient_tracer`, `calculate_jacobian` |
-| **Cross-direction products** — e.g. `b_x·b_y` inside frontogenesis | **No — genuinely stuck.** The two factors never share a grid point, so at least one must be averaged (while still signed) before multiplying. The artifact can be minimized, never removed. | Component path for now (watch-list; see `prompts/field_validation.md`) |
+To combine any two components we need them to exist at the same
+location.  So we have four cases:
 
-Everything below is the detail behind this table.
+- **Squares.** If we take the square before we interpolate, we can
+  avoid that error entirely (yay, all `grad_squared` components are
+  good!) — `calculate_grad_squared_tracer`,
+  `calculate_grad_dot_tracer`.
+- **Magnitude of a Jacobian.** Without interpolation, different
+  Jacobian components live at different parts of the grid.  If we
+  square them THERE before interpolating, we can avoid the artifact
+  (yay `strain_magnitude` and `okubo_weiss`!) —
+  `calculate_native_strain_vorticity` + `interp_corner_squared`.
+- **Plain Jacobian** (relative vorticity, divergence): we use the
+  ECCO code exactly.  The artifact is still there (interpolation
+  happens twice), just not exaggerated by squaring.  I'm assuming it
+  is benign if it is what is used by ECCO folks.  We keep this
+  version deliberately so that we can store all calculated fields at
+  the cell centres — `calculate_jacobian`.
+- **Multiplication of two different directional components** (e.g.
+  frontogenesis multiplies bx·by): we have to interpolate before
+  multiplying them to get them on the same point, so the artifact is
+  unavoidable.
 
-## The two recipes: signed components vs squared magnitudes
+Evidence for all of this: `field_validation_sparkle.ipynb`.
 
-**1. Vector components — the ECCO recipe** (`rotate_vector_to_geographic`,
-`calculate_native_gradient_tracer`, `calculate_jacobian`): difference
-on the staggered points, 2-point-interpolate to the tracer centre,
-rotate to geographic east/north via the grid `CS`/`SN` coefficients
 
-    u_east  = u·CS − v·SN
-    v_north = u·SN + v·CS
 
-This is the standard recipe from the [ECCO v4 tutorial](
-https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html)
-and is the right tool whenever the **signed vector** is needed:
-geographic `U`/`V`, ∇b for frontogenesis, the signed strain
-channels, geostrophic shear.
 
-> **Note on wind stress (`oceTAUX`/`oceTAUY`):** in the Arakawa
-> C-grid, wind stress acts on horizontal velocities which are
-> staggered relative to the tracer cells, with indexing such that
-> +oceTAUY(i, j_g) corresponds to +y momentum fluxes at the 'v'
-> edge of the tracer cell at (i, j, k=0) (and +oceTAUX(i_g, j) to
-> +x fluxes at the 'u' edge).  Also, the model +y direction does
-> not necessarily correspond to the geographical north–south
-> direction, because the x and y axes of the model's curvilinear
-> lat-lon-cap (llc) grid have arbitrary orientations which vary
-> within and across tiles.  This is why the `oceTAUX`/`oceTAUY`
-> output channels go through `rotate_vector_to_geographic`
-> (interp to tracer points + CS/SN rotation) exactly like `U`/`V`,
-> and are eastward/northward stress in the stores.
->
-> *Provenance:* the note above is adapted from the model output
-> metadata (`comments_2` of `oceTAUX`/`oceTAUY`).  Beware that in
-> the metadata itself, `oceTAUY`'s `comments_2` carries a
-> copy-paste indexing typo — it says `+oceTAUY(i_g, j)`, which
-> contradicts its own dims declaration `oceTAUY(time, j_g, i)` and
-> `comments_1` ("centered over the 'v' side"); the dims are
-> authoritative.
->
-> *ECCO-tutorial caveat:* the [ECCO gradient tutorial](
-> https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html)
-> states that "surface winds/wind stress are located at the grid
-> cell centers" — that refers to ECCO's ATMOSPHERIC forcing fields
-> (`EXFuwind`/`EXFvwind`), which are indeed cell-centred.  The
-> ocean-stress output `oceTAUX`/`oceTAUY` is EDGE-located (see the
-> dims above), so the tutorial's closing exercise ("replace
-> EXFuwind/EXFvwind with oceTAUX/oceTAUY" in the centre-based curl
-> recipe) is misleading if followed naively.  Our
-> `wind_stress_curl` does the right thing: it feeds the RAW
-> staggered τ into `calculate_jacobian`, whose first step
-> interpolates from the u/v edges before rotating and
-> differencing.
+# Some downwtream impacts: 
 
-**2. Squared magnitudes — square/multiply BEFORE interpolating**
-(`calculate_grad_squared_tracer`, `calculate_grad_dot_tracer`,
-`calculate_native_strain_vorticity` + `interp_corner_squared`):
-form squares and products **on** the staggered points where their
-gradients natively live, and move only the already-squared (non-negative) 
-results to the cell centers.
+## Strain, vorticity, and rotation
 
-## Why two recipes: the 'sparkle' mechanism
+**Why this section exists:** the square-first functions skip the
+CS/SN rotation entirely — this explains why that is correct, and
+which quantities you therefore must NOT take from them.
 
-Interpolating a value from the staggered points to a cell center means averaging
-the two neighboring values. This can become problematic if one is sitting at 
-a local minima or maxima in a field. This leads to a case where, for example,
-the slope in the left side is +a, the slope on the right side is -a, and averaging
-the two gives zero. This erases a real gradient that exists on either side 
-of the cell. For a signed field this hardly matters: one near-zero pixel among many mid-range values is
-invisible. But square that averaged value and the erasure
-becomes glaring — the pixel is now orders of magnitude smaller than
-its neighbours, which shows up as white speckle ('sparkle') on a
-log-scale map, and as absurdly large values anywhere a squared
-gradient sits in a denominator (R_ib).
+`calculate_native_strain_vorticity` gives four combinations, at 
+particular locations on the grid:
 
-Squaring first avoids the trap entirely: (+a)² and (−a)² are both
-positive, and an average of positive numbers can't cancel to zero.
-That's the whole fix. Both orders of operation are legitimate
-approximations of the same physics — they only disagree about
-features at the very smallest (two-grid-cell) scale, which the
-average-first version silently erases and the square-first version
-keeps. Evidence: field_validation_sparkle.ipynb (side-by-side
-A/B); float32 precision was ruled out as the cause first (store and
-full-precision recompute agree to ~1e-7).
+- **cell centres** — differencing U along its own axis (x): normal
+  strain (∂u/∂x − ∂v/∂y) and divergence (∂u/∂x + ∂v/∂y);
+- **cell corners** — differencing U across the other axis (y):
+  vorticity (∂v/∂x − ∂u/∂y) and shear strain (∂v/∂x + ∂u/∂y).  The
+  corner vorticity is the same stencil MITgcm itself uses
+  (`momVort3`).
 
-## Velocity combinations at their natural points
+`interp_corner_squared` moves a corner value to the centres by simple
+averaging — use it **only after squaring**.
 
-`calculate_native_strain_vorticity` is just eight finite
-differences, bundled. The trick is where each one is evaluated.
-On the C-grid, taking a difference moves you half a cell — so if
-you pick the right combination, the result lands exactly on a grid
-point and no interpolation is needed at all:
-  - differencing U along its own axis (x) lands on the cell
-  centres — so normal strain (∂u/∂x − ∂v/∂y) and divergence
-  (∂u/∂x + ∂v/∂y) come out there for free;
-  - differencing U across the other axis (y) lands on the cell
-  corners — so vorticity (∂v/∂x − ∂u/∂y) and shear strain
-  (∂v/∂x + ∂u/∂y) come out there for free. The corner vorticity
-  is the same stencil MITgcm itself uses (momVort3).
+`CS`/`SN` rotate model x/y into geographic east/north (a rotation
+about the local vertical).  The ECCO functions apply it
+(`u_east = u·CS − v·SN`, `v_north = u·SN + v·CS`); the square-first
+functions never need to:
 
-`interp_corner_squared` then moves a corner value to the cell
-centres by simple averaging. Use it only after squaring — an
-average of positive numbers can't cancel. Moving a signed corner
-quantity with it walks straight back into the trap above.
-
-## Basis and rotation rules
-
-`CS`/`SN` rotate the model's horizontal x/y axes into geographic
-east/north — a rotation **about the local vertical axis**.   
-The four native-point outputs react differently to that rotation:
-
-- **vorticity** measures horizontal rotation around the vertical
-  axis — the vertical component of the vorticity vector — and is
-  unchanged by a rotation about that same axis (spinning doesn't 
-  care which way your map is turned — same number in any basis.);
-- **divergence** measures horizontal expansion/contraction — the
-  trace of the horizontal velocity-gradient tensor, or how fast 
-  the water spreads apart or squeezes together — likewise
-  unchanged;
+- **vorticity** (spin about the vertical) and **divergence**
+  (spreading/squeezing) are the same number in any basis (model vs geo);
 - **normal and shear strain** describe stretching along particular
-  directions — turn the map and what looked like "stretching
-  north–south" becomes partly "shearing", and vice versa.
-  So the native-point pair is **model-basis** and must NEVER be
-  output as the signed strain channels (`strain_n`/`strain_s` come
-  from the rotated Jacobian).  The total amount of stretching (the 
-  **sum of squares**), however, is invariant under the rotation — 
-  which is exactly how `strain_mag` and `okubo_weiss` consume them.
+  directions, so turning the map converts one into the other.  The
+  native-point pair is therefore **model-basis** and must NEVER be
+  output as `strain_n`/`strain_s` (those come from the rotated
+  Jacobian) — but their **sum of squares** IS rotation-invariant,
+  which is exactly how `strain_mag` and `okubo_weiss` use them;
+- likewise |∇s|² and ∇a·∇b.  What you *can't* get square-first is the
+  east² and north² parts separately — squaring throws away the
+  direction information the rotation needs (verified in
+  `field_validation_sparkle.ipynb`: on a rotated face the model-axis
+  squares come out swapped relative to the geographic ones).
 
-The same logic covers the tracer functions: the length of a gradient
-vector (|∇s|²) and their projection/dot products (∇a·∇b) are
-rotation-invariant, so
-`calculate_grad_squared_tracer` and `calculate_grad_dot_tracer` never
-apply `CS`/`SN`. What you cannot get from the square-first route is
-the individual *geographic* component squares (east2, north2) separately, 
-as squaring throws away direction information needed by the rotation.
-(This is verified empirically in `field_validation_sparkles.ipynb`, where
-the model-axis squares come out squapped relative to the geographic ones
-on a rotated face).
+Consequences: `strain_mag` ≠ `sqrt(strain_n² + strain_s²)` pixelwise,
+and `okubo_weiss` uses the corner (`momVort3`) vorticity rather than
+the centred `relative_vorticity` channel — different stencils by
+design.
 
-## Products need co-located factors
 
-You can only multiply two numbers that live at the same locations.  
-`a²` is always safe (a factor is co-located with itself).  For two *different*
-fields, the same-direction gradient products are co-located
-(`a_x·b_x` on the u-points, `a_y·b_y` on the v-points) — that is
-`calculate_grad_dot_tracer`, used by the Turner angle so its
-numerator and denominator come from one consistent measurement route.
-Cross-direction products (e.g. `b_x·b_y` in frontogenesis) have no
-native co-location; at best at least one must be averaged/interpolated
-before multiplying. These quantities can never be made fully cancellation-free.
+## Note on wind stress (`oceTAUX`/`oceTAUY`)
 
-## Consequences to state when comparing channels
+From the model metadata: in the Arakawa C-grid, wind stress acts on
+horizontal velocities which are staggered relative to the tracer
+cells, with indexing such that +oceTAUY(i, j_g) corresponds to +y
+momentum fluxes at the 'v' edge of the tracer cell at (i, j, k=0)
+(and +oceTAUX(i_g, j) to +x fluxes at the 'u' edge).  Also, the model
++y direction does not necessarily correspond to the geographical
+north–south direction, because the x and y axes of the llc grid have
+arbitrary orientations which vary within and across tiles.  This is
+why `oceTAUX`/`oceTAUY` go through `rotate_vector_to_geographic` like
+`U`/`V`, and are eastward/northward stress in the stores.
 
-- `strain_mag` ≠ `sqrt(strain_n² + strain_s²)` pixelwise (different
-  stencils by design). 
-    - strain_mag: Normal strain lives on cell centres (differencing U along its own
-      axis lands there — ZERO interpolation); shear strain lives on
-      cell corners.  The shear is squared AT the corners, and only
-      the non-negative square is moved to the centres (a mean of
-      non-negatives cannot cancel). 
-    - Signed geographic components, strain_n² & strain_s²: ECCO path 
-      (vectors need the rotation; near-zeros are benign on signed fields).
-- `okubo_weiss` uses the corner (`momVort3`) vorticity stencil, not
-  the centred `relative_vorticity` channel.
-    - normal strain on cell centres (zero interpolation); 
-      vorticity and shear strain on cell corners (MITgcm's own momVort3 stencil); 
-      each squared AT its native point, and only the non-negative squares are
-      moved corner -> centre.
-- `turner_angle` (projection form, Johnson et al. 2012 / Whalen &
-  Drushka 2025) is built from measured-∇ρ dot products and is
-  independent of the `grad*2` channels; `gradrho2` keeps full-EOS ρ
-  differencing (the gap to the linearized form is the cabbeling
-  content).
+Two footnotes on sources:
+
+- `oceTAUY`'s `comments_2` in the model metadata has an
+  indexing typo (`+oceTAUY(i_g, j)`), contradicting its own dims
+  `oceTAUY(time, j_g, i)` and `comments_1` ("centered over the 'v'
+  side").  The dims are authoritative.
+- The [ECCO gradient tutorial](
+  https://ecco-v4-python-tutorial.readthedocs.io/ECCO_v4_Gradient_calc_on_native_grid.html)
+  says wind stress lives at cell centres — that's ECCO's
+  *atmospheric* forcing (`EXFuwind`/`EXFvwind`).  `oceTAUX`/`oceTAUY`
+  are edge-located, so its closing "just swap in oceTAUX/oceTAUY"
+  exercise is misleading.  Our `wind_stress_curl` is fine: it feeds
+  the raw staggered τ into `calculate_jacobian`, which interpolates
+  from the edges first.
 
 *Generated by LH and Claude.*
