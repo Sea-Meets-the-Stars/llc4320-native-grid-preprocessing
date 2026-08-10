@@ -3,7 +3,7 @@
 pipeline: "SURF"
 
 run:
-  run_id: "v2_2_00"
+  run_id: "v2_2_01"
   log_dir: "logs/"
 
 data:
