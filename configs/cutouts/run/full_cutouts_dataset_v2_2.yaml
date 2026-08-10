@@ -1,5 +1,5 @@
 run:
-  run_id: "2_00/"
+  run_id: "2_02/"
   log_dir: "logs/"
 
 # Source: generate-global output consumed as cutout input.
@@ -9,7 +9,7 @@ run:
 input:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "globals_for_cutouts/v2_2_00/"
+  folder: "globals_for_cutouts/v2_2_01/"
   #date_prefixes:                                # including no dates should process all. 
   grid_access:                                  # rectangular llc4320 grid store
     s3_endpoint: "https://s3-west.nrp-nautilus.io"
@@ -19,7 +19,7 @@ input:
 
 sampling: # info on these configs can be found in docs/Sampling_With_GradB2.md
   bias_to_high_gradients: 1.3
-  sample_points_per_snapshot: 10000 # with 100 globals = 1mil cutouts
+  sample_points_per_snapshot: 300
 
 output:
   target_km_res: 150
@@ -54,5 +54,5 @@ feature_channels:
 runtime:
   zarr_async_concurrency: 128
   dask_scheduler: "distributed"
-  dask_n_workers: 18
+  dask_n_workers: 15
   dask_threads_per_worker: 1
