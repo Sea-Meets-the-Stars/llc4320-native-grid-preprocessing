@@ -20,7 +20,7 @@ cmaps:
   # --- native model variables (surface-only, no suffix) ---
   Theta:    [thermal, "Potential temperature (°C)"]
   Salt:     [haline,  "Salinity (psu)"]
-  Eta:      [gray,    "Sea surface height (m)"]
+  Eta:      [balance, "Sea surface height (m)"]
   U:        [balance, "Zonal velocity U (m s⁻¹)"]
   V:        [balance, "Meridional velocity V (m s⁻¹)"]
   W:        [balance, "Vertical velocity W (m s⁻¹)"]
@@ -49,7 +49,7 @@ cmaps:
   W_z25m:         [balance, "Vertical velocity W at 25 m (m s⁻¹)"]
   W_mld:          [balance, "Vertical velocity W at MLD (m s⁻¹)"]
   W_mld_mean:     [balance, "Vertical velocity W ML mean (m s⁻¹)"]
-  Eta_sfc:        [gray,    "Sea surface height (m)"]
+  Eta_sfc:        [balance, "Sea surface height (m)"]
 
   # --- stratification ---
   mixed_layer_depth: [deep,    "Mixed layer depth (m)"]

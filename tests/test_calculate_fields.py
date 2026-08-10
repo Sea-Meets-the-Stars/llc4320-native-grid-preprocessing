@@ -136,9 +136,22 @@ def test_native_gradient_tracer_dimension_agnostic(ds2d, grid2d, ds3d,
 def test_jacobian_injection_is_consistent(ds2d, grid2d):
     jac = cf.compute_velocity_jacobian(ds2d, grid2d)
     for fn in (cf.relative_vorticity, cf.divergence,
-               cf.okubo_weiss_parameter, cf.rossby_number):
+               cf.rossby_number):
         assert_k0_equal(fn(ds2d, grid2d, jacobian=jac), fn(ds2d, grid2d),
                         name=f"{fn.__name__} jacobian-injection")
+
+    # strain_mag and okubo_weiss share the native-point velocity
+    # gradients (sparkle fix); the injection kwarg is inert.
+    nsv = ng.calculate_native_strain_vorticity(
+        ds2d.U, ds2d.V, ds2d, grid2d)
+    assert_k0_equal(
+        cf.okubo_weiss_parameter(ds2d, grid2d, native_sv=nsv),
+        cf.okubo_weiss_parameter(ds2d, grid2d),
+        name="okubo_weiss native_sv-injection")
+    for got, want in zip(
+            cf.strain(ds2d, grid2d, jacobian=jac, native_sv=nsv),
+            cf.strain(ds2d, grid2d)):
+        assert_k0_equal(got, want, name="strain native_sv-injection")
 
 
 def test_frontogenesis_injection_is_consistent(ds2d, grid2d):
@@ -152,14 +165,17 @@ def test_frontogenesis_injection_is_consistent(ds2d, grid2d):
 
 
 def test_turner_angle_injection_is_consistent(ds2d, grid2d):
-    gt = cf.grad_theta2(ds2d, grid2d)
-    gs = cf.grad_salt2(ds2d, grid2d)
-    gr = cf.grad_rho2(ds2d, grid2d)
+    # Projection form (Johnson et al. 2012): rho is the injectable.
+    rho = cf.potential_density(ds2d)
     assert_k0_equal(
-        cf.turner_angle(ds2d, grid2d,
-                        gradtheta2=gt, gradsalt2=gs, gradrho2=gr),
+        cf.turner_angle(ds2d, grid2d, rho=rho),
         cf.turner_angle(ds2d, grid2d),
-        name="turner_angle injection")
+        name="turner_angle rho-injection")
+    # Bounded by construction: arctan on (-90, 90) degrees.
+    tu = cf.turner_angle(ds2d, grid2d).compute()
+    finite = tu.values[np.isfinite(tu.values)]
+    assert finite.size > 0
+    assert (finite > -90.0).all() and (finite < 90.0).all()
 
 
 # ===========================================================================
@@ -167,13 +183,15 @@ def test_turner_angle_injection_is_consistent(ds2d, grid2d):
 # ===========================================================================
 
 def test_grad_squared_single_implementation(ds2d, grid2d):
-    """ng owns grad_squared; pc re-exports it; the two-step workflow
-    reproduces a grad_*2 field."""
-    assert pc.grad_squared is ng.grad_squared
-    gx, gy = ng.calculate_native_gradient_tracer(
-        ds2d.Theta, ds2d, grid=grid2d)
-    assert_k0_equal(ng.grad_squared(gx, gy), cf.grad_theta2(ds2d, grid2d),
-                    name="two-step workflow vs grad_theta2")
+    """grad_*2 fields delegate to the single square-BEFORE-interp
+    implementation (sparkle fix, prompts/field_validation.md
+    2026-08-05); the old pointwise grad_squared is deleted."""
+    assert not hasattr(ng, "grad_squared")
+    assert not hasattr(pc, "grad_squared")
+    assert_k0_equal(
+        ng.calculate_grad_squared_tracer(ds2d.Theta, ds2d, grid2d),
+        cf.grad_theta2(ds2d, grid2d),
+        name="calculate_grad_squared_tracer vs grad_theta2")
 
 
 # ===========================================================================

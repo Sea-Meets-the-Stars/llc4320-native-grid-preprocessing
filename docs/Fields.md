@@ -2,20 +2,12 @@
 
 Reference list of every output field, organised by subset. Pipeline
 mechanics (running subsets, depth-suffix expansion, re-run behaviour) live
-in `Global_Maps.md`; this document is the field-level reference and the
-checklist for the per-subset verification notebooks (planned; one notebook
-per subset).
+in `Global_Maps.md`; this document is the field-level.
 
 Function names refer to `preprocessing/calculate_fields.py` (single
 lazy, dimension-agnostic implementations — the same functions serve 2D
 and 3D inputs), `preprocessing/calculate_fields_at_depth.py`
 (vertical-structure fields only), and inline in the subset dispatchers.
-There is exactly ONE implementation per field (field migration,
-`prompts/field_migration.md` — complete).  Conventions: the single
-reference density RHO0_REFERENCE = 1000 kg/m³ and g = 9.81 m/s² apply
-throughout; buoyancy is anomaly-based (b = g·σ₀/ρ₀); the `density`
-channel is the potential density ANOMALY σ₀ (not σ₀ + 1000).  These
-invariants are pinned by `tests/test_calculate_fields.py`.
 
 ## Conventions
 
@@ -24,13 +16,16 @@ invariants are pinned by `tests/test_calculate_fields.py`.
   coefficients.
 - Density is potential density: JMD95 evaluated at p = 0 with potential
   temperature (surface-referenced; equals in-situ density at the surface
-  only).  The output channel carries the anomaly σ₀ = ρ_θ − 1000.
+  only).  The `density` channel is the potential density ANOMALY σ₀ = ρ_θ − 1000.
 - Buoyancy is b = g·σ₀/ρ₀ (anomaly-based; constant offsets vanish under
   the gradients/derivatives that consume it).
+- Reference density RHO0_REFERENCE = 1000 kg/m³ and g = 9.81 m/s² apply throughout
 - In the DEPTH pipeline, each base field is expanded across the active
   depth suffixes (`sfc`, `z25m`, `mld`, `mld_mean` by default). Bases in
   `SURFACE_ONLY_BASES` (`Eta`, `gradeta2`, `ug`, `vg`) only ever emit
   `_sfc`. Extra channels are emitted as-is (inherently 2D).
+- Information about calcultaing gradients on the LLC4320 Arakawa C-grid
+  lives in [Gradients.md](Gradients.md).
 
 ---
 
@@ -76,7 +71,7 @@ All surface subsets are 2D (k = 0 input data, no depth suffixes).
 | `gradtheta2` | `grad_theta2` | \|∇θ\|² | (°C m⁻¹)² |
 | `gradeta2` | `grad_eta2` | \|∇η\|² | (m m⁻¹)² |
 | `gradrho2` | `grad_rho2` | \|∇ρ\|² (potential density) | (kg m⁻⁴)² |
-| `turner_angle` | `turner_angle` | Tu_h = arctan(ρ₀(β²\|∇S\|² − α²\|∇θ\|²) / (−\|∇ρ\|²/ρ₀)); NaN where \|∇ρ\|² = 0 | degrees |
+| `turner_angle` | `turner_angle` | Tu_h = arctan(∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T − β∇S)) — projection form (Johnson et al. 2012; Whalen & Drushka 2025), measured ∇ρ, co-located staggered dot products; NaN at exact 0/0; mask weak \|∇ρ\|² at display time | degrees |
 | `density` | `potential_density_anomaly` | Potential density anomaly σ₀ = ρ_θ(p=0) − 1000 | kg m⁻³ |
 | `buoyancy` | `buoyancy_of_field` | b = g·σ₀/ρ₀ | m s⁻² |
 
@@ -227,10 +222,9 @@ Identical channel list to the SURF `surface_wind` subset (including
 
 ---
 
-## Verification notebooks (planned)
+## Verification notebooks 
 
 One notebook per subset, verifying each channel against: expected units
 and magnitude ranges, known spatial structure (e.g. equatorial NaN bands
-for f-normalised fields, sign conventions for vorticity/OW), and — after
-the field migration — the expected ~2.6% rescaling of buoyancy-based
-dimensional fields under RHO0 = 1000 / g = 9.81.
+for f-normalised fields, sign conventions for vorticity/OW). These notebooks
+live at `notebooks/notebooks_field_validation/`

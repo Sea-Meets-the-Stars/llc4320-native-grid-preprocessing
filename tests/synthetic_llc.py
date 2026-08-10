@@ -87,6 +87,17 @@ def _grid_metric_vars(n=N, d=D, cs=1.0, sn=0.0):
                             dims=("face", "j", "i_g")),
         "dyC": xr.DataArray(np.full((N_FACES, n, n), d),
                             dims=("face", "j_g", "i")),
+        # Edge lengths + cell areas for the C-grid-native kinematic
+        # invariants (flux form on rA, circulation form on rAz).
+        # Uniform grid: dxG = dyG = d, areas = d^2.
+        "dxG": xr.DataArray(np.full((N_FACES, n, n), d),
+                            dims=("face", "j_g", "i")),
+        "dyG": xr.DataArray(np.full((N_FACES, n, n), d),
+                            dims=("face", "j", "i_g")),
+        "rA": xr.DataArray(np.full((N_FACES, n, n), d * d),
+                           dims=("face", "j", "i")),
+        "rAz": xr.DataArray(np.full((N_FACES, n, n), d * d),
+                            dims=("face", "j_g", "i_g")),
     }
 
 

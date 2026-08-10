@@ -272,10 +272,8 @@ def grad_b2(ds_merge, grid):
         Units are s^-4
     """
     buoyancy = buoyancy_of_field(ds_merge)
-
-    zonal_grad_b, merid_grad_b = ng.calculate_native_gradient_tracer(buoyancy, ds_merge, grid=grid)
-
-    gradb2 = ng.grad_squared(zonal_grad_b, merid_grad_b)
+    gradb2 = ng.calculate_grad_squared_tracer(
+        buoyancy, ds_merge, grid)
 
     return gradb2
 
@@ -328,17 +326,13 @@ def grad_rho2(ds_merge, grid):
     """
 
     rho = potential_density(ds_merge)
-
-    zonal_grad_rho, merid_grad_rho = ng.calculate_native_gradient_tracer(rho, ds_merge, grid=grid)
-    gradrho2 = ng.grad_squared(zonal_grad_rho, merid_grad_rho)
+    gradrho2 = ng.calculate_grad_squared_tracer(
+        rho, ds_merge, grid)
     return gradrho2
 
 
 def grad_theta2(ds_merge, grid):
     """Compute the squared temperature gradient magnitude.
-
-    Computes zonal and meridional gradients on the native LLC grid, 
-    squares and sums them
 
     Parameters
     ----------
@@ -355,16 +349,12 @@ def grad_theta2(ds_merge, grid):
         Units are (degrees C/m)^2
     """
     theta = ds_merge.Theta
-
-    zonal_grad_theta, merid_grad_theta = ng.calculate_native_gradient_tracer(theta, ds_merge, grid=grid)
-    gradtheta2 = ng.grad_squared(zonal_grad_theta, merid_grad_theta)
+    gradtheta2 = ng.calculate_grad_squared_tracer(
+        theta, ds_merge, grid)
     return gradtheta2
 
 def grad_salt2(ds_merge, grid):
     """Compute the squared salinity gradient magnitude.
-
-    Computes zonal and meridional gradients on the native LLC grid, 
-    squares and sums them
 
     Parameters
     ----------
@@ -381,16 +371,12 @@ def grad_salt2(ds_merge, grid):
         Units are (psu/m)^2
     """
     salt = ds_merge.Salt
-
-    zonal_grad_salt, merid_grad_salt = ng.calculate_native_gradient_tracer(salt, ds_merge, grid=grid)
-    gradsalt2 = ng.grad_squared(zonal_grad_salt, merid_grad_salt)
+    gradsalt2 = ng.calculate_grad_squared_tracer(
+        salt, ds_merge, grid)
     return gradsalt2
 
 def grad_eta2(ds_merge, grid):
     """Compute the squared SSH gradient magnitude.
-
-    Computes zonal and meridional gradients on the native LLC grid, 
-    squares and sums them
 
     Parameters
     ----------
@@ -407,65 +393,54 @@ def grad_eta2(ds_merge, grid):
         Units are (m/m)^2
     """
     eta = ds_merge.Eta
-
-    zonal_grad_eta, merid_grad_eta = ng.calculate_native_gradient_tracer(eta, ds_merge, grid=grid)
-    gradeta2 = ng.grad_squared(zonal_grad_eta, merid_grad_eta)
+    gradeta2 = ng.calculate_grad_squared_tracer(
+        eta, ds_merge, grid)
     return gradeta2
 
-def turner_angle(ds_merge, grid, *, gradtheta2=None, gradsalt2=None, gradrho2=None):
-    """Compute the horizontal Turner Angle.
+def turner_angle(ds_merge, grid, *, rho=None):
+    """Horizontal Turner angle, PROJECTION form (Johnson et al. 2012).
 
-    Tu_h = arctan( ∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T - β∇S) )
-
-        Linear EOS  ∇ρ = ρ₀(−α∇T + β∇S) -->
-
-        Numerator   = ∇ρ·(α∇T + β∇S) = ρ₀(β²|∇S|² - α²|∇T|²)
-                 [T·S cross terms cancel exactly]
-
-        Denominator = ∇ρ·(α∇T - β∇S) = -|∇ρ|²/ρ₀
-                 [follows from |∇ρ|² = ρ₀²(α²|∇T|² - 2αβ∇T·∇S + β²|∇S|²)]
+    Tu_h = arctan( ∇ρ·(α∇T + β∇S) / ∇ρ·(α∇T − β∇S) )   [degrees]
 
     Parameters
     ----------
     ds_merge : xarray.Dataset
-        Merged dataset containing 'Theta', 'Salt', grid metrics
-        ('dxC', 'dyC'), and rotation coefficients ('CS', 'SN').
+        Merged dataset containing 'Theta', 'Salt' and grid metrics
+        ('dxC', 'dyC').
     grid : xgcm.Grid
         Grid object used for differencing and interpolation.
-    gradtheta2 : array-like, optional
-        Pre-computed |∇θ|².  Computed from *ds_merge* when *None*.
-    gradsalt2 : array-like, optional
-        Pre-computed |∇S|².  Computed from *ds_merge* when *None*.
-    gradrho2 : array-like, optional
-        Pre-computed |∇ρ|².  Computed from *ds_merge* when *None*.
+    rho : xarray.DataArray, optional
+        Pre-computed potential density (JMD95, p=0).  Computed from
+        *ds_merge* when *None*.
 
     Returns
     -------
-    dask.array.Array
-        Turner Angle.
-        Units are degrees.
+    xarray.DataArray
+        Turner angle [degrees], in (−90°, 90°), lazy.
     """
+    if rho is None:
+        rho = potential_density(ds_merge)
 
-    if gradtheta2 is None:
-        gradtheta2 = grad_theta2(ds_merge, grid)
-    if gradsalt2 is None:
-        gradsalt2 = grad_salt2(ds_merge, grid)
-    if gradrho2 is None:
-        gradrho2 = grad_rho2(ds_merge, grid)
+    # ∇ρ projections onto the T and S gradients (all dot
+    # products on native staggered points; rotation-invariant).
+    p_t = ng.calculate_grad_dot_tracer(rho, ds_merge.Theta,
+                                       ds_merge, grid)
+    p_s = ng.calculate_grad_dot_tracer(rho, ds_merge.Salt,
+                                       ds_merge, grid)
 
-    numer = RHO0_REFERENCE * (BETA**2 * gradsalt2 - ALPHA**2 * gradtheta2)
-    # xr.where (not np.where): stays lazy and keeps coords/attrs.  Mask
-    # pixels where |∇ρ| = 0 to avoid divide-by-zero.
-    denom = xr.where(gradrho2 > 0, -gradrho2 / RHO0_REFERENCE, np.nan)
-
-    tu_rad = np.arctan(numer / denom)
-    tu_h = np.degrees(tu_rad)
-
+    numer = ALPHA * p_t + BETA * p_s
+    denom = ALPHA * p_t - BETA * p_s
+    # xr.where keeps it lazy; exact-zero denominators (0/0 pixels,
+    # genuinely undefined angle) -> NaN rather than a warning.
+    tu_h = np.degrees(np.arctan(
+        numer / xr.where(denom != 0, denom, np.nan)))
+    tu_h.name = "turner_angle"
+    tu_h.attrs["long_name"] = (
+        "horizontal Turner angle (projection form, "
+        "Johnson et al. 2012)")
+    tu_h.attrs["units"] = "degrees"
     return tu_h
 
-# ------------------------------------------------------------------------------------
-# --------------------------------- KINEMATIC ----------------------------------------
-# ------------------------------------------------------------------------------------
 
 def relative_vorticity(ds_merge, grid, *, jacobian=None):
     """
@@ -542,9 +517,11 @@ def rossby_number(ds_merge, grid, *, jacobian=None):
 
     return rossby_no
 
-def strain(ds_merge, grid, *, jacobian=None):
+def strain(ds_merge, grid, *, jacobian=None, native_sv=None):
     """
     Compute strain from horizontal velocity components.
+    See Gradients.md for information on signed geographic 
+    versus magnitude calculations.
 
     Parameters
     ----------
@@ -553,24 +530,37 @@ def strain(ds_merge, grid, *, jacobian=None):
     grid : xgcm.Grid
         Grid object relating to ds_merge.
     jacobian : VelocityJacobian, optional
-        Pre-computed velocity Jacobian.  When *None* the Jacobian is
-        computed internally (standalone mode).
-
+        Pre-computed velocity Jacobian (used for the SIGNED
+        components).  When *None* the Jacobian is computed
+        internally (standalone mode).
     Returns
     -------
     strain_mag : xarray.DataArray
-        Strain magnitude field [s^-1].
+        Strain magnitude field [s^-1] — built square-first from
+        the native-point velocity gradients (sparkle fix,
+        prompts/field_validation.md 2026-08-05).  NOTE: therefore
+        NOT pixelwise equal to sqrt(strain_n^2 + strain_s^2), whose
+        centre-interpolated components lose grid-scale variance.
     strain_n: xarray.DataArray
-        Normal strain field [s^-1].
+        Normal strain field [s^-1] (geographic, centre-interpolated).
     strain_s: xarray.DataArray
-        Shear strain field [s^-1].
+        Shear strain field [s^-1] (geographic, centre-interpolated).
     """
     if jacobian is None:
         jacobian = compute_velocity_jacobian(ds_merge, grid)
 
+    # Signed geographic components: ECCO path
     strain_n = jacobian.du_dx - jacobian.dv_dy
     strain_s = jacobian.du_dy + jacobian.dv_dx
-    strain_mag = np.sqrt(strain_n**2 + strain_s**2)
+
+    # Magnitude: squared components path
+    if native_sv is None:
+        native_sv = ng.calculate_native_strain_vorticity(
+            ds_merge.U, ds_merge.V, ds_merge, grid)
+    shear2_c = ng.interp_corner_squared(
+        native_sv["strain_shear_corner"] ** 2, grid)
+    strain_mag = np.sqrt(
+        native_sv["strain_normal_center"] ** 2 + shear2_c)
 
     return strain_mag, strain_n, strain_s
 
@@ -602,9 +592,12 @@ def divergence(ds_merge, grid, *, jacobian=None):
     return div
 
 
-def okubo_weiss_parameter(ds_merge, grid, *, jacobian=None):
+def okubo_weiss_parameter(ds_merge, grid, *, native_sv=None):
     """
-    Compute the Okubo-Weiss parameter.
+    Compute the Okubo-Weiss parameter,
+    W = strain_normal^2 + strain_shear^2 - vorticity^2.
+
+    See Gradients.md for information on okubo-weiss calculation.
 
     Parameters
     ----------
@@ -612,29 +605,24 @@ def okubo_weiss_parameter(ds_merge, grid, *, jacobian=None):
         Dataset containing U and V components on the model grid.
     grid : xgcm.Grid
         Grid object relating to ds_merge.
-    jacobian : VelocityJacobian, optional
-        Pre-computed velocity Jacobian.  Forwarded to
-        ``relative_vorticity`` and ``strain``; when *None* the Jacobian
-        is computed internally (once, then shared).
-
     Returns
     -------
     OW : xarray.DataArray
         Okubo-Weiss parameter field [s^-2].
     """
-    if jacobian is None:
-        jacobian = compute_velocity_jacobian(ds_merge, grid)
-
-    omega = relative_vorticity(ds_merge, grid, jacobian=jacobian)
-    _, strain_n, strain_s = strain(ds_merge, grid, jacobian=jacobian)
-
-    okubo_weiss = strain_n**2 + strain_s**2 - omega**2
+    # Square-first on the native C-grid points
+    if native_sv is None:
+        native_sv = ng.calculate_native_strain_vorticity(
+            ds_merge.U, ds_merge.V, ds_merge, grid)
+    shear2_corner = ng.interp_corner_squared(
+        native_sv["strain_shear_corner"] ** 2, grid)
+    vort2_corner = ng.interp_corner_squared(
+        native_sv["vorticity_corner"] ** 2, grid)
+    okubo_weiss = (native_sv["strain_normal_center"] ** 2
+                   + shear2_corner - vort2_corner)
 
     return okubo_weiss
 
-# ------------------------------------------------------------------------------------
-# ------------------------------ FRONTOGENESIS ---------------------------------------
-# ------------------------------------------------------------------------------------ 
 
 def _frontogenesis_formula(du_dx, du_dy, dv_dx, dv_dy, grad_bx, grad_by):
     """Kinematic frontogenesis tendency from velocity gradient components.
@@ -837,10 +825,6 @@ def ekman_pumping(ds_merge, grid, rho0=RHO0_REFERENCE):
 
 def ekman_transport(ds_merge, grid, rho0=RHO0_REFERENCE):
     """Lazy Ekman transport (u_E, v_E) — depth-integrated tau / (rho0 f).
-
-    Moved from ``calculate_fields_at_depth`` during the field migration;
-    now uses the single public :func:`geographic_wind_stress` (the private
-    ``_wind_stress_geographic`` duplicate was deleted).
     https://sam.ucsd.edu/ltalley/sio210/dynamics_ekman/index.html
 
     Parameters
@@ -888,13 +872,6 @@ def modified_okubo_weiss(ds_merge, grid, *, jacobian=None,
         Q1 = -(du/dx db/dx + dv/dx db/dy)
         Q2 = -(du/dy db/dx + dv/dy db/dy),   |Q|^2 = Q1^2 + Q2^2.
 
-    Moved (suffix-free) from ``calculate_fields_at_depth`` during the
-    field migration: horizontal math only, so dimension-agnostic.  The
-    buoyancy gradient now comes from the single
-    :func:`compute_buoyancy_gradients` (the private phys-gradient helper
-    was deleted — with one project-wide buoyancy definition the two
-    routes are identical).
-
     Parameters
     ----------
     ds_merge : xarray.Dataset
@@ -924,10 +901,7 @@ def modified_okubo_weiss(ds_merge, grid, *, jacobian=None,
     """
     # Classical Okubo-Weiss W (reuse caller's if given).
     if okubo_weiss is None:
-        if jacobian is None:
-            jacobian = compute_velocity_jacobian(ds_merge, grid)
-        okubo_weiss = okubo_weiss_parameter(ds_merge, grid,
-                                            jacobian=jacobian)
+        okubo_weiss = okubo_weiss_parameter(ds_merge, grid)
     # Smaller eigenvalue l2 = W / 4.
     l2 = okubo_weiss / 4.0
 

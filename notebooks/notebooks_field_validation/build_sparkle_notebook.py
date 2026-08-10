@@ -1,12 +1,13 @@
 """
 Builder for notebooks/notebooks_dev/field_validation_sparkle.ipynb.
 
-Purpose (prompts/field_validation.md): trace at which pipeline stage
-the pixel-level 'sparkle' first appears in the gradient-squared and
-kinematic fields.  One figure per final field: columns are the
-dependency chain (raw -> intermediates -> final), rows are
-store-full / store-zoom / live-full / live-zoom, sequential
-colormaps only, one shared norm per column.
+The sparkle A/B record (prompts/field_validation.md, 2026-08-05):
+one figure per squared field comparing the legacy ECCO recipe
+(interpolate -> rotate -> square; rows 1-2) against the
+square-BEFORE-interp form that is now the production implementation
+(rows 3-4).  The plotting helper is INLINED in the notebook (LH
+decision: it is specific to this diagnostic, not shared plotting
+code).
 
 Regenerate with:  python dev/build_sparkle_notebook.py
 
@@ -34,100 +35,68 @@ cells = []
 
 # ---------------------------------------------------------------------
 md(cells, """\
-# Sparkle diagnostic — where does the speckle enter the pipeline?
+# Sparkle A/B — legacy ECCO recipe vs square-before-interp
 
-The grad(x)² and kinematic fields show pixel-level 'sparkle'
-(isolated extreme pixels).  The store-vs-live consistency checks in
-the field-validation notebooks already rule out the
-float32→64→32 round-trip (residuals ~1e-7 relative, pure rounding),
-so the sparkle must be *created* during the calculation.  This
-notebook shows every stage of the dependency chain side by side to
-identify the first stage where it appears:
+The grad(x)² and squared kinematic fields showed pixel 'sparkle':
+isolated WHITE (anomalously small) values on log-scaled maps.  Root
+cause (confirmed here): the ECCO gradient recipe computes finite
+differences on the staggered points, 2-point-interpolates them to
+the cell centre, rotates, THEN squares.  The 2-point mean has a
+null space at the grid scale — at a local extremum the two flanking
+differences are equal-and-opposite and cancel — so the centred
+|grad|² is orders of magnitude below its one-sided gradients.  Not
+a precision artifact (store ≡ live to ~1e-7).
 
-- **frontal_structure** chains exercise
-  `native_gradient.calculate_native_gradient_tracer` +
-  `native_gradient.grad_squared`;
-- **kinematic** chains exercise
-  `native_gradient.calculate_jacobian`.
+The fix (now the production implementation,
+`native_gradient.calculate_grad_squared_tracer` and
+`ng.calculate_native_strain_vorticity`): square each difference ON
+its native C-grid point, then move only the non-negative squares —
+a mean of non-negatives cannot cancel.  |grad|², σ², ζ², W are
+rotation-invariant, so no CS/SN is needed.  See
+[MITgcm horizontal grid](
+https://mitgcm.readthedocs.io/en/latest/algorithm/horiz-grid.html)
+and docs/Fields.md.
 
-Figure layout — one figure per final field:
+Figure layout — one figure per squared field:
 
-| | col 1 (raw) | ... | col n (final) |
-|---|---|---|---|
-| row 1 | store, full region | | |
-| row 2 | store, 200×200 km zoom | | |
-| row 3 | live recompute, full region | | |
-| row 4 | live recompute, zoom | | |
+| | col 1 (raw) | (∂/∂x)² | (∂/∂y)² | final |
+|---|---|---|---|---|
+| rows 1-2 | ECCO recipe, full + 200×200 km zoom | | | |
+| rows 3-4 | square-first, full + zoom | | | |
 
-Sequential colormaps only (diverging maps can hide speckle in their
-white midpoint); one shared norm per column so store and live are
-directly comparable.  Stages that are never saved (gradient /
-Jacobian components) show a placeholder in the store rows.\
+**Component-column caveat**: ECCO components are geographic
+(zonal/meridional); square-first components are MODEL-axis (the
+geographic split needs the cross term the squares destroy).  On
+rotated LLC faces (e.g. the Gulf Stream) the two appear SWAPPED —
+verified corr(ECCO dx², sq-first dy²) ≈ 0.9 vs 0.5 same-name.
+The FINAL column is rotation-invariant and directly comparable.
+Sequential colormaps only; one shared norm per column.\
 """)
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 1 — RUN the SURF pipeline (both subsets)
+## Section 1 — Grid
 
-Existing stores for this date are skipped unless `--clobber` is
-added, so re-running is a cheap no-op.\
+Only the stitched-grid coordinates are needed (the A/B is entirely
+live; store-vs-live consistency lives in the validation notebooks).\
 """)
 
 code(cells, """\
-# Section 1: run the SURF pipeline for both subsets + timestep.
-PIPELINE = "SURF"
-RUN_ID   = "field_validation_v1"
-DATE     = "2012-11-09 12:00:00"   # single validation timestep
-
-!generate-global \\
-    --config ../../configs/global/run/field_validation_surface.yaml \\
-    --pipeline $PIPELINE \\
-    --subset frontal_structure \\
-    --run_id $RUN_ID
-
-!generate-global \\
-    --config ../../configs/global/run/field_validation_surface.yaml \\
-    --pipeline $PIPELINE \\
-    --subset kinematic \\
-    --run_id $RUN_ID\
-""")
-
-# ---------------------------------------------------------------------
-md(cells, """\
-## Section 2 — LOAD both stores + the shared grid\
-""")
-
-code(cells, """\
-# Section 2: store readers (frontal_structure + kinematic) + grid.
+# Section 1: shared 2D grid (XC/YC) for stitching + slicing.
 import numpy as np
 import matplotlib.pyplot as plt
+import cmocean.cm as cmo
 
 import dbof.io.filesystems as filesystems
-import dbof.global_dataset_creation.zarr_dataset_global as zarr_dataset
 import dbof.global_dataset_creation.zarr_grid_global as zarr_grid
-from dbof.global_dataset_creation.subset_definitions import (
-    get_subset_definition,
-)
 
 S3_ENDPOINT = "https://s3-west.nrp-nautilus.io"
-BUCKET      = "dbof"
-FOLDER      = "surface_fields"       # SURF output folder
-DATE_PREFIX = "20121109_120000"      # matches DATE in Section 1
-
-fs, _ = filesystems.create_s3_filesystems(S3_ENDPOINT)
-readers = {}
-for _subset in ("frontal_structure", "kinematic"):
-    _defn = get_subset_definition(PIPELINE, _subset)
-    readers[_subset] = zarr_dataset.GlobalZarrDatasetReader(
-        bucket=BUCKET, folder=FOLDER, run_id=RUN_ID,
-        dataset_name=_defn["dataset_name"],
-        date_prefix=DATE_PREFIX, fs=fs,
-    )
-    print(f"{_subset}: {readers[_subset].channel_names}")
+PIPELINE = "SURF"
+DATE = "2012-11-09 12:00:00"   # single validation timestep
 
 fs_grid, _ = filesystems.create_s3_filesystems(S3_ENDPOINT)
 grid_reader = zarr_grid.GlobalGridZarrReader(
-    bucket=BUCKET, folder="LLC4320_GRID_2D",
+    bucket="dbof", folder="LLC4320_GRID_2D",
     dataset_name="llc4320_grid.zarr", fs=fs_grid,
 )
 XC, YC = grid_reader.lon, grid_reader.lat
@@ -136,15 +105,14 @@ print(f"grid: XC {XC.shape}")\
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 3 — Region selection + chains
+## Section 2 — Region selection
 
-`REGION` is selectable; any region with a `zoom` anchor works
-(`gulf_stream`, `kuroshio`, `so_atlantic`, `eq_pacific`,
-`kerguelen`).  Re-run from here after changing it.\
+Any region with a `zoom` anchor works; re-run from here after
+changing it.\
 """)
 
 code(cells, """\
-# Section 3: pick the region; define the dependency chains.
+# Section 2: pick the region.
 from dbof.plotting import regions
 
 REGION       = "gulf_stream"   # <-- change me, re-run from here
@@ -152,47 +120,22 @@ ZOOM_HALF_KM = 100.0           # 200x200 km zoom box
 
 _zoomable = [n for n, r in regions.REGIONS.items() if "zoom" in r]
 assert REGION in _zoomable, f"pick one of {_zoomable}"
-print(f"region: {REGION}  (options: {_zoomable})")
-
-# Dependency chains, raw -> intermediates -> final.  Frontal chains
-# exercise calculate_native_gradient_tracer + grad_squared; the
-# kinematic chains exercise calculate_jacobian.
-CHAINS = {
-    # frontal_structure
-    "gradtheta2": ["Theta", "dTheta_dx", "dTheta_dy", "gradtheta2"],
-    "gradsalt2":  ["Salt", "dSalt_dx", "dSalt_dy", "gradsalt2"],
-    "gradeta2":   ["Eta", "dEta_dx", "dEta_dy", "gradeta2"],
-    "gradrho2":   ["rho_theta", "drho_dx", "drho_dy", "gradrho2"],
-    "gradb2":     ["buoyancy", "db_dx", "db_dy", "gradb2"],
-    # kinematic
-    "relative_vorticity": ["U", "V", "dv_dx", "du_dy",
-                           "relative_vorticity"],
-    "divergence":         ["U", "V", "du_dx", "dv_dy",
-                           "divergence"],
-    "strain_n":           ["U", "V", "du_dx", "dv_dy", "strain_n"],
-    "strain_s":           ["U", "V", "dv_dx", "du_dy", "strain_s"],
-    "strain_mag":         ["strain_n", "strain_s", "strain_mag"],
-    "okubo_weiss":        ["strain_mag", "relative_vorticity",
-                           "okubo_weiss"],
-}
-STAGES = sorted({s for c in CHAINS.values() for s in c})
-print(f"{len(CHAINS)} chains, {len(STAGES)} distinct stages")\
+print(f"region: {REGION}  (options: {_zoomable})")\
 """)
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 4 — LIVE recomputation (raw → intermediates → finals)
+## Section 3 — Live fields: both variants, lazily
 
-Same loaders and same code as `generate-global`: one OSN snapshot,
-every chain stage recomputed lazily in float64, batch-stitched, and
-sliced to `REGION` immediately (bounded memory).  The finals here
-are the *live* versions of the store channels — per the consistency
-checks they agree with the store to ~1e-7, so any sparkle visible
-in the store rows must also appear here.\
+- **ECCO variant** (legacy recipe) is reconstructed INLINE here —
+  it no longer exists in the codebase (grad_*2, strain_mag and
+  okubo_weiss are square-first in production since the sparkle
+  fix).
+- **sq-first variant** = the production functions themselves.\
 """)
 
 code(cells, """\
-# Section 4a: snapshot + lazy live fields for every chain stage.
+# Section 3a: snapshot + lazy fields for both variants.
 import dbof.preprocessing.calculate_fields as calculate_fields
 import dbof.utils.native_gradient as ng
 from dbof.cli.generate_global import load_snapshot
@@ -206,68 +149,82 @@ ds_raw, ds_merge, it = load_snapshot(
     surface_only=False, data_source=get_data_source(PIPELINE),
 )
 print(f"OSN iteration {it}")
-for _v in ("Theta", "Salt", "Eta", "U", "V"):
-    print(f"  raw {_v}: {ds_merge[_v].dtype}")
 
-# frontal chain: tracer gradients (calculate_native_gradient_tracer)
-# and their grad_squared finals.
 rho = calculate_fields.potential_density(ds_merge)
 b = calculate_fields.buoyancy_of_field(ds_merge)
-gTh = ng.calculate_native_gradient_tracer(
-    ds_merge.Theta, ds_merge, grid=xgrid)
-gS = ng.calculate_native_gradient_tracer(
-    ds_merge.Salt, ds_merge, grid=xgrid)
-gE = ng.calculate_native_gradient_tracer(
-    ds_merge.Eta, ds_merge, grid=xgrid)
-gR = ng.calculate_native_gradient_tracer(rho, ds_merge, grid=xgrid)
-gB = ng.calculate_native_gradient_tracer(b, ds_merge, grid=xgrid)
 
-# kinematic chain: rotated velocities + Jacobian (calculate_jacobian)
-# and the finals computed from the SAME shared Jacobian.
-u_east, v_north = calculate_fields.geographic_velocity(
-    ds_merge, xgrid)
-J = calculate_fields.compute_velocity_jacobian(ds_merge, xgrid)
-s_mag, s_n, s_s = calculate_fields.strain(
-    ds_merge, xgrid, jacobian=J)
-
-live_map = {
-    # frontal raw + intermediates
-    "Theta": ds_merge["Theta"], "Salt": ds_merge["Salt"],
-    "Eta": ds_merge["Eta"], "rho_theta": rho, "buoyancy": b,
-    "dTheta_dx": gTh[0], "dTheta_dy": gTh[1],
-    "dSalt_dx": gS[0], "dSalt_dy": gS[1],
-    "dEta_dx": gE[0], "dEta_dy": gE[1],
-    "drho_dx": gR[0], "drho_dy": gR[1],
-    "db_dx": gB[0], "db_dy": gB[1],
-    # frontal finals (live)
-    "gradtheta2": calculate_fields.grad_theta2(ds_merge, xgrid),
-    "gradsalt2": calculate_fields.grad_salt2(ds_merge, xgrid),
-    "gradeta2": calculate_fields.grad_eta2(ds_merge, xgrid),
-    "gradrho2": calculate_fields.grad_rho2(ds_merge, xgrid),
-    "gradb2": calculate_fields.grad_b2(ds_merge, xgrid),
-    # kinematic raw + Jacobian components
-    "U": u_east, "V": v_north,
-    "du_dx": J.du_dx, "du_dy": J.du_dy,
-    "dv_dx": J.dv_dx, "dv_dy": J.dv_dy,
-    # kinematic finals (live, shared Jacobian)
-    "relative_vorticity": calculate_fields.relative_vorticity(
-        ds_merge, xgrid, jacobian=J),
-    "divergence": calculate_fields.divergence(
-        ds_merge, xgrid, jacobian=J),
-    "strain_n": s_n, "strain_s": s_s, "strain_mag": s_mag,
-    "okubo_weiss": calculate_fields.okubo_weiss_parameter(
-        ds_merge, xgrid, jacobian=J),
+# Tracer sources per final field: (raw stage name, source array).
+TRACERS = {
+    "gradtheta2": ("Theta", ds_merge.Theta),
+    "gradsalt2": ("Salt", ds_merge.Salt),
+    "gradeta2": ("Eta", ds_merge.Eta),
+    "gradrho2": ("rho_theta", rho),
+    "gradb2": ("buoyancy", b),
 }
-missing = [s for s in STAGES if s not in live_map]
-assert not missing, f"live_map is missing stages: {missing}"
-print(f"{len(live_map)} lazy live fields ready")\
+# Production sq-first finals (the canonical functions).
+SQF_FN = {
+    "gradtheta2": calculate_fields.grad_theta2,
+    "gradsalt2": calculate_fields.grad_salt2,
+    "gradeta2": calculate_fields.grad_eta2,
+    "gradrho2": calculate_fields.grad_rho2,
+    "gradb2": calculate_fields.grad_b2,
+}
+
+
+def _sqfirst_parts(da):
+    \"\"\"Model-axis squared components, square-BEFORE-interp.
+
+    Mirrors the stencils of
+    ``ng.calculate_grad_squared_tracer`` (their sum IS that
+    function); exposed separately only for the component columns.
+    Inputs: da (DataArray at tracer points).
+    Outputs: (dx2_c, dy2_c) at tracer points, lazy.
+    Generated by LH and Claude
+    \"\"\"
+    dx = xgrid.diff(da, 'X') / ds_merge.dxC
+    dy = xgrid.diff(da, 'Y') / ds_merge.dyC
+    return (xgrid.interp(dx ** 2, 'X', boundary='fill'),
+            xgrid.interp(dy ** 2, 'Y', boundary='fill'))
+
+
+live_map = {}
+for _f, (_raw, _da) in TRACERS.items():
+    live_map[_raw] = _da
+    # ECCO variant (legacy recipe, inline): geographic components,
+    # squared AFTER the centre interpolation + rotation.
+    _gx, _gy = ng.calculate_native_gradient_tracer(
+        _da, ds_merge, grid=xgrid)
+    live_map[f"{_f}_dx2_ecco"] = _gx ** 2
+    live_map[f"{_f}_dy2_ecco"] = _gy ** 2
+    live_map[f"{_f}_ecco"] = _gx ** 2 + _gy ** 2
+    # sq-first variant: production function + model-axis parts.
+    _px, _py = _sqfirst_parts(_da)
+    live_map[f"{_f}_dx2_sqf"] = _px
+    live_map[f"{_f}_dy2_sqf"] = _py
+    live_map[f"{_f}_sqfirst"] = SQF_FN[_f](ds_merge, xgrid)
+
+# Kinematics.  ECCO variant inline from the centred Jacobian;
+# sq-first = the production strain/okubo_weiss (C-grid-native
+# invariants, shared).
+jac = calculate_fields.compute_velocity_jacobian(ds_merge, xgrid)
+_sn = jac.du_dx - jac.dv_dy
+_ss = jac.du_dy + jac.dv_dx
+_zeta = jac.dv_dx - jac.du_dy
+live_map["strain_mag_ecco"] = np.sqrt(_sn ** 2 + _ss ** 2)
+live_map["okubo_weiss_ecco"] = _sn ** 2 + _ss ** 2 - _zeta ** 2
+
+_mag, _, _ = calculate_fields.strain(ds_merge, xgrid, jacobian=jac)
+live_map["strain_mag_sqfirst"] = _mag
+live_map["okubo_weiss_sqfirst"] = (
+    calculate_fields.okubo_weiss_parameter(ds_merge, xgrid))
+print(f"{len(live_map)} lazy live fields")\
 """)
 
 code(cells, """\
-# Section 4b: batch-stitch the live fields, slice to REGION only.
+# Section 3b: batch-stitch and slice to REGION only.
 BATCH = 4
 mask = {"_land_mask": (ds_merge.hFacC == 0)}
-names = [s for s in live_map if s in STAGES]
+names = list(live_map)
 live_region = {}
 for i0 in range(0, len(names), BATCH):
     grp = names[i0:i0 + BATCH]
@@ -278,111 +235,235 @@ for i0 in range(0, len(names), BATCH):
                                                REGION)
     del chw
     print(f"stitched + sliced: {grp}")
-print(f"live fields ready: {sorted(live_region)}")\
+print(f"{len(live_region)} fields ready")\
 """)
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Section 5 — STORE slices
+## Section 4 — Plotting helper (inlined)
 
-Store channels sliced to `REGION`.  Stages that are not store
-channels (gradient / Jacobian components, `rho_theta`) stay
-live-only and show a placeholder in the store rows.\
+Notebook-local by design (LH decision) — this layout exists only
+for this A/B.  Sequential colormaps only (diverging maps hide
+speckle in their white midpoint); one shared norm per column; log
+norms for non-negative columns with the TOP end unclipped so
+extreme pixels stay visible; exact zeros clipped to the bottom
+colour (not gray, which would read as land).\
 """)
 
 code(cells, """\
-# Section 5: slice the store channels used by any chain to REGION.
-store_region = {}
-for _subset, _rd in readers.items():
-    for ch in _rd.channel_names:
-        if ch in STAGES and ch not in store_region:
-            arr = _rd.get_channel_snapshot(ch)
-            store_region[ch] = regions.select_region(arr, XC, YC,
-                                                     REGION)
-            del arr
-print(f"stored stages   : {sorted(store_region)}")
-print(f"live-only stages: {sorted(set(STAGES) - set(store_region))}")\
-""")
+# Section 4: 4-row (ECCO / sq-first x full / zoom) stage grid.
+import matplotlib.colors as mcolors
+from dbof.plotting.pipeline_grids import LAND_COLOR
 
-# ---------------------------------------------------------------------
-md(cells, """\
-## Section 6 — Stage-by-stage sparkle figures
-
-How to read each figure: scan the columns left to right and find
-the **first** column whose zoom rows show isolated extreme pixels.
-
-- Sparkle already in column 1 (raw) → it's in the model data.
-- First appears in the gradient / Jacobian columns → created by the
-  native-grid differencing.
-- Only in the final column → created by the squaring / combination
-  step (which amplifies: a 10x outlier becomes 100x).
-
-Store and live rows share the column norm — if they sparkle
-identically, precision handling is ruled out (consistent with the
-~1e-7 consistency-check residuals).\
-""")
-
-code(cells, """\
-# Section 6 helper: one call per final field.
-from dbof.plotting.sparkle_grids import sparkle_stage_grid
+ROW_LABELS = ("ECCO (full)", "ECCO (zoom)",
+              "sq-first (full)", "sq-first (zoom)")
+ROBUST_PCT = (1.0, 99.9)
+PANEL_W, PANEL_H = 4.4, 3.1
 
 
-def sparkle_figure(field, cmap="viridis"):
-    \"\"\"Render the 4-row stage grid for one final field.
-
-    Inputs: field (str) — key into CHAINS; cmap (str) — sequential
-    colormap name.  Outputs: displays the figure.
+def _stage_norm(arrays):
+    \"\"\"Shared colour norm for one column: log when non-negative
+    (zeros allowed — clipped at draw time), robust linear otherwise.
+    Inputs: arrays (list of np.ndarray or None).
+    Outputs: matplotlib Normalize/LogNorm.
     Generated by LH and Claude
     \"\"\"
-    chain = CHAINS[field]
-    store_xyz = {s: store_region.get(s) for s in chain}
-    live_xyz = {s: live_region[s] for s in chain}
-    sparkle_stage_grid(
-        chain, store_xyz, live_xyz, REGION,
-        half_km=ZOOM_HALF_KM, cmap=cmap,
-        suptitle=(f"{field} \\u2014 sparkle trace "
-                  f"({REGION}, store vs live)"),
-    )
-    plt.show()\
+    vals = np.concatenate(
+        [a[np.isfinite(a)].ravel() for a in arrays
+         if a is not None])
+    if vals.size == 0:
+        return mcolors.Normalize(0.0, 1.0)
+    pos = vals[vals > 0]
+    if vals.min() >= 0 and pos.size:
+        lo = np.percentile(pos, ROBUST_PCT[0])
+        hi = pos.max()            # keep the sparkle end unclipped
+        if lo < hi:
+            return mcolors.LogNorm(vmin=lo, vmax=hi)
+    lo, hi = np.percentile(vals, ROBUST_PCT)
+    if lo == hi:
+        lo, hi = vals.min(), vals.max()
+    return mcolors.Normalize(vmin=lo, vmax=hi)
+
+
+def _panel(ax, xyz, norm, cmap):
+    \"\"\"One pcolormesh panel (plain axes, gray land, zero-clip).
+    Inputs: ax; xyz ((x, y, arr) or None); norm; cmap.
+    Outputs: the QuadMesh or None (placeholder).
+    Generated by LH and Claude
+    \"\"\"
+    ax.set_facecolor(LAND_COLOR)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if xyz is None:
+        ax.text(0.5, 0.5, "n/a", ha="center", va="center",
+                fontsize=9, style="italic",
+                transform=ax.transAxes)
+        return None
+    x, y, arr = xyz
+    if isinstance(norm, mcolors.LogNorm):
+        arr = np.clip(arr, norm.vmin, None)   # zeros -> bottom colour
+    return ax.pcolormesh(x, y, arr, norm=norm, cmap=cmap,
+                         shading="nearest")
+
+
+def stage_grid(labels, top_xyz, bot_xyz, *, cmap, suptitle):
+    \"\"\"4-row grid: rows 1-2 = top variant (full/zoom), rows 3-4 =
+    bottom variant; columns = labels; shared per-column norms.
+    Inputs: labels (list[str]); top_xyz/bot_xyz (dict label ->
+    (x, y, arr) or None); cmap; suptitle.
+    Outputs: displays the figure.
+    Generated by LH and Claude
+    \"\"\"
+    n = len(labels)
+    fig, axes = plt.subplots(
+        4, n, figsize=(PANEL_W * n, PANEL_H * 4 + 0.8),
+        squeeze=False)
+    for col, lab in enumerate(labels):
+        t_full, b_full = top_xyz.get(lab), bot_xyz.get(lab)
+        t_zoom = (regions.crop_zoom(*t_full, REGION,
+                                    half_km=ZOOM_HALF_KM)
+                  if t_full is not None else None)
+        b_zoom = (regions.crop_zoom(*b_full, REGION,
+                                    half_km=ZOOM_HALF_KM)
+                  if b_full is not None else None)
+        norm = _stage_norm(
+            [t_full[2] if t_full is not None else None,
+             b_full[2] if b_full is not None else None])
+        mappable = None
+        for row, xyz in enumerate((t_full, t_zoom, b_full,
+                                   b_zoom)):
+            pm = _panel(axes[row, col], xyz, norm, cmap)
+            mappable = pm or mappable
+        axes[0, col].set_title(lab, fontsize=11)
+        if mappable is not None:
+            fig.colorbar(mappable, ax=list(axes[:, col]),
+                         orientation="horizontal", shrink=0.85,
+                         pad=0.02, aspect=30)
+    for row, label in enumerate(ROW_LABELS):
+        axes[row, 0].set_ylabel(label, fontsize=10)
+    fig.suptitle(suptitle, fontsize=13)
+    plt.show()
+
+
+def ecco_vs_sqfirst(field, cmap=cmo.amp):
+    \"\"\"Tracer-grad² A/B: raw, (d/dx)², (d/dy)², final.
+    Component columns: ECCO rows = geographic, sq-first rows =
+    MODEL-axis (see header caveat — swapped on rotated faces).
+    Inputs: field (str, key into TRACERS); cmap.
+    Outputs: displays the figure.
+    Generated by LH and Claude
+    \"\"\"
+    raw = TRACERS[field][0]
+    labels = [raw, "(d/dx)2", "(d/dy)2", field]
+    ecco = {raw: live_region[raw],
+            "(d/dx)2": live_region[f"{field}_dx2_ecco"],
+            "(d/dy)2": live_region[f"{field}_dy2_ecco"],
+            field: live_region[f"{field}_ecco"]}
+    sqf = {raw: live_region[raw],
+           "(d/dx)2": live_region[f"{field}_dx2_sqf"],
+           "(d/dy)2": live_region[f"{field}_dy2_sqf"],
+           field: live_region[f"{field}_sqfirst"]}
+    stage_grid(labels, ecco, sqf, cmap=cmap,
+               suptitle=(f"{field} \\u2014 ECCO (rows 1-2) vs "
+                         f"square-first (rows 3-4), {REGION}"))
+
+
+def kin_vs_sqfirst(field, cmap=cmo.amp):
+    \"\"\"Kinematic A/B (single column): ECCO vs C-grid-native.
+    Inputs: field ('strain_mag' or 'okubo_weiss'); cmap.
+    Outputs: displays the figure.
+    Generated by LH and Claude
+    \"\"\"
+    stage_grid(
+        [field], {field: live_region[f"{field}_ecco"]},
+        {field: live_region[f"{field}_sqfirst"]}, cmap=cmap,
+        suptitle=(f"{field} \\u2014 ECCO vs C-grid-native "
+                  f"sq-first, {REGION}"))
+
+print("ready: ecco_vs_sqfirst(...), kin_vs_sqfirst(...)")\
 """)
-
-FIELDS = [
-    ("gradtheta2",
-     "Sparkle candidate #1 (see the validation Figure 1).\n"
-     "Columns: raw Theta → dTheta_dx → dTheta_dy → |∇Θ|²."),
-    ("gradsalt2", None),
-    ("gradeta2", None),
-    ("gradrho2",
-     "rho_theta is live-only (the store carries `density` =\n"
-     "rho_theta − 1000)."),
-    ("gradb2", None),
-    ("relative_vorticity",
-     "Kinematic chain: rotated U, V → Jacobian components → ζ.\n"
-     "Sequential colormap on the signed field — speckle shows as\n"
-     "isolated bright/dark dots."),
-    ("divergence", None),
-    ("strain_n", None),
-    ("strain_s", None),
-    ("strain_mag", None),
-    ("okubo_weiss", None),
-]
-
-for name, note in FIELDS:
-    title = f"### {name}"
-    if note:
-        title += "\n\n" + note
-    md(cells, title)
-    code(cells, f'sparkle_figure("{name}")')
 
 # ---------------------------------------------------------------------
 md(cells, """\
-## Findings
+## Section 5 — Figures
 
-*(fill in after running)*
+Read each figure left to right: the ECCO zooms (row 2) show white
+specks; the sq-first zooms (row 4) show the same fronts without
+them.  Any white surviving in BOTH is a genuine critical point.\
+""")
 
-- First stage showing sparkle, per chain:
-- Store vs live identical? (expected: yes)
-- Interpretation:\
+for name in ("gradtheta2", "gradsalt2", "gradeta2", "gradrho2",
+             "gradb2"):
+    note = ""
+    if name == "gradeta2":
+        note = ("\n\nControl: Eta is smooth at grid scale,\n"
+                "so the two variants should look\n"
+                "near-identical.")
+    md(cells, f"### {name}{note}")
+    code(cells, f'ecco_vs_sqfirst("{name}")')
+
+for name in ("strain_mag", "okubo_weiss"):
+    note = ("\n\nSigned field — linear scale; look for the "
+            "salt-and-pepper extremes calming."
+            if name == "okubo_weiss" else "")
+    md(cells, f"### {name}{note}")
+    code(cells, f'kin_vs_sqfirst("{name}")')
+
+# ---------------------------------------------------------------------
+md(cells, """\
+## Section 6 — ECCO vs square-first: regional RMSE
+
+Bulk size of the discretization difference per field.  Plain RMSE
+is dominated by the large values (fronts, where the two forms
+agree); the log-space RMSE weights the small values where the
+cancellation speckle lives — expect it to be much larger.\
+""")
+
+code(cells, """\
+# Section 6: RMSE between the ECCO and sq-first variants (REGION).
+_PAIRS = ([(f, f"{f}_ecco", f"{f}_sqfirst") for f in TRACERS]
+          + [("strain_mag", "strain_mag_ecco",
+              "strain_mag_sqfirst"),
+             ("okubo_weiss", "okubo_weiss_ecco",
+              "okubo_weiss_sqfirst")])
+
+print(f"{'field':22s} {'RMSE':>11s} {'RMSE/RMS':>9s} "
+      f"{'log10-RMSE':>11s}   ({REGION})")
+for _name, _ke, _ks in _PAIRS:
+    _, _, a = live_region[_ke]
+    _, _, b = live_region[_ks]
+    m = np.isfinite(a) & np.isfinite(b)
+    rmse = float(np.sqrt(np.mean((a[m] - b[m]) ** 2)))
+    rms = float(np.sqrt(np.mean(b[m] ** 2)))
+    # log-space RMSE (positive-definite fields only).
+    mp = m & (a > 0) & (b > 0)
+    lrmse = (float(np.sqrt(np.mean(
+        (np.log10(a[mp]) - np.log10(b[mp])) ** 2)))
+        if mp.sum() else float("nan"))
+    print(f"{_name:22s} {rmse:11.3e} {100*rmse/rms:8.2f}% "
+          f"{lrmse:11.3f}")
+print("\\nlog10-RMSE in decades; driven by the speckle pixels "
+      "(small values), where the two stencils disagree most.")\
+""")
+
+# ---------------------------------------------------------------------
+md(cells, """\
+## Findings (2026-08-05, gulf_stream)
+
+- **Confirmed**: white specks in every ECCO grad² zoom are absent
+  in the square-first rows; frontal structure identical.
+- **gradeta2** (control): no specks either way — Eta has no
+  grid-scale extrema for the interp to cancel.
+- **strain_mag / okubo_weiss**: both improved by the C-grid-native
+  square-first invariants.
+- **Component swap**: corr(ECCO dx², sq-first dy²) ≈ 0.9 vs ≈ 0.5
+  same-name on this (rotated) face — rotation invariance of the
+  SUM verified; individual geographic component-squares are
+  impossible square-first (the rotation cross term is destroyed
+  by squaring).
+- Production switched to square-first
+  (`calculate_grad_squared_tracer`, `kinematic_invariants`) —
+  see docs/Fields.md and prompts/field_validation.md.\
 """)
 
 nb = {
