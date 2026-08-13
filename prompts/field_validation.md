@@ -786,7 +786,7 @@ frontal_structure now shares the same generator):
   ``Wstar-F-gradb_Bachman-etal(2021)_Kerguelen-maps.png`` /
   ``..._Kerguelen-pdfs.png`` in ``literature_figures/``.
 - Builder now supports per-subset regeneration
-  (``python dev/build_field_validation_notebooks.py <subset ...>``).
+  (``python notebooks/notebooks_field_validation/builders/build_field_validation_notebooks.py <subset ...>``).
 - kinematic Section 6 added (kinematic.ipynb regenerated — needs
   re-run): (6.1) Bachman et al. (2021) ζ/W Kerguelen maps (b → 
   frontal_structure, W* → frontogenesis per cross-reference rule;
@@ -955,7 +955,7 @@ RUN cell, which is exactly its purpose.
   explicit pass/fail test of pipeline plumbing.  native_fields /
   icearea have no derived relations → no cell.
 - Notebook generator committed as
-  ``dev/build_field_validation_notebooks.py`` (canonical source for
+  ``notebooks/notebooks_field_validation/builders/build_field_validation_notebooks.py`` (canonical source for
   all six surface notebooks; edit templates/specs there and re-run).
 - ``notebooks_field_validation/precision_provenance.ipynb`` added
   (standalone; does NOT touch the executed subset notebooks):
@@ -995,7 +995,7 @@ so the sparkle is created during calculation — the question is at
 which stage.
 
 New: `notebooks/notebooks_dev/field_validation_sparkle.ipynb`
-(canonical builder `dev/build_sparkle_notebook.py`, 37 cells) +
+(canonical builder `notebooks/notebooks_field_validation/builders/build_sparkle_notebook.py`, 37 cells) +
 `src/dbof/plotting/sparkle_grids.py` (`sparkle_stage_grid`).
 
 Design (LH spec):
@@ -1297,7 +1297,7 @@ S, ±90 near-compensation).  gradrho2 the CHANNEL is untouched
 (keeps full-EOS ρ differencing; difference to D_lin = cabbeling).
 
 NEW notebooks/notebooks_field_validation/surface_fields/
-turner_angle.ipynb (builder dev/build_turner_notebook.py, 15 cells):
+turner_angle.ipynb (builder notebooks/notebooks_field_validation/builders/build_turner_notebook.py, 15 cells):
 rows 1–2 = STORE Tu full/zoom, rows 3–4 = closed-set Tu (masked)
 full/zoom, fixed ±90° balance scale; plus Tu histograms (watch the
 spurious ±90° pileup shrink) and a masked-fraction printout for

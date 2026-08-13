@@ -1,4 +1,10 @@
-"""Vertical-grid schematic for the LLC4320 test notebooks.
+"""SUPERSEDED -- kept for reference only.
+
+Both drawing functions below now live in
+``src/dbof/plotting/schematics.py``, which is what Grid.ipynb
+and the docs PNGs import.  Edit THAT module, not this file.
+
+Vertical-grid schematic for the LLC4320 test notebooks.
 
 Draws where each vertical quantity lives on an MITgcm/ECCO column and names
 every coordinate and spacing variable at the depth it belongs to.
