@@ -130,6 +130,9 @@ store the DEPTH pipeline uses (`grid_setup.set_up_grid("DEPTH", ...)`).
 Only the 1-D vertical coordinates are pulled, so this is a small read;
 the full grid is ~1.5 GB and is NOT loaded here.
 
+**Note:** the raw LLC4320 grid has 90 vertical levels reaching ~7000 m;
+this pipeline stores only the top 51 (to ~969 m).
+
 Columns, all in metres and all POSITIVE DOWNWARD:
 
 | column | meaning |
@@ -200,6 +203,398 @@ if "drF" in vert:
 with pd.option_context("display.max_rows", None,
                        "display.float_format", "{:.3f}".format):
     display(levels)\
+""")
+
+# ---------------------------------------------------------------------
+md(cells, """\
+## Section 3.5 — Is the vertical spacing the same at every 2D point?
+
+Half yes, half no, and the distinction matters for every vertical
+average in the pipeline.
+
+**The coordinate is 1-D.**  `Z`, `Zl`, `Zu`, `Zp1` and `drF` carry a
+single `k` axis — Section 3a prints their shapes — so the NOMINAL
+levels are identical over the whole globe.
+
+**The effective thickness is 2-D.**  MITgcm shaves the deepest wet cell
+of each column so the column bottom lands on the true bathymetry
+instead of on the nearest grid interface (["partial
+cells"](https://mitgcm.readthedocs.io/en/latest/algorithm/vert-grid.html)).
+The open fraction is `hFacC(k, j, i)`: 1 for a fully wet cell, 0 below
+the seafloor, and something in between in exactly one cell per column.
+So the thickness to weight by is `hFacC * drF`, not `drF`, and two
+things ARE per-column: how many levels are wet, and how thick the last
+one is.
+
+The identity that ties it to the map:
+
+$$\\sum_k \\mathrm{hFacC}[k,j,i]\\;\\mathrm{drF}[k]\\;=\\;
+\\mathrm{Depth}[j,i]$$
+
+— the 2-D bathymetry field *is* the vertical grid's 2-D content.
+
+**Two practical traps, both handled below.**
+
+*Truncation.*  The DEPTH store keeps only the top 51 levels, about
+969 m (Section 3b prints the exact sum).  A column deeper than that
+never reaches its seafloor within the store, so every one of its wet
+cells is full and its bottom `hFacC` is exactly 1.0 — that is
+truncation, NOT the absence of a partial cell.  Partial cells are
+visible only on the shelf and slope, so every partial-cell diagnostic
+here is restricted to columns that do reach the bottom.
+
+*Cost.*  `hFacC` is 51 x 13 x 4320^2 (~49 GB) and the store is chunked
+`(k=1, face=13, j=720, i=720)`, so striding saves no I/O — a strided
+read still touches every chunk.  The 3-D work below runs on ONE
+contiguous 720x720 native tile, chosen by a cheap 2-D scan so it
+actually contains shelf.\
+""")
+
+code(cells, """\
+# Section 3.5a: global Depth (2-D store) + the raw 3-D grid (hFacC).
+import cmocean.cm as cmo
+import xarray as xr
+
+import dbof.io.filesystems as filesystems
+import dbof.global_dataset_creation.zarr_grid_global as zarr_grid
+from dbof.plotting import regions
+from dbof.plotting.pipeline_grids import LAND_COLOR
+# Same storage options the DEPTH loader uses (private, but replicating
+# it here would let the two drift apart).
+from dbof.llc4320_ingestion.get_raw_data import (
+    _llc_depth_storage_options)
+
+S3_ENDPOINT = _src["s3_endpoint"]
+
+# --- the 2-D global grid store (already stitched to lat/lon) --------
+fs_grid, _ = filesystems.create_s3_filesystems(S3_ENDPOINT)
+reader2d = zarr_grid.GlobalGridZarrReader(
+    bucket="dbof", folder="LLC4320_GRID_2D",
+    dataset_name="llc4320_grid.zarr", fs=fs_grid,
+)
+_XC, _YC = reader2d.lon, reader2d.lat
+_depth2d = reader2d["Depth"]
+glon, glat, gdepth = regions.select_region(_depth2d, _XC, _YC,
+                                           "global")
+gdepth = np.where(gdepth > 0, gdepth, np.nan)     # land -> NaN
+del _XC, _YC, _depth2d                            # ~900 MB each
+print(f"global Depth, {regions.GLOBAL_DOWNSAMPLE}x downsampled: "
+      f"{gdepth.shape}")
+
+# --- the raw DEPTH grid store, for the 3-D hFacC -------------------
+_bkt = _src["bucket"].strip("/")
+_fld = _src.get("grid_folder", _src["folder"]).strip("/")
+RAW_GRID_URL = f"s3://{_bkt}/{_fld}/grid.zarr"
+graw = xr.open_zarr(
+    RAW_GRID_URL, consolidated=False,
+    storage_options=_llc_depth_storage_options(S3_ENDPOINT),
+)
+print(f"\\n{RAW_GRID_URL}")
+print(f"  Z    dims {graw.Z.dims}    shape {graw.Z.shape}")
+print(f"  drF  dims {graw.drF.dims}  shape {graw.drF.shape}")
+print(f"  hFacC dims {graw.hFacC.dims}  shape {graw.hFacC.shape}")
+print("\\n-> the vertical COORDINATE is 1-D (k only); the only 2-D "
+      "vertical\\n   information in the grid is hFacC.")\
+""")
+
+code(cells, """\
+# Section 3.5b: pick a tile that actually contains partial cells.
+# Reads Depth for ONE face (2-D, ~75 MB retained) and ranks the
+# 720x720 tiles by how many columns reach the seafloor within the
+# stored levels.  Depth < Z_MAX is a proxy for that; the exact test
+# (n_wet < nk) needs hFacC and is applied in 3.5c.
+TILE_FACE = 1               # <-- change me to scan another face
+TILE_N = 720                # one native chunk
+TILE_J0 = TILE_I0 = None    # None = auto-pick the best tile below
+
+Z_MAX = float(vert["drF"].sum())
+print(f"stored column reaches {Z_MAX:.1f} m "
+      f"({vert['Z'].size} levels) -- anything deeper is TRUNCATED\\n")
+
+_depf = graw.Depth.isel(face=TILE_FACE).load().values
+_nt = _depf.shape[0] // TILE_N
+_scan = []
+for _jj in range(_nt):
+    for _ii in range(_nt):
+        _blk = _depf[_jj * TILE_N:(_jj + 1) * TILE_N,
+                     _ii * TILE_N:(_ii + 1) * TILE_N]
+        _oc = _blk > 0
+        _scan.append((_jj * TILE_N, _ii * TILE_N, float(_oc.mean()),
+                      float((_oc & (_blk < Z_MAX)).mean())))
+_scan.sort(key=lambda r: -r[3])
+
+print(f"face {TILE_FACE}: {_nt}x{_nt} tiles of {TILE_N}^2, ranked by "
+      "the share of columns\\nthat reach the seafloor within the "
+      "stored levels\\n")
+print(f"{'j0':>6s} {'i0':>6s} {'ocean':>8s} {'reaches bottom':>15s}")
+for _r in _scan[:8]:
+    print(f"{_r[0]:6d} {_r[1]:6d} {100*_r[2]:7.1f}% {100*_r[3]:14.1f}%")
+
+if TILE_J0 is None or TILE_I0 is None:
+    TILE_J0, TILE_I0 = _scan[0][0], _scan[0][1]
+    print(f"\\nauto-picked tile j0={TILE_J0}, i0={TILE_I0} "
+          f"({100*_scan[0][3]:.1f}% of columns reach the bottom)")
+if _scan[0][3] < 0.01:
+    print("\\n!! No tile on this face has meaningful shelf -- panels "
+          "(c)-(f) will be\\n   nearly empty.  Try another TILE_FACE.")
+del _depf\
+""")
+
+code(cells, """\
+# Section 3.5c: per-column diagnostics on that tile.
+_jsl = slice(TILE_J0, TILE_J0 + TILE_N)
+_isl = slice(TILE_I0, TILE_I0 + TILE_N)
+_sel = dict(face=TILE_FACE, j=_jsl, i=_isl)
+
+hfac = graw.hFacC.isel(**_sel).load()          # (k, j, i), one tile
+dep_t = graw.Depth.isel(**_sel).load().values
+lon_t = graw.XC.isel(**_sel).load().values
+lat_t = graw.YC.isel(**_sel).load().values
+drF = xr.DataArray(vert["drF"], dims="k")      # Section 3a, metres
+
+n_wet = (hfac > 0).sum("k").values.astype(float)
+n_part = ((hfac > 0) & (hfac < 1)).sum("k").values
+hfac_bot = hfac.where(hfac > 0).min("k").values   # partials sit at
+#                                                  the BOTTOM, so the
+#                                                  minimum wet value
+#                                                  IS the bottom cell
+thick = (hfac * drF).sum("k").values
+
+_ocean = n_wet > 0
+_full = _ocean & (n_wet < hfac.sizes["k"])     # reaches the seafloor
+_res = thick[_full] - dep_t[_full]
+
+print(f"tile: face {TILE_FACE}, j {_jsl.start}:{_jsl.stop}, "
+      f"i {_isl.start}:{_isl.stop}")
+print(f"  lon {np.nanmin(lon_t):.2f} to {np.nanmax(lon_t):.2f}, "
+      f"lat {np.nanmin(lat_t):.2f} to {np.nanmax(lat_t):.2f}")
+print(f"  ocean columns: {_ocean.sum():,} of {_ocean.size:,}")
+print(f"  reaching the seafloor within {hfac.sizes['k']} levels: "
+      f"{_full.sum():,}")
+print(f"\\ncells with 0 < hFacC < 1 per column: max {n_part.max()} "
+      "(expected <= 1 --\\npartial cells only at the bottom)")
+print(f"distinct wet-level counts: {len(np.unique(n_wet[_ocean]))}")
+print(f"distinct bottom hFacC values (seafloor-reaching columns "
+      f"only): {len(np.unique(np.round(hfac_bot[_full], 6))):,} "
+      f"of {_full.sum():,}")
+if _res.size:
+    print(f"\\nsum(hFacC*drF) - Depth over those columns:"
+          f"\\n  max |residual| {np.abs(_res).max():.3e} m, "
+          f"median {np.median(np.abs(_res)):.3e} m")
+    print("  -> the identity holds; the 2-D bathymetry IS the 2-D "
+          "content of the\\n     vertical grid.")
+else:
+    print("\\n!! No column in this tile reaches the seafloor within "
+          "the stored levels;\\n   panels (c)-(f) will be empty.  "
+          "Pick another tile in 3.5b.")\
+""")
+
+code(cells, """\
+# Section 3.5d: the figure.
+_fig = plt.figure(figsize=(15.0, 8.6), constrained_layout=True)
+_gs = _fig.add_gridspec(2, 3)
+
+# (a) global bathymetry, with the tile boxed.
+_ax = _fig.add_subplot(_gs[0, 0])
+_pm = _ax.pcolormesh(glon, glat, gdepth, cmap=cmo.deep,
+                     shading="nearest")
+_ax.set_facecolor(LAND_COLOR)
+_ax.plot([lon_t.min(), lon_t.max(), lon_t.max(), lon_t.min(),
+          lon_t.min()],
+         [lat_t.min(), lat_t.min(), lat_t.max(), lat_t.max(),
+          lat_t.min()], color="crimson", lw=1.6)
+_fig.colorbar(_pm, ax=_ax, shrink=0.85, label="Depth (m)")
+_ax.set_title("(a) Depth, global 2-D grid store\\n(crimson = the tile "
+              "used below)", fontsize=10)
+_ax.set_xlabel("longitude", fontsize=8)
+_ax.set_ylabel("latitude", fontsize=8)
+_ax.tick_params(labelsize=7)
+
+# (b) how many levels are wet -- the same information, quantized.
+_ax = _fig.add_subplot(_gs[0, 1])
+_pm = _ax.pcolormesh(np.where(_ocean, n_wet, np.nan), cmap=cmo.deep,
+                     shading="nearest")
+_ax.set_facecolor(LAND_COLOR)
+_fig.colorbar(_pm, ax=_ax, shrink=0.85, label="wet levels per column")
+_ax.set_title(f"(b) number of wet levels\\n(saturates at "
+              f"{hfac.sizes['k']} where the column is truncated)",
+              fontsize=10)
+_ax.set_xlabel("i (native)", fontsize=8)
+_ax.set_ylabel("j (native)", fontsize=8)
+_ax.tick_params(labelsize=7)
+
+# (c) the partial fraction of the deepest wet cell.
+_ax = _fig.add_subplot(_gs[0, 2])
+_pm = _ax.pcolormesh(np.where(_full, hfac_bot, np.nan),
+                     cmap=cmo.amp, vmin=0, vmax=1, shading="nearest")
+_ax.set_facecolor(LAND_COLOR)
+_fig.colorbar(_pm, ax=_ax, shrink=0.85, label="bottom-cell hFacC")
+_ax.set_title("(c) open fraction of the DEEPEST wet cell\\n(blank = "
+              "land, or deeper than the stored levels)", fontsize=10)
+_ax.set_xlabel("i (native)", fontsize=8)
+_ax.set_ylabel("j (native)", fontsize=8)
+_ax.tick_params(labelsize=7)
+
+# (d) a handful of columns side by side.
+_ax = _fig.add_subplot(_gs[1, 0])
+# Seafloor-reaching columns only -- a truncated column would draw its
+# crimson bottom below the deepest stored interface.
+_ord = np.argsort(dep_t[_full])
+_deps = dep_t[_full][_ord]
+_nw = n_wet[_full][_ord]
+_pick = np.linspace(0.15, 0.95, 5)
+_ifc = vert["Zp1"]
+for _c, _q in enumerate(_pick):
+    if _deps.size == 0:
+        break
+    _k = int(_q * (_deps.size - 1))
+    _d, _n = float(_deps[_k]), int(_nw[_k])
+    for _z in _ifc[:_n]:
+        _ax.plot([_c - 0.35, _c + 0.35], [_z, _z], color="0.75",
+                 lw=0.8, zorder=1)
+    _ax.plot([_c - 0.35, _c + 0.35], [_d, _d], color="crimson",
+             lw=2.2, zorder=3)
+    _ax.text(_c, _d + 0.03 * _ifc[:_n + 1].max(), f"{_d:.0f} m",
+             ha="center", va="top", fontsize=8, color="crimson")
+_ax.set_ylim(0.0, float(_deps.max()) * 1.08 if _deps.size else 1.0)
+_ax.invert_yaxis()
+_ax.set_xticks(range(len(_pick)))
+_ax.set_xticklabels([f"col {c}" for c in range(len(_pick))],
+                    fontsize=8)
+_ax.set_ylabel("depth (m, positive down)", fontsize=8)
+_ax.set_title("(d) five columns: IDENTICAL interfaces (grey),\\n"
+              "different seafloor (crimson)", fontsize=10)
+_ax.tick_params(labelsize=7)
+
+# (e) are the bottom fractions really spread over (0, 1]?
+_ax = _fig.add_subplot(_gs[1, 1])
+_ax.hist(hfac_bot[_full], bins=50, range=(0, 1), color="steelblue",
+         alpha=0.85, edgecolor="none")
+_ax.set_yscale("log")
+_ax.set_xlabel("bottom-cell hFacC", fontsize=8)
+_ax.set_ylabel("columns", fontsize=8)
+_ax.set_title("(e) bottom-cell open fraction, seafloor-reaching\\n"
+              "columns (flat = every column shaved differently)",
+              fontsize=10)
+_ax.tick_params(labelsize=7)
+
+# (f) the identity, as a picture.
+_ax = _fig.add_subplot(_gs[1, 2])
+_ax.plot(dep_t[_full], thick[_full], ".", ms=1.5, alpha=0.3,
+         color="steelblue")
+_lim = [0, float(np.nanmax(dep_t[_full])) * 1.02] if _full.any() \\
+    else [0, 1]
+_ax.plot(_lim, _lim, color="crimson", lw=1.2, ls="--", label="1:1")
+_ax.set_xlim(_lim)
+_ax.set_ylim(_lim)
+_ax.set_xlabel("Depth (m)", fontsize=8)
+_ax.set_ylabel("sum(hFacC * drF)  (m)", fontsize=8)
+_ax.set_title("(f) the identity: column thickness\\nreproduces the "
+              "bathymetry", fontsize=10)
+_ax.legend(fontsize=8)
+_ax.tick_params(labelsize=7)
+
+_fig.suptitle("The vertical grid is 1-D; the BATHYMETRY makes the "
+              "effective thickness 2-D", fontsize=13)
+plt.show()\
+""")
+
+# ---------------------------------------------------------------------
+md(cells, """\
+## Section 3.6 — The 13 faces, and which way each one points
+
+LLC4320 wraps the globe in 13 square faces: five cube facets plus an
+Arctic cap (face 6).  Laid out in native index space they form the
+familiar staircase — three faces up the left, three more beside them,
+the cap, then two rows of three rotated faces.
+
+**Orientation is the point.**  A unit vector along native `+i` maps to
+`(CS, SN)` in (east, north), so geographic NORTH points `(-SN, CS)` in
+native `(i, j)`.  The crimson arrow on each face is exactly that,
+computed from the grid's own rotation coefficients — not drawn by hand.
+Faces 0–5 and 7–12 differ by ~90 degrees across the cube seam, which is
+why `CS`/`SN` exist at all, why `U`/`V` must be rotated before they
+mean anything geographic, and why a constant-`j` line is NOT a line of
+latitude.  Face 6 is the cap: its angle varies across it, so read its
+single arrow as indicative only.
+
+Cost: one full read of `Depth` (~1 GB) for the land masks — the store's
+chunks span the face axis, so reading face-by-face would multiply the
+traffic by 13 — plus one central chunk of `CS`/`SN`/`XC`/`YC`, which
+covers every face at once for a few tens of MB.\
+""")
+
+code(cells, """\
+# Section 3.6: the 13 LLC faces, and which way each one points.
+# LLC layout: the 5 cube facets, as in the xmitgcm/ECCO tile figure.
+# (col, row), row increasing UP.
+LLC_LAYOUT = {0: (0, 0), 1: (0, 1), 2: (0, 2),
+              3: (1, 0), 4: (1, 1), 5: (1, 2), 6: (1, 3),
+              7: (2, 3), 8: (3, 3), 9: (4, 3),
+              10: (2, 4), 11: (3, 4), 12: (4, 4)}
+FACE_STRIDE = 16        # display only -- the read is chunk-bound
+_CEN = slice(1800, 2520)   # one central chunk, covers ALL faces
+
+# ONE read for all 13 faces: the store's chunks span the face axis, so
+# reading face-by-face would multiply the traffic by 13.
+_dep_all = graw.Depth.load().values
+land = _dep_all[:, ::FACE_STRIDE, ::FACE_STRIDE] <= 0
+del _dep_all
+
+# Grid angle from the rotation coefficients themselves: a unit vector
+# along native +i points (CS, SN) in (east, north), so geographic NORTH
+# points (-SN, CS) in native (i, j).  Median over one central chunk;
+# the cube facets are near-uniform, the Arctic cap (face 6) is not, so
+# treat its arrow as indicative only.
+_cs = graw.CS.isel(j=_CEN, i=_CEN).load().values
+_sn = graw.SN.isel(j=_CEN, i=_CEN).load().values
+_lon = graw.XC.isel(j=_CEN, i=_CEN).load().values
+_lat = graw.YC.isel(j=_CEN, i=_CEN).load().values
+ang = np.median(np.arctan2(_sn, _cs), axis=(1, 2))     # radians
+face_lon = np.median(_lon, axis=(1, 2))
+face_lat = np.median(_lat, axis=(1, 2))
+
+print(f"{'face':>5s} {'centre lon':>11s} {'centre lat':>11s} "
+      f"{'+i axis, deg E of east':>24s}")
+for _f in range(land.shape[0]):
+    print(f"{_f:5d} {face_lon[_f]:10.1f}  {face_lat[_f]:10.1f}  "
+          f"{np.degrees(ang[_f]):23.1f}")
+print("\\n0 deg = native +i points due EAST.  The ~90 deg jump between "
+      "faces 0-5\\nand 7-12 is the cube seam -- it is exactly why CS/SN "
+      "exist, and why a\\nconstant-j line is not a line of latitude.")
+
+_nc = max(c for c, _ in LLC_LAYOUT.values()) + 1
+_nr = max(r for _, r in LLC_LAYOUT.values()) + 1
+_fig, _axes = plt.subplots(_nr, _nc, figsize=(2.35 * _nc, 2.5 * _nr),
+                           layout="constrained")
+for _ax in _axes.ravel():
+    _ax.set_visible(False)
+for _f, (_c, _r) in LLC_LAYOUT.items():
+    _ax = _axes[_nr - 1 - _r, _c]          # row 0 of the array is TOP
+    _ax.set_visible(True)
+    _ax.imshow(np.where(land[_f], 1.0, np.nan), origin="lower",
+               cmap=mcolors.ListedColormap(["forestgreen"]),
+               vmin=0, vmax=1, interpolation="nearest")
+    _n = land[_f].shape[0]
+    _dx, _dy = -np.sin(ang[_f]), np.cos(ang[_f])
+    _ax.arrow(0.5 * _n, 0.5 * _n, 0.28 * _n * _dx, 0.28 * _n * _dy,
+              head_width=0.06 * _n, head_length=0.07 * _n,
+              fc="crimson", ec="crimson", lw=1.4,
+              length_includes_head=True, zorder=5)
+    _ax.text(0.5 * _n + 0.34 * _n * _dx, 0.5 * _n + 0.34 * _n * _dy,
+             "N", color="crimson", fontsize=9, fontweight="bold",
+             ha="center", va="center", zorder=5)
+    _ax.set_title(f"face {_f}\\n+i at {np.degrees(ang[_f]):.0f}"
+                  "\\u00b0 E of east", fontsize=8)
+    _ax.set_xticks([])
+    _ax.set_yticks([])
+    for _s in _ax.spines.values():
+        _s.set_edgecolor("0.4")
+_fig.supxlabel("face x-axis  (native +i \\u2192)", fontsize=10)
+_fig.supylabel("face y-axis  (native +j \\u2191)", fontsize=10)
+_fig.suptitle("The 13 LLC4320 faces in native layout; crimson = "
+              "geographic NORTH", fontsize=13)
+plt.show()\
 """)
 
 # ---------------------------------------------------------------------

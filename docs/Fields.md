@@ -107,6 +107,9 @@ All velocity-gradient fields share one Jacobian computed per subset run.
 Base fields expand across depth suffixes (default: `_sfc`, `_z25m`,
 `_mld`, `_mld_mean`); extra channels are inherently 2D and emitted as-is.
 
+**Note:** the raw LLC4320 grid has 90 vertical levels reaching ~7000 m; this pipeline stores only the top 51 (to ~969 m).  Anything deeper — including winter MLDs in the
+deep-convection regions — is clipped at the bottom of the store.
+
 ### `stratification` (stratification.zarr)
 
 | Channel | Source / function | Definition | Units |
