@@ -53,7 +53,9 @@ from dbof.global_dataset_creation.data_sources import get_data_source
 # NOTE (PR #10): in a future PR ``iterations`` moves to
 # ``llc4320_ingestion.date_iterations`` (a backwards-compatible shim is kept at
 # the old location), so this import will keep working after the rebase.
-from dbof.global_dataset_creation.iterations import mit_date_to_iteration, DATE_FMT
+from dbof.global_dataset_creation.iterations import (
+    mit_date_to_iteration, date_to_run_id, DATE_FMT,
+)
 # ``_git_commit_hash`` moved from ``global_dataset_creation.logging`` to
 # ``global_dataset_creation.metadata`` on main.  Prefer the new location and
 # fall back to the old one so the import survives both before and after the
@@ -140,44 +142,97 @@ def _resolve_s3_source(config_path: Path | None) -> dict:
     return s3
 
 
+#: Leaf directory for tile output under ``{netcdf_base}/{run_id}/{date_prefix}``.
+#: Fixed so tiles stay separate from the per-channel global NetCDFs that
+#: ``run_all_subsets`` writes into the same date folder.
+TILE_SUBDIR = "tiles"
+
+
 def _build_output_path(
     user_output: str | None,
     tile_idx: int,
     date_str: str,
     filename_prefix: str,
+    netcdf_base: str | None = None,
+    run_id: str | None = None,
 ) -> Path:
     """Resolve the NetCDF output path with per-property defaults.
+
+    Three layouts, in precedence order:
+
+    1. ``user_output`` given -- honoured verbatim (or as a directory to
+       drop the default filename into).  Always wins.
+    2. ``netcdf_base`` AND ``run_id`` given -- the repo's standard
+       output tree with a ``tiles`` leaf::
+
+           {netcdf_base}/{run_id}/{date_prefix}/tiles/{default_name}
+
+       matching ``run_all_subsets``'s
+       ``{netcdf_base}/{run_id}/{date_prefix}`` convention, where
+       ``date_prefix`` is ``YYYYMMDD_HHMMSS`` from ``date_to_run_id``.
+    3. neither -- the default filename in CWD (legacy behaviour).
 
     Parameters
     ----------
     user_output : str or None
         User-supplied output path.  Three accepted forms:
-          * ``None`` -- use the default name in CWD.
+          * ``None`` -- fall through to layout 2 or 3.
           * existing directory -- place the default name inside it.
           * full file path -- used verbatim.
     tile_idx : int
         Flat rect-grid tile index, 0..431.
     date_str : str
-        Timestamp string in ``DATE_FMT``; used to build ``YYYYMMDDTHH``.
+        Timestamp string in ``DATE_FMT``; used to build both the
+        ``YYYYMMDDTHH`` filename stamp and the ``YYYYMMDD_HHMMSS``
+        directory prefix.
     filename_prefix : str
         Property-specific prefix (e.g. ``'density'``, ``'theta'``, ``'salt'``).
+    netcdf_base : str or None
+        Root of the output tree (e.g.
+        ``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts``).  Requires
+        ``run_id``.
+    run_id : str or None
+        Dataset version directory under ``netcdf_base`` (e.g. ``'V4'``).
+        Requires ``netcdf_base``.
 
     Returns
     -------
     Path
-        Resolved absolute output path.  Default form is
-        ``./{filename_prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc``.
+        Resolved absolute output path.  The filename is always
+        ``{filename_prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc`` unless
+        ``user_output`` names a file explicitly.
+
+    Raises
+    ------
+    ValueError
+        If exactly one of ``netcdf_base`` / ``run_id`` is supplied -- the
+        structured layout needs both, and silently falling back to CWD
+        would scatter output where the user did not expect it.
     """
     dt = datetime.strptime(date_str, DATE_FMT)
     stamp = dt.strftime("%Y%m%dT%H")
     default_name = f"{filename_prefix}_tile{tile_idx:03d}_{stamp}.nc"
 
-    if user_output is None:
-        return Path(default_name).resolve()
-    p = Path(user_output)
-    if p.is_dir():
-        return (p / default_name).resolve()
-    return p.resolve()
+    # An explicit --output always wins.
+    if user_output is not None:
+        p = Path(user_output)
+        if p.is_dir():
+            return (p / default_name).resolve()
+        return p.resolve()
+
+    if (netcdf_base is None) != (run_id is None):
+        raise ValueError(
+            "netcdf_base and run_id must be supplied together (got "
+            f"netcdf_base={netcdf_base!r}, run_id={run_id!r})."
+        )
+
+    if netcdf_base is not None:
+        return (
+            Path(netcdf_base) / run_id / date_to_run_id(date_str)
+            / TILE_SUBDIR / default_name
+        ).resolve()
+
+    return Path(default_name).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -674,6 +729,8 @@ def run(
     lon: float | None = None,
     lat: float | None = None,
     mask_land: bool = True,
+    netcdf_base: str | None = None,
+    run_id: str | None = None,
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
@@ -711,6 +768,15 @@ def run(
     mask_land : bool, default True
         NaN land cells via ``hFacC == 0`` (see
         :func:`compute_tile_property`).
+    netcdf_base : str or None
+        Root of the standard output tree (e.g.
+        ``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts``).  With
+        ``run_id``, the file lands in
+        ``{netcdf_base}/{run_id}/{date_prefix}/tiles/``.  Ignored when
+        ``output`` is given.
+    run_id : str or None
+        Dataset version directory under ``netcdf_base`` (e.g. ``'V4'``).
+        Must be supplied together with ``netcdf_base``.
 
     Returns
     -------
@@ -765,6 +831,7 @@ def run(
     # Create out_path
     out_path = _build_output_path(
         output, tile.tile_idx, timestamp, filename_prefix=prop.filename_prefix,
+        netcdf_base=netcdf_base, run_id=run_id,
     )
     if out_path.exists() and not clobber:
         logging.info(f"Output file {out_path} already exists. Skipping.")
