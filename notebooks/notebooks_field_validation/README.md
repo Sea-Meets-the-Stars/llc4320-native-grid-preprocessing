@@ -31,6 +31,20 @@ Shared plotting modules: `src/dbof/plotting/` — `regions.py`
 consistency-check residuals are rounding, not grid discrepancies.
 Notebook generator: `dev/build_field_validation_notebooks.py`.
 
+## Documentation notebooks (this folder)
+
+| Notebook | What it documents | Builder |
+|---|---|---|
+| `Grid.ipynb` | The grid itself: Arakawa C-grid schematic, vertical-grid schematic, and the real depth of every level read from `LLC4320_RAW/DEPTH/grid.zarr`.  Section 4 writes `docs/images/*.png` and the depth table in `docs/Grid.md`. | `build_grid_notebook.py` |
+| `field_validation_sparkle.ipynb` | The sparkle A/B: legacy ECCO recipe vs square-before-interp, with the mechanism schematic (Section 0), per-field maps, regional RMSE (Section 6) and percent-error maps + PDFs (Section 7). | `build_sparkle_notebook.py` |
+| `precision_provenance.ipynb` | dtype flow and rounding residuals. | — |
+
+Both schematics and the sparkle cartoon are drawn by
+`dbof.plotting.schematics`, so the docs PNGs and the notebook figures
+cannot drift apart; regenerate the PNGs alone (no data, no
+credentials) with
+`python -m dbof.plotting.schematics --outdir docs/images`.
+
 ## Validation domains (rows of Figures 1–2)
 
 | Row | Region | Box |

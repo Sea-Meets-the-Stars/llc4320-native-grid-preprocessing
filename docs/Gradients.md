@@ -17,6 +17,9 @@ quantity by half a cell: differencing a centre field lands on a face;
 differencing a face field lands on a centre or a corner, depending on
 the direction.  
 
+Where each quantity lives, and the full vertical grid, are drawn in
+[Grid.md](Grid.md).
+
 ## Gradient / Interpolation artifacts
 
 Any time we interpolate a gradient we run the risk of getting an

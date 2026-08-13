@@ -80,6 +80,31 @@ Sequential colormaps only; one shared norm per column.\
 
 # ---------------------------------------------------------------------
 md(cells, """\
+## Section 0 — The mechanism, in one figure
+
+Before any data: the 1-D arithmetic the rest of this notebook is
+evidence for.  Same field, same differences, same point — only the
+ORDER of squaring and interpolating changes, and |∇s|² comes out zero
+one way and a² the other.
+
+Needs no data and no credentials; the same figure is embedded in
+[docs/Gradients.md](../../docs/Gradients.md) and is drawn by
+`dbof.plotting.schematics.draw_sparkle_schematic`.  Grid geometry and
+naming: [docs/Grid.md](../../docs/Grid.md) / `Grid.ipynb`.\
+""")
+
+code(cells, """\
+# Section 0: the 1-D arithmetic behind the sparkle artifact.
+import matplotlib.pyplot as plt
+
+from dbof.plotting import schematics
+
+schematics.draw_sparkle_schematic()
+plt.show()\
+""")
+
+# ---------------------------------------------------------------------
+md(cells, """\
 ## Section 1 — Grid
 
 Only the stitched-grid coordinates are needed (the A/B is entirely
