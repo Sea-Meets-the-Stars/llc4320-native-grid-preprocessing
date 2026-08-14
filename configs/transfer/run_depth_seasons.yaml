@@ -27,9 +27,9 @@ data:
   # Dates for time-varying fields.  Override a single one from CLI with --date.
   date_iterations:
     - '2012-02-29 18:00:00'
-    - '2012-05-16 06:00:00'
-    - '2012-09-18 11:00:00'
-    - '2012-11-15 09:00:00'
+    #- '2012-05-16 06:00:00'
+    #- '2012-09-18 11:00:00'
+    #- '2012-11-15 09:00:00'
 
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
