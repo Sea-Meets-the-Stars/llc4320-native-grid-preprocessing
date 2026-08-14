@@ -1,0 +1,110 @@
+# ---------------------------------------------------------------------------
+# Config for the LLC4320 transfer CLI — full dataset, DEPTH subset.
+#
+# Copies ALL variables (3D depth-resolved + 2D surface + time) from the MIT
+# LLC4320 zarr store to S3.  No computation — pure data transfer.
+#
+# 3D chunk layout: (k=51, face=1, j=720, i=720)
+#   — matches MIT on-disk layout (all depth levels per stored object)
+#   — one S3 GET retrieves the full water column for one face tile
+#
+# Output (under {bucket}/{raw_prefix}/{folder}):
+#   dbof/LLC4320_RAW/DEPTH/grid.zarr          — static grid variables (once)
+#   dbof/LLC4320_RAW/DEPTH/{YYYYMMDDTHH}.zarr — time-varying fields (per-date)
+#
+# Usage:
+#   transfer-timestep --config configs/transfer/run_depth.yaml --init-store
+# ---------------------------------------------------------------------------
+
+run:
+  run_id: "transfer_llc4320_depth"
+  log_dir: "./logs"
+
+data:
+  # Path to the full LLC4320 zarr store on the local / cluster filesystem.
+  MIT_data_path: "/orcd/data/abodner/003/LLC4320/LLC4320"
+
+  # Dates for time-varying fields.  Override a single one from CLI with --date.
+  date_iterations:
+    - '2012-02-29 18:00:00'
+    - '2012-05-16 06:00:00'
+    - '2012-09-18 11:00:00'
+    - '2012-11-15 09:00:00'
+
+output:
+  s3_endpoint: "https://s3-west.nrp-nautilus.io"
+  bucket: "dbof/"
+  # All raw transfers live under {bucket}/{raw_prefix}/.
+  raw_prefix: "LLC4320_RAW"
+  # Subset directory read by generate_global.
+  folder: "DEPTH"
+
+# ---------------------------------------------------------------------------
+# Transfer-specific settings
+# ---------------------------------------------------------------------------
+transfer:
+  mode: "all"
+
+  # Static grid variables — written once to grid.zarr.
+  # Geometry, masks, and vertical coordinates.
+  # Dimension coordinates (i, j, face, i_g, j_g, k, k_l, k_u, k_p1) are written
+  # automatically whenever a data variable that uses them is transferred.
+  static_variables:
+    - XC
+    - YC
+    - XG
+    - YG
+    - Depth
+    - CS
+    - SN
+    - drC
+    - drF
+    - dxC
+    - dxF
+    - dxG
+    - dxV
+    - dyC
+    - dyF
+    - dyG
+    - dyU
+    - hFacC
+    - hFacS
+    - hFacW
+    - mask_c
+    - mask_s
+    - mask_w
+    - Z
+    - Zl
+    - Zu
+    - Zp1
+    - PHrefC
+    - PHrefF
+    - rhoRef
+    - rA
+    - rAz
+    - rAw
+    - rAs
+  static_dataset_name: "grid.zarr"
+
+  # Time-varying fields — DEPTH subset transfers ALL variables (3D + 2D + time).
+  variables:
+    - Theta
+    - Salt
+    - U
+    - V
+    - W
+    - Eta
+    - oceTAUX
+    - oceTAUY
+    - SIarea
+    - oceQnet
+    - time
+
+  # Horizontal tile sizes for zarr chunking (native LLC chunk = 720x720).
+  tile_j: 720
+  tile_i: 720
+
+runtime:
+  zarr_async_concurrency: 128
+  # "synchronous" is safest; use "distributed" for parallel chunk writes.
+  dask_scheduler: "synchronous"
