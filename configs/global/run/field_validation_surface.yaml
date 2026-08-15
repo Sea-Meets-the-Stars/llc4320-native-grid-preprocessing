@@ -36,7 +36,9 @@ run:
 data:
   # Single validation timestep — same date for surface and depth phases.
   date_iterations:
-    - '2012-11-09 12:00:00'
+    #- '2012-11-09 12:00:00'
+    - '2012-11-01 12:00:00'
+    #- '2011-12-12 11:00:00'
 
 output:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
