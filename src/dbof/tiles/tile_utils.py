@@ -334,7 +334,8 @@ def _tile_indexer(ds: xr.Dataset, tile: TileInfo) -> dict:
     return {d: sl for d, sl in candidates.items() if d in ds.dims}
 
 
-def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
+def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo,
+                        chunk: bool = False) -> xr.Dataset:
     """Fetch ``grid.zarr`` from S3 and reduce it to the tile extent.
 
     Staggered dims are sliced too: the grid metrics ``dxC``/``dyG``
@@ -367,6 +368,10 @@ def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
         s3_cfg["grid_folder"],
     )
     ds_grid = preproc_llc_core_data.process_llc4320_3d_grid(co)
+    if chunk:
+        # A CHUNKS folder ships its own grid.zarr, already at the tile
+        # extent and sharing the tracers' coords.
+        return ds_grid.compute()
     ds_grid_tile = ds_grid.isel(
         face=[tile.face_idx],
         **_tile_indexer(ds_grid, tile),
@@ -424,8 +429,10 @@ def _load_tracers_for_tile(
         ),
     )
     # A CHUNKS store is already one tile, so the face-local window does
-    # not apply -- its j/i run 0..719, not 2160..2879.
+    # not apply.  It also carries a singleton time dim.
     if chunk:
+        if ds.sizes.get("time") == 1:
+            ds = ds.isel(time=0, drop=True)
         return ds
 
     # One shared indexer slices tracer AND staggered horizontal dims
@@ -852,7 +859,7 @@ def run(
             return out_path
 
     # 3: load grid for the tile (output coords, metrics, hFacC mask).
-    ds_grid_tile = _load_grid_for_tile(s3_cfg, tile)
+    ds_grid_tile = _load_grid_for_tile(s3_cfg, tile, chunk=chunk)
 
     # 4-5: lazy-open tracers (only the vars this property needs) and
     # slice.  Properties with no tracer inputs (e.g. coriolis_f) still
