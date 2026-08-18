@@ -379,6 +379,7 @@ def _load_tracers_for_tile(
     date_str: str,
     tile: TileInfo,
     vars_needed: list[str],
+    chunk: bool = False,
 ) -> xr.Dataset:
     """Open the timestep zarr lazily and slice down to the tile.
 
@@ -393,6 +394,9 @@ def _load_tracers_for_tile(
     vars_needed : list of str
         Tracer variable names to request from the timestep store
         (e.g. ``['Theta', 'Salt']``).
+    chunk : bool
+        The store is a CHUNKS store -- already one tile, so neither the
+        face selection nor the face-local slice applies.
 
     Returns
     -------
@@ -410,7 +414,7 @@ def _load_tracers_for_tile(
         s3_cfg["bucket"],
         s3_cfg["folder"],
         date_str,
-        face_range=[tile.face_idx],
+        face_range=None if chunk else [tile.face_idx],
         vars_requested=vars_needed,
         # Depth pipeline: full water column per S3 GET + cache-disabled options
         # so dask retries always re-fetch (matches generate_global's DEPTH path).
@@ -419,6 +423,11 @@ def _load_tracers_for_tile(
             s3_cfg["s3_endpoint"]
         ),
     )
+    # A CHUNKS store is already one tile, so the face-local window does
+    # not apply -- its j/i run 0..719, not 2160..2879.
+    if chunk:
+        return ds
+
     # One shared indexer slices tracer AND staggered horizontal dims
     # (identical ranges -- tiles are chunk-aligned); k/k_l stay full.
     ds_tile = ds.isel(**_tile_indexer(ds, tile))
@@ -731,6 +740,8 @@ def run(
     mask_land: bool = True,
     netcdf_base: str | None = None,
     run_id: str | None = None,
+    chunk: bool = False,
+    write: bool = True,
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
@@ -829,13 +840,16 @@ def run(
     )
 
     # Create out_path
-    out_path = _build_output_path(
-        output, tile.tile_idx, timestamp, filename_prefix=prop.filename_prefix,
-        netcdf_base=netcdf_base, run_id=run_id,
-    )
-    if out_path.exists() and not clobber:
-        logging.info(f"Output file {out_path} already exists. Skipping.")
-        return out_path
+    out_path = None
+    if write:
+        out_path = _build_output_path(
+            output, tile.tile_idx, timestamp,
+            filename_prefix=prop.filename_prefix,
+            netcdf_base=netcdf_base, run_id=run_id,
+        )
+        if out_path.exists() and not clobber:
+            logging.info(f"Output file {out_path} already exists. Skipping.")
+            return out_path
 
     # 3: load grid for the tile (output coords, metrics, hFacC mask).
     ds_grid_tile = _load_grid_for_tile(s3_cfg, tile)
@@ -845,6 +859,7 @@ def run(
     # get a valid (empty) dataset merged with the grid below.
     ds_tracers_tile = _load_tracers_for_tile(
         s3_cfg, timestamp, tile, vars_needed=list(prop.vars_needed),
+        chunk=chunk,
     ) if prop.vars_needed else xr.Dataset()
 
     # 5b: merged tile dataset + LOCAL xgcm grid (no face connections).
@@ -866,6 +881,9 @@ def run(
         rect_i_user=i_rect,
         rect_j_user=j_rect,
     )
+
+    if not write:
+        return ds_out
 
     # 8: resolve filename and save.
 
