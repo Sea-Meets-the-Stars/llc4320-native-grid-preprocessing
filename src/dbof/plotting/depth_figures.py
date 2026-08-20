@@ -74,6 +74,19 @@ LEVEL_TITLES = {
 #: Default half-width of the zoom box, in km (so a 200 x 200 km square).
 ZOOM_HALF_KM = 100.0
 
+#: Colours for the profile locations, in FIXED order -- never cycled.
+#: Okabe-Ito, the colourblind-safe qualitative set that is also the de
+#: facto standard for oceanography figures.  Validated all-pairs under
+#: deuteranopia / protanopia / tritanopia: the worst pair (purple vs
+#: green) sits at dE 7.6, inside the floor band that is permissible ONLY
+#: with a second, non-colour channel -- which is why every location also
+#: carries its NUMBER on the map and in the legend.  Identity here never
+#: depends on colour alone.
+LOCATION_COLORS = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00")
+
+#: Default number of profile locations.
+N_PROFILE_POINTS = 5
+
 #: Vertical dimension names, for spotting an inherently 2D field.
 _VERTICAL_DIMS = {"k", "k_l", "k_u", "k_p1", "Z", "Zl", "Zu", "Zp1"}
 
@@ -530,12 +543,18 @@ def depth_map_grid(chain, level_arrays, cmap_cfg, *, region,
                    percentiles=(1, 99),
                    zoom_rows=True,
                    zoom_half_km=ZOOM_HALF_KM,
+                   row_labels=None,
                    suptitle=None):
     """Figure 1: dependency chain across columns, depth levels down rows.
 
     Rows 1..N are the levels over the whole tile; rows N+1..2N repeat
     them zoomed to a ``2 * zoom_half_km`` square, whose position is
     drawn as a crimson box on the whole-tile rows.
+
+    For a field that does NOT vary with depth (``mixed_layer_depth``,
+    ``ml_heat_content`` -- both are integrals over the whole column)
+    pass ``levels=("sfc",)`` and a two-entry ``row_labels``: four
+    identical depth rows would say nothing.
 
     One colour scale per COLUMN, built from the pooled whole-tile values
     of every level and reused by that column's zoom rows -- so both the
@@ -565,6 +584,9 @@ def depth_map_grid(chain, level_arrays, cmap_cfg, *, region,
         Add the zoomed rows.  Turn off for a quick 4-row look.
     zoom_half_km : float
         Half-width of the zoom square, in km.
+    row_labels : sequence[str] or None
+        Override the row labels.  Must match the row count
+        (``2 * len(levels)`` with zooms, else ``len(levels)``).
     suptitle : str or None
         Figure title.
 
@@ -580,6 +602,12 @@ def depth_map_grid(chain, level_arrays, cmap_cfg, *, region,
     n_cols = len(chain)
 
     bounds = zoom_bounds(region, half_km=zoom_half_km) if zoom_rows else None
+
+    if row_labels is not None and len(row_labels) != n_rows:
+        raise ValueError(
+            f"row_labels has {len(row_labels)} entries but the figure has "
+            f"{n_rows} rows"
+        )
 
     fig, axes = plt.subplots(
         n_rows, n_cols, squeeze=False,
@@ -626,9 +654,12 @@ def depth_map_grid(chain, level_arrays, cmap_cfg, *, region,
             if i == 0:
                 ax.set_title(field, fontsize=9)
             if j == 0:
-                title = LEVEL_TITLES.get(lev, lev)
-                if zoomed:
-                    title = f"{title}\n{2 * zoom_half_km:.0f} km zoom"
+                if row_labels is not None:
+                    title = row_labels[i]
+                else:
+                    title = LEVEL_TITLES.get(lev, lev)
+                    if zoomed:
+                        title = f"{title}\n{2 * zoom_half_km:.0f} km zoom"
                 ax.set_ylabel(title, fontsize=9)
 
         if im_last is not None:
@@ -650,6 +681,7 @@ def depth_pdf_grid(chain, level_arrays, cmap_cfg, *,
                    log10_fields=frozenset(),
                    n_bins=N_BINS,
                    log_y=False,
+                   row_labels=None,
                    suptitle=None):
     """Figure 2: PDFs, dependency chain across columns, levels down rows.
 
@@ -674,6 +706,8 @@ def depth_pdf_grid(chain, level_arrays, cmap_cfg, *,
         Shared bin count per field.
     log_y : bool
         Logarithmic density axis.
+    row_labels : sequence[str] or None
+        Override the row labels; must match ``len(levels)``.
     suptitle : str or None
         Figure title.
 
@@ -706,12 +740,295 @@ def depth_pdf_grid(chain, level_arrays, cmap_cfg, *,
             if i == 0:
                 axes[i, j].set_title(field, fontsize=9)
             if j == 0:
-                axes[i, j].set_ylabel(
-                    LEVEL_TITLES.get(levels[i], levels[i]), fontsize=9)
+                lab = (row_labels[i] if row_labels is not None
+                       else LEVEL_TITLES.get(levels[i], levels[i]))
+                axes[i, j].set_ylabel(lab, fontsize=9)
 
     fig.text(0.005, 0.5, "probability density", rotation=90,
              va="center", fontsize=9)
     if suptitle:
         fig.suptitle(suptitle, fontsize=12, y=1.005)
+    fig.tight_layout()
+    return fig, axes
+
+
+# ---------------------------------------------------------------------------
+# Figure 3 -- depth profiles
+# ---------------------------------------------------------------------------
+
+def pick_profile_points(land_mask, *, n=N_PROFILE_POINTS, edge_margin=0,
+                        inset_frac=0.15, seed=42, verbose=True):
+    """Choose *n* well-separated ocean columns to draw profiles at.
+
+    Seeded, so every field in a notebook profiles the SAME columns and
+    the panels are comparable.
+
+    Two constraints shape the choice.  Candidates are restricted to the
+    tile's INTERIOR (``inset_frac`` in from each side), because a plain
+    farthest-point spread pins every profile to a corner -- the least
+    representative water on the tile, and the closest to the invalid
+    rim.  Within that interior they are then spread greedily, because a
+    plain random draw clusters and gives five profiles of the same
+    water.
+
+    Inputs
+    ------
+    land_mask : np.ndarray
+        Boolean ``(j, i)``, True on land -- from :func:`tile_land_mask`.
+    n : int
+        How many locations.  Do not exceed ``len(LOCATION_COLORS)``.
+    edge_margin : int
+        Cells to stay clear of at the tile boundary.
+    inset_frac : float
+        Fraction of the tile to exclude on each side before choosing.
+        0 uses the whole tile (and will hug the corners).
+    seed : int
+        RNG seed.
+    verbose : bool
+        Print the chosen indices.
+
+    Outputs
+    -------
+    list[tuple[int, int]]
+        ``(j, i)`` index pairs, one per location.
+
+    Generated by LH and Claude.
+    """
+    if n > len(LOCATION_COLORS):
+        raise ValueError(
+            f"n={n} exceeds the {len(LOCATION_COLORS)} fixed location "
+            "colours; categorical hues are never cycled."
+        )
+
+    n_j, n_i = land_mask.shape
+    m = max(int(edge_margin), 1)
+    ok = ~land_mask
+    ok[:m, :] = ok[-m:, :] = False
+    ok[:, :m] = ok[:, -m:] = False
+
+    # Keep the profiles off the tile edge entirely.
+    ij = int(n_j * inset_frac)
+    ii = int(n_i * inset_frac)
+    if ij and ii:
+        inset = np.zeros_like(ok)
+        inset[ij:n_j - ij, ii:n_i - ii] = True
+        if (ok & inset).sum() >= n:
+            ok = ok & inset
+
+    js, is_ = np.nonzero(ok)
+    if js.size < n:
+        raise ValueError(
+            f"only {js.size} usable ocean cells on this tile -- cannot "
+            f"place {n} profiles."
+        )
+
+    rng = np.random.default_rng(seed)
+    take = rng.choice(js.size, size=min(js.size, 4000), replace=False)
+    cand = np.column_stack([js[take], is_[take]]).astype(float)
+
+    # Greedy farthest-point: start at the candidate nearest the tile
+    # centre, then repeatedly take whichever candidate is furthest from
+    # everything chosen so far.
+    centre = np.array([n_j / 2.0, n_i / 2.0])
+    chosen = [int(np.argmin(((cand - centre) ** 2).sum(axis=1)))]
+    while len(chosen) < n:
+        d = np.min(
+            [((cand - cand[c]) ** 2).sum(axis=1) for c in chosen], axis=0)
+        chosen.append(int(np.argmax(d)))
+
+    points = [(int(cand[c, 0]), int(cand[c, 1])) for c in chosen]
+    if verbose:
+        print(f"profiles at : {points}  (seed={seed})")
+    return points
+
+
+def sample_profiles(lazy_3d, ds_merge, points, *, verbose=True):
+    """Pull full water-column profiles at *points*, in one ``dask.compute``.
+
+    Only the 5 columns are read, so this is cheap next to the maps --
+    a few hundred numbers per field.
+
+    Inputs
+    ------
+    lazy_3d : dict[str, xr.DataArray]
+        Base name -> lazy field on the tile.  Entries with no vertical
+        dimension are skipped (they have no profile).
+    ds_merge : xr.Dataset
+        Merged tile dataset, for the depth coordinate.
+    points : list[tuple[int, int]]
+        ``(j, i)`` pairs from :func:`pick_profile_points`.
+    verbose : bool
+        Print which fields were sampled.
+
+    Outputs
+    -------
+    (profiles, depth) : tuple
+        ``profiles[base]`` is ``(n_k, n_points)``; ``depth`` is the
+        ``(n_k,)`` depth coordinate in metres, POSITIVE DOWNWARD.
+
+    Generated by LH and Claude.
+    """
+    import xarray as xr
+    from dbof.preprocessing.vertical_helpers import (
+        _get_depth_coord, _get_vertical_dim,
+    )
+
+    j_sel = xr.DataArray([p[0] for p in points], dims="pt")
+    i_sel = xr.DataArray([p[1] for p in points], dims="pt")
+
+    lazy_cols, zdims = {}, {}
+    for base, field in lazy_3d.items():
+        if not (set(field.dims) & _VERTICAL_DIMS):
+            continue          # 2D field: nothing to profile
+        col = field
+        if "face" in col.dims:
+            col = col.isel(face=0)
+        zdims[base] = _get_vertical_dim(col)
+        lazy_cols[base] = col.isel(j=j_sel, i=i_sel)
+
+    keys = list(lazy_cols)
+    values = dask.compute(*[lazy_cols[k] for k in keys], retries=10)
+    profiles = {
+        k: np.asarray(v.transpose(zdims[k], "pt").values)
+        for k, v in zip(keys, values)
+    }
+
+    depth = np.asarray(_get_depth_coord(ds_merge).values, dtype=float)
+    if verbose:
+        print(f"profiled    : {sorted(profiles)} over {len(depth)} levels, "
+              f"0 to {depth.max():.0f} m")
+    return profiles, depth
+
+
+def depth_profile_grid(chain, profiles, depth, cmap_cfg, *, points,
+                       level_arrays, region, map_field=None,
+                       map_level="sfc", mld_at_points=None,
+                       diverging_cmaps=frozenset(),
+                       log_scale_channels=frozenset(),
+                       max_depth=None, suptitle=None):
+    """Figure 3: where the profiles are, then one profile panel per column.
+
+    Leftmost panel is the tile with a numbered, colour-coded X at each
+    location.  Then one panel per 3D field in the chain: value across,
+    depth down, **surface at the top and depth increasing downward**.
+    Each location keeps its colour across every panel, and its number,
+    so the identity is readable without relying on colour.
+
+    Columns of the chain that are inherently 2D have no profile and are
+    skipped; pass ``mld_at_points`` to draw the mixed-layer depth as a
+    dashed horizontal line per location instead, which is usually the
+    most useful thing on a profile plot.
+
+    Inputs
+    ------
+    chain : list[str]
+        Field base names in dependency order.
+    profiles : dict[str, np.ndarray]
+        ``(n_k, n_points)`` per field -- from :func:`sample_profiles`.
+    depth : np.ndarray
+        ``(n_k,)`` depth in metres, positive downward.
+    cmap_cfg : dict[str, tuple[str, str]]
+        Registry; used for the axis labels and the map panel.
+    points : list[tuple[int, int]]
+        ``(j, i)`` locations, same order as the profile columns.
+    level_arrays : dict[str, dict[str, tuple]]
+        For the locator map.
+    region : str
+        Region key (titles only).
+    map_field : str or None
+        Field for the locator map; defaults to the chain's last entry.
+    map_level : str
+        Depth level for the locator map.
+    mld_at_points : sequence[float] or None
+        MLD in metres at each location; drawn as dashed lines.
+    diverging_cmaps, log_scale_channels : set[str]
+        Passed through to the map panel.
+    max_depth : float or None
+        Clip the depth axis, e.g. 400.0 to zoom on the upper ocean.
+    suptitle : str or None
+        Figure title.
+
+    Outputs
+    -------
+    (fig, axes) : tuple
+
+    Generated by LH and Claude.
+    """
+    cols = [f for f in chain if f in profiles]
+    if not cols:
+        raise ValueError(
+            f"none of {chain} has a profile -- all are 2D fields."
+        )
+
+    colors = LOCATION_COLORS[:len(points)]
+    n_cols = len(cols) + 1
+    fig, axes = plt.subplots(
+        1, n_cols, squeeze=False,
+        figsize=(n_cols * PANEL_W, PANEL_H * 1.9),
+    )
+    axes = axes[0]
+
+    # --- locator map -------------------------------------------------
+    mfield = map_field or cols[-1]
+    x, y, arr = level_arrays[mfield][map_level]
+    ax = axes[0]
+    ax.set_facecolor(LAND_COLOR)
+    plot_global_field(
+        ax, x, y, arr, mfield, cmap_cfg,
+        diverging_cmaps=diverging_cmaps, transform=None,
+        add_coastline=False,
+    )
+    for n, ((pj, pi), c) in enumerate(zip(points, colors), start=1):
+        # White halo so the marker reads on any colormap underneath.
+        ax.plot(x[pj, pi], y[pj, pi], "x", color=c, markersize=11,
+                markeredgewidth=3.4, zorder=5)
+        ax.plot(x[pj, pi], y[pj, pi], "x", color="white", markersize=11,
+                markeredgewidth=1.2, zorder=6)
+        ax.annotate(
+            str(n), (x[pj, pi], y[pj, pi]),
+            textcoords="offset points", xytext=(7, 5),
+            fontsize=9, fontweight="bold", color=c, zorder=7,
+            path_effects=None,
+            bbox={"boxstyle": "round,pad=0.12", "facecolor": "white",
+                  "edgecolor": "none", "alpha": 0.75},
+        )
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title(f"locations ({mfield}, {LEVEL_TITLES.get(map_level)})",
+                 fontsize=9)
+
+    # --- one profile panel per 3D column -----------------------------
+    ymax = max_depth if max_depth is not None else float(depth.max())
+    for k, field in enumerate(cols, start=1):
+        ax = axes[k]
+        _, label = cmap_cfg.get(field, ("viridis", field))
+        prof = profiles[field]
+
+        for n, c in enumerate(colors):
+            ax.plot(prof[:, n], depth, color=c, linewidth=2.0,
+                    label=str(n + 1), zorder=3)
+            if mld_at_points is not None:
+                ax.axhline(mld_at_points[n], color=c, linewidth=1.0,
+                           linestyle="--", alpha=0.55, zorder=2)
+
+        # Surface at the top, depth increasing downward.
+        ax.set_ylim(ymax, 0.0)
+        ax.set_xlabel(label, fontsize=8)
+        ax.tick_params(labelsize=7)
+        ax.grid(alpha=0.25, linewidth=0.6)
+        ax.set_title(field, fontsize=9)
+        if k == 1:
+            ax.set_ylabel("depth (m)", fontsize=9)
+            ax.legend(title="location", fontsize=7, title_fontsize=7,
+                      loc="lower right", framealpha=0.85)
+        else:
+            ax.set_yticklabels([])
+
+    if mld_at_points is not None:
+        fig.text(0.5, -0.02,
+                 "dashed horizontal lines: mixed-layer depth at each "
+                 "location", ha="center", fontsize=8, style="italic")
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=12, y=1.04)
     fig.tight_layout()
     return fig, axes

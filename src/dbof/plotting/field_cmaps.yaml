@@ -230,6 +230,18 @@ cmaps:
   # Dependency-chain columns in the validation figures; these are never
   # output channels of any subset (plan §2 / Clarification 5).
   rho_theta: [dense,   "Potential density ρθ (kg m⁻³)"]
+
+  # Depth notebooks name potential density `rho` (see
+  # prompts/field_validation_depth.md).  `rho_theta` above is kept
+  # because the SURFACE notebooks already use that key as a chain
+  # column -- renaming it there would silently break their colour and
+  # label lookup.  Same field, same cmap.
+  rho:       [dense,   "Potential density ρ (kg m⁻³)"]
+
+  # ∂ρ/∂z with z POSITIVE DOWNWARD, so a stable water column is
+  # POSITIVE here.  Diverging and centred on zero so static
+  # instability (negative) is unmistakable.
+  drho_dz:   [balance, "∂ρ/∂z (kg m⁻⁴)"]
   log_gradb: [amp,     "log₁₀ |∇b| (log₁₀ s⁻²)"]
   # Gradient components (tracer-point, CS/SN-rotated to east/north)
   dTheta_dx: [balance, "∂Θ/∂x (°C m⁻¹)"]

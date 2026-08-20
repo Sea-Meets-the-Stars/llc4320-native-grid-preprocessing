@@ -86,6 +86,11 @@ ZOOM_HALF_KM = 100.0                  # -> a 200 x 200 km zoom box
 SUBSET   = "{subset}"
 PIPELINE = "DEPTH"
 RAW_VARS = {raw_vars}
+
+# Profiles (Figure 3)
+N_PROFILES        = 5       # <= 5; the fixed location colours are not cycled
+PROFILE_SEED      = 42      # same 5 columns for every field in the notebook
+PROFILE_MAX_DEPTH = 500.0   # depth-axis limit, m; None = full 969 m column
 # ------------------------------------------------------------------------
 
 import dask
@@ -95,6 +100,7 @@ import dbof.preprocessing.calculate_fields as CF
 import dbof.preprocessing.calculate_fields_at_depth as CFAD
 from dbof.plotting import depth_figures as dfig
 from dbof.plotting.field_cmaps import load_field_cmaps
+from dbof.preprocessing.vertical_helpers import _vertical_derivative
 from dbof.tiles import tile_utils
 from dbof.tiles.tile_mapping import rect_ij_to_tile
 from dbof.global_dataset_creation.subset_definitions import (
@@ -199,10 +205,27 @@ level_arrays = dfig.pack_tile_levels(
     land_mask=LAND, levels=LEVELS)\
 """
 
+PROFILE_CELL = """\
+# Five ocean columns, seeded and spread across the tile, reused by every
+# field in this notebook so the profile panels are comparable.
+POINTS = dfig.pick_profile_points(
+    LAND, n=N_PROFILES, edge_margin=max(EDGE_MARGIN, 1),
+    seed=PROFILE_SEED)
+
+# Full water column at those five points -- a few hundred numbers per
+# field, so this is cheap next to the maps.
+PROFILES, DEPTH_M = dfig.sample_profiles(PROFILE_3D, ds_merge, POINTS)
+
+# MLD at each point, to mark on the profiles.
+MLD_AT_POINTS = (
+    [level_arrays["mixed_layer_depth"]["sfc"][2][j, i] for j, i in POINTS]
+    if "mixed_layer_depth" in level_arrays else None)\
+"""
+
 HELPERS_MD = """\
 ## Section 5 — Per-field validation
 
-Two figures per field.
+Three figures per field.
 
 **Figure 1 — maps.**  Columns are the dependency chain, raw → final.
 Rows are the four depth levels over the whole tile, then the same four
@@ -210,14 +233,24 @@ zoomed to a 200 × 200 km box; the crimson square on the whole-tile rows
 is where the zoom is.  One colour scale per column, shared by every row
 including the zooms, so nothing changes colour when you look closer.
 
-**Figure 2 — PDFs.**  Four rows, the whole tile at each level.  Bins
-are shared down a column, so reading a column top to bottom shows how
-the distribution changes with depth.  The zoom boxes are deliberately
-absent — too few cells to make an honest histogram.
+Fields that **do not vary with depth** get two rows instead of eight —
+whole tile and zoom.  `mixed_layer_depth` and `ml_heat_content` are
+both integrals over the entire water column, so four identical depth
+rows would say nothing.  Their 3D chain inputs are shown at the surface
+in those figures, and the title says so.
 
-Fields that are inherently 2D (`Eta`, `gradeta2`, `ug`, `vg`,
-`coriolis_f`, `mixed_layer_depth`, `ml_heat_content`) repeat down the
-rows; `pack_tile_levels` printed which ones did.
+**Figure 2 — PDFs.**  Same columns; four rows, the whole tile at each
+level.  Bins are shared down a column, so reading a column top to
+bottom shows how the distribution changes with depth.  The zoom boxes
+are deliberately absent — too few cells to make an honest histogram.
+
+**Figure 3 — profiles.**  Five ocean columns, spread across the tile
+and fixed by a seed so every field profiles the same water.  The
+leftmost panel shows where they are, as numbered colour-coded ×; then
+one panel per 3D field in the chain, with the **surface at the top and
+depth increasing downward**.  Dashed horizontal lines mark each
+location's mixed-layer depth.  The location numbers repeat in the
+legend, so the five are distinguishable without relying on colour.
 
 ("Grid" in the function names below means the rows × columns array of
 panels — not the model's Arakawa C-grid, which is `docs/Grid.md`.)
@@ -228,29 +261,56 @@ HELPERS_CELL = """\
 CHAINS = {chains}
 LOG_FIELDS = {log_fields}
 
+# Fields with no depth dependence -- integrals over the whole column.
+# Their figures collapse to 2 rows (whole tile + zoom) / 1 PDF row.
+DEPTH_INVARIANT = {depth_invariant}
+
 
 def figure1_maps(field):
-    \"\"\"Figure 1 for one field: chain across, depth down.\"\"\"
+    \"\"\"Figure 1: chain across columns, depth down rows.\"\"\"
+    flat = field in DEPTH_INVARIANT
+    note = (" | depth-invariant: 3D inputs shown at the surface"
+            if flat else "")
     dfig.depth_map_grid(
         CHAINS[field], level_arrays, CMAP_CFG,
-        region=REGION, levels=LEVELS,
+        region=REGION,
+        levels=("sfc",) if flat else LEVELS,
+        row_labels=(("whole tile", f"{{2 * ZOOM_HALF_KM:.0f}} km zoom")
+                    if flat else None),
         diverging_cmaps=DIVERGING,
         log_scale_channels=LOG_FIELDS,
         zoom_half_km=ZOOM_HALF_KM,
-        suptitle=(f"Figure 1 — {{field}} | {{REGION}} tile | "
-                  f"columns = dependency chain, rows = depth "
-                  f"(lower 4 rows: {{2 * ZOOM_HALF_KM:.0f}} km zoom)"),
+        suptitle=(f"Figure 1 — {{field}} | {{REGION}} tile | columns = "
+                  f"dependency chain, rows = depth{{note}}"),
     )
     plt.show()
 
 
 def figure2_pdfs(field):
-    \"\"\"Figure 2 for one field: PDFs, chain across, depth down.\"\"\"
+    \"\"\"Figure 2: PDFs, chain across columns, depth down rows.\"\"\"
+    flat = field in DEPTH_INVARIANT
     dfig.depth_pdf_grid(
         CHAINS[field], level_arrays, CMAP_CFG,
-        levels=LEVELS, log10_fields=LOG_FIELDS,
+        levels=("sfc",) if flat else LEVELS,
+        row_labels=("whole tile",) if flat else None,
+        log10_fields=LOG_FIELDS,
         suptitle=(f"Figure 2 — {{field}} | {{REGION}} tile | density; "
                   f"land + rim NaNs dropped; bins shared down each column"),
+    )
+    plt.show()
+
+
+def figure3_profiles(field):
+    \"\"\"Figure 3: depth profiles at the five fixed locations.\"\"\"
+    dfig.depth_profile_grid(
+        CHAINS[field], PROFILES, DEPTH_M, CMAP_CFG,
+        points=POINTS, level_arrays=level_arrays, region=REGION,
+        mld_at_points=MLD_AT_POINTS,
+        diverging_cmaps=DIVERGING,
+        log_scale_channels=LOG_FIELDS,
+        max_depth=PROFILE_MAX_DEPTH,
+        suptitle=(f"Figure 3 — {{field}} | {{REGION}} tile | profiles at "
+                  f"{{len(POINTS)}} locations; surface at top"),
     )
     plt.show()\
 """
@@ -316,10 +376,10 @@ SPECS = {
 
     "stratification": {
         "raw_vars": '["Theta", "Salt"]',
+        "depth_invariant": {"mixed_layer_depth", "ml_heat_content"},
         "header_extra": (
             "\n\nThis is the **template** depth notebook: the shortest "
-            "chain in the DEPTH pipeline (two raw tracers, one shared "
-            "density step, three finals), so the machinery is visible "
+            "chain in the DEPTH pipeline, so the machinery is visible "
             "rather than buried.  MLD is validated HERE and referenced "
             "by every other depth notebook — all the `_mld` and "
             "`_mld_mean` channels in the project rest on it."
@@ -335,37 +395,60 @@ Channels, verbatim from `subset_definitions.DEPTH_SUBSETS`:
 | `mixed_layer_depth` | extra (inherently 2D) |
 | `ml_heat_content` | extra (inherently 2D) |
 
-The two extras are 2D by nature, so they repeat down the depth rows of
-every figure rather than varying with the row.
+The two extras integrate over the whole water column, so they have no
+depth dependence — their figures collapse to two rows (whole tile and
+zoom) rather than repeating the same map four times.
 """,
         "dep_table": """\
 ## Section 4 — Field & dependency table
 
 | FIELD | UNITS | EQUATION | DEPENDS ON | CODE |
 |---|---|---|---|---|
-| `rho_theta` | kg m⁻³ | JMD95(S, Θ, p = 0) | Theta, Salt | `calculate_fields.potential_density` |
-| `N2_{sfx}` | s⁻² | N² = (g/ρ₀)·∂ρ/∂z | rho_theta, Z, drF | `calculate_fields_at_depth.buoyancy_frequency_squared` |
-| `mixed_layer_depth` | m | deepest z with σ₀ − σ₀(10 m) ≤ 0.03 kg m⁻³ | rho_theta, Z | `calculate_fields_at_depth.mixed_layer_depth` |
+| `rho` | kg m⁻³ | ρ = JMD95(S, Θ, p = 0) | Theta, Salt | `calculate_fields.potential_density` |
+| `drho_dz` | kg m⁻⁴ | ∂ρ/∂z, centred difference (one-sided at the ends) | rho, Z | `vertical_helpers._vertical_derivative` |
+| `N2_{sfx}` | s⁻² | N² = (g/ρ₀)·∂ρ/∂z | drho_dz | `calculate_fields_at_depth.buoyancy_frequency_squared` |
+| `mixed_layer_depth` | m | deepest z with σ₀ − σ₀(10 m) ≤ 0.03 kg m⁻³ | rho, Z | `calculate_fields_at_depth.mixed_layer_depth` |
 | `ml_heat_content` | J m⁻² | Q = ∫₀^MLD c_p·ρ₀·Θ dz | Theta, MLD, drF | `calculate_fields_at_depth.mixed_layer_heat_content` |
 
-σ₀ is `rho_theta − 1000`; the constant offset drops out of both the
-vertical derivative and the MLD threshold, so the figures plot
-`rho_theta` and the two are interchangeable here.
+σ₀ is `rho − 1000`; the constant drops out of both the vertical
+derivative and the MLD threshold, so the figures plot `rho` and the two
+are interchangeable here.
+
+### The sign of N², and which way z points
+
+This is the one thing in this subset that reliably confuses people, so
+it is worth being explicit.
+
+The textbook form is **N² = −(g/ρ₀)·∂ρ/∂z**, which assumes z is
+**positive upward** (z < 0 below the surface).  Density then *decreases*
+with increasing z, so ∂ρ/∂z < 0 and the leading minus makes N² > 0.
+
+This code uses the opposite convention.  `_get_depth_coord` returns
+|Z| — **depth, positive downward**, 0 at the surface and increasing as
+you go down.  Density *increases* with depth, so ∂ρ/∂z > 0 and
+
+**N² = +(g/ρ₀)·∂ρ/∂z**
+
+with no leading minus.  Same physics, same numbers; the sign of the
+constant flips with the sign convention of z, and the two conventions
+cancel out.  `drho_dz` gets its own column above precisely so this is
+checkable by eye: in a stable water column that panel should be
+**positive**, and the N² panel should have the same sign everywhere.
 
 **Processing operations in play:** depth selection and averaging
 (`depth_strategies`: k = 0 / nearest-k to 25 m / nearest-k to MLD /
 thickness-weighted mean over the mixed layer), the vertical derivative
-on the tracer grid (`vertical_helpers`, float64 internally), land
-masking from the surface `hFacC`, and the tile edge rim.
+on the tracer grid (float64 internally), land masking from the surface
+`hFacC`, and the tile edge rim.
 
 **Tile edge rim:** every field here is purely vertical — no horizontal
 stencil — so `field_registry` gives them `edge_margin = 0` and nothing
 is lost at the tile boundary.  That changes from `frontal_structure`
 onwards, where the gradient chains carry a 3-cell rim.
 
-**Gradient artifacts:** none of these fields takes a horizontal
-gradient, so the sparkle cases in `docs/Gradients.md` do not arise in
-this notebook.  They start at `frontal_structure` and `kinematic`.
+**Gradient artifacts:** none of these fields takes a *horizontal*
+gradient, so the sparkle cases in `docs/Gradients.md` do not arise
+here.  They start at `frontal_structure` and `kinematic`.
 
 **Depth clipping:** the store keeps only the top 51 levels (≈969 m).
 Any mixed layer deeper than that is clipped — visible in winter
@@ -376,20 +459,33 @@ deep-convection regions, not in the Gulf Stream in November.
 store = get_compute_fn(PIPELINE, SUBSET)(ds_merge, xgrid, CHANNELS)
 print(f"computed : {sorted(store)}")
 
-# Live intermediates: the raw tracers and the shared density step.
+# The chain's raw inputs and intermediates.  The global products never
+# keep these, so they are recomputed here from the same ds_merge the
+# finals came from -- the figures then show the actual steps.
 mld = CFAD.mixed_layer_depth(ds_merge)
+rho = CF.potential_density(ds_merge)
+
+PROFILE_3D = {
+    "Theta": ds_merge["Theta"],
+    "Salt":  ds_merge["Salt"],
+    "rho":   rho,
+    # drho/dz is the entire content of N2 -- N2 is just (g/rho0) times
+    # this -- so it earns its own column.  _vertical_derivative is the
+    # single canonical implementation; buoyancy_frequency_squared calls
+    # exactly this, so the column really is the pipeline's own step.
+    "drho_dz": _vertical_derivative(rho, ds_merge),
+    # N2 itself, kept lazy here so Figure 3 can profile it too.
+    "N2": CFAD.buoyancy_frequency_squared(ds_merge),
+}
+
+# Everything except N2 (which comes from `store` at the four levels).
 live = dfig.compute_levels(
-    {
-        "Theta":     ds_merge["Theta"],
-        "Salt":      ds_merge["Salt"],
-        "rho_theta": CF.potential_density(ds_merge),
-    },
-    ds_merge, mld=mld, levels=LEVELS,
-)\
+    {k: v for k, v in PROFILE_3D.items() if k != "N2"},
+    ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
-            "N2": ["Theta", "Salt", "rho_theta", "N2"],
-            "mixed_layer_depth": ["Theta", "Salt", "rho_theta",
+            "N2": ["Theta", "Salt", "rho", "drho_dz", "N2"],
+            "mixed_layer_depth": ["Theta", "Salt", "rho",
                                   "mixed_layer_depth"],
             "ml_heat_content": ["Theta", "mixed_layer_depth",
                                 "ml_heat_content"],
@@ -397,54 +493,85 @@ live = dfig.compute_levels(
         "log_fields": set(),
         "fields": [
             ("N2", "N² — buoyancy frequency squared",
-             "Stratification strength.  Expect a clear ordering with "
-             "depth: largest just below the surface where the seasonal "
-             "thermocline sits, near-zero through the mixed layer, and "
-             "the `_mld_mean` row smoother than the `_mld` row because "
-             "it averages over the layer instead of sampling one level. "
-             " Negative values are real (statically unstable cells) and "
-             "should be sparse and speckled, not organised."),
+             "**N² = (g/ρ₀)·∂ρ/∂z**  [s⁻²] — positive-downward z, so no "
+             "leading minus (see Section 4).",
+             "Stratification strength.  Expect the `at MLD` row to be "
+             "the *strongest* of the four: the mixed-layer depth is by "
+             "definition where density starts changing sharply, so that "
+             "level sits in the pycnocline.  The `surface` and "
+             "`MLD mean` rows sample well-mixed water and should be "
+             "much weaker.  Negative values are real (statically "
+             "unstable cells) and should be sparse and speckled, not "
+             "organised.  In the profiles, look for the near-zero "
+             "segment above the dashed MLD line and the peak at it."),
             ("mixed_layer_depth", "MLD — mixed layer depth",
-             "The 0.03 kg m⁻³ threshold MLD.  This is the field every "
-             "other depth notebook leans on, so it gets validated here "
-             "and referenced elsewhere.  On the Gulf Stream tile expect "
-             "deeper values north of the front and shallow values in the "
-             "warm core; sharp lateral steps across the front are "
-             "physical.  The four rows are identical by construction — "
-             "MLD has no depth dependence."),
+             "**MLD = max{ z : σ₀(z) − σ₀(10 m) ≤ 0.03 kg m⁻³ }**  [m]",
+             "The field every other depth notebook leans on, so it is "
+             "validated here and referenced elsewhere.  On the Gulf "
+             "Stream tile expect deeper values north of the front and "
+             "shallow values in the warm core; sharp lateral steps "
+             "across the front are physical.  Two rows only — MLD is an "
+             "integral over the whole column and has no depth "
+             "dependence."),
             ("ml_heat_content", "Q_ml — mixed-layer heat content",
-             "∫ c_p·ρ₀·Θ over the mixed layer, so it inherits both the "
-             "MLD pattern and the temperature pattern: large where the "
-             "layer is both deep and warm.  Also depth-independent, so "
-             "the rows repeat."),
+             "**Q_ml = ∫₀^MLD c_p·ρ₀·Θ dz**  [J m⁻²]",
+             "Inherits both the MLD pattern and the temperature "
+             "pattern: large where the layer is both deep and warm.  "
+             "Also depth-independent, so two rows.  Watch for exactly-"
+             "zero cells — see the note under the checks below; they "
+             "are a defect in the field, not a physical result."),
         ],
         "checks": """\
 mld_arr = level_arrays["mixed_layer_depth"]["sfc"][2]
 n2_sfc = level_arrays["N2"]["sfc"][2]
 n2_mld = level_arrays["N2"]["mld"][2]
+n2_mlm = level_arrays["N2"]["mld_mean"][2]
+drho = level_arrays["drho_dz"]["z25m"][2]
 q_ml = level_arrays["ml_heat_content"]["sfc"][2]
 
+# ml_heat_content returns EXACTLY 0.0 -- not NaN -- for any column where
+# the MLD mask selects no model level, because
+# `(integrand * dz).where(mask).sum(dim=zdim)` uses xarray's default
+# skipna=True and the sum of nothing is 0.  Treat those as missing and
+# count them; see the note printed below.
+q_zero = np.isfinite(q_ml) & (q_ml == 0.0)
+q_real = np.where(q_zero, np.nan, q_ml)
+
 CHECKS = [
-    ("MLD positive",
+    ("MLD strictly positive",
      np.nanmin(mld_arr) > 0,
      f"min = {np.nanmin(mld_arr):.1f} m"),
-    ("MLD within the stored water column (<= 969 m)",
+    ("MLD inside the stored water column (<= 969 m)",
      np.nanmax(mld_arr) <= 969.0,
      f"max = {np.nanmax(mld_arr):.1f} m"),
-    ("N2 mostly stable (>0) at the surface",
-     np.nanmean(n2_sfc > 0) > 0.9,
-     f"{100 * np.nanmean(n2_sfc > 0):.1f}% positive"),
-    ("N2 weaker inside the mixed layer than at the surface",
-     np.nanmedian(np.abs(n2_mld)) < np.nanmedian(np.abs(n2_sfc)),
-     f"median |N2| mld = {np.nanmedian(np.abs(n2_mld)):.2e}, "
-     f"sfc = {np.nanmedian(np.abs(n2_sfc)):.2e}"),
-    ("ML heat content positive",
-     np.nanmin(q_ml) > 0,
-     f"min = {np.nanmin(q_ml):.3e} J m-2"),
+    ("drho/dz mostly positive -- confirms positive-DOWNWARD z",
+     np.nanmean(drho > 0) > 0.9,
+     f"{100 * np.nanmean(drho > 0):.1f}% positive at 25 m"),
+    ("N2 mostly positive (statically stable) at 25 m",
+     np.nanmean(level_arrays['N2']['z25m'][2] > 0) > 0.9,
+     f"{100 * np.nanmean(level_arrays['N2']['z25m'][2] > 0):.1f}%"),
+    ("N2 strongest AT the MLD -- the pycnocline, not the mixed layer",
+     np.nanmedian(n2_mld) > np.nanmedian(n2_sfc),
+     f"median N2: mld = {np.nanmedian(n2_mld):.2e}, "
+     f"sfc = {np.nanmedian(n2_sfc):.2e}"),
+    ("N2 at the MLD exceeds the mixed-layer mean",
+     np.nanmedian(n2_mld) > np.nanmedian(n2_mlm),
+     f"median N2: mld = {np.nanmedian(n2_mld):.2e}, "
+     f"mld_mean = {np.nanmedian(n2_mlm):.2e}"),
+    ("ML heat content positive wherever it is not a degenerate zero",
+     np.nanmin(q_real) > 0,
+     f"min = {np.nanmin(q_real):.3e} J m-2"),
     ("tile is not mostly land",
      np.isfinite(mld_arr).mean() > 0.5,
      f"{100 * np.isfinite(mld_arr).mean():.1f}% finite"),
-]\
+]
+
+n_zero = int(q_zero.sum())
+if n_zero:
+    print(f"NOTE  ml_heat_content is exactly 0.0 in {n_zero} cells "
+          f"({100 * n_zero / q_zero.size:.3f}% of the tile) -- columns "
+          f"where the MLD mask caught no model level.  These should be "
+          f"NaN, not 0.  Excluded from the check above.\\n")
 """,
         "crossref": """\
 ---
@@ -505,8 +632,8 @@ def build(subset, spec):
 | Plan | `prompts/field_validation_depth.md` |
 | Field reference | `docs/Fields.md` |
 
-Rows of every figure are **depth levels**, not regions — that is the one
-structural difference from the surface notebooks.{spec['header_extra']}""")
+Rows of the map and PDF figures are **depth levels**, not regions — that
+is the one structural difference from the surface notebooks.{spec['header_extra']}""")
 
     md(cells, SETUP_MD)
     code(cells, SETUP_CELL.format(subset=subset,
@@ -518,6 +645,7 @@ structural difference from the surface notebooks.{spec['header_extra']}""")
     md(cells, COMPUTE_MD)
     code(cells, spec["live_cell"])
     code(cells, PACK_CELL)
+    code(cells, PROFILE_CELL)
 
     md(cells, spec["section3_md"])
     md(cells, spec["dep_table"])
@@ -527,16 +655,23 @@ structural difference from the surface notebooks.{spec['header_extra']}""")
         f'    "{k}": {json.dumps(v)},' for k, v in spec["chains"].items()
     ]
     chains_src = "{\n" + "\n".join(chains_lines) + "\n}"
-    log_src = ("set()" if not spec["log_fields"]
-               else "{" + ", ".join(f'"{x}"'
-                                    for x in sorted(spec["log_fields"]))
-               + "}")
-    code(cells, HELPERS_CELL.format(chains=chains_src, log_fields=log_src))
 
-    for field, title, desc in spec["fields"]:
-        md(cells, f"### {title}\n\n{desc}")
+    def fmt_set(values):
+        if not values:
+            return "set()"
+        return "{" + ", ".join(f'"{v}"' for v in sorted(values)) + "}"
+
+    code(cells, HELPERS_CELL.format(
+        chains=chains_src,
+        log_fields=fmt_set(spec["log_fields"]),
+        depth_invariant=fmt_set(spec["depth_invariant"]),
+    ))
+
+    for field, title, equation, desc in spec["fields"]:
+        md(cells, f"### {title}\n\n{equation}\n\n{desc}")
         code(cells, f'figure1_maps("{field}")')
         code(cells, f'figure2_pdfs("{field}")')
+        code(cells, f'figure3_profiles("{field}")')
 
     md(cells, LIT_MD)
 
