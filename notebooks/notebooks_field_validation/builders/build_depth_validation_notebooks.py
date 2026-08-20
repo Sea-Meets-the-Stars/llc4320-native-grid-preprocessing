@@ -132,6 +132,15 @@ CHANNELS = expand_channels_with_suffixes(
     defn["compute_features_channels"], list(LEVELS),
     defn.get("extra_channels"),
 )
+# The mld / mld_mean strategies need MLD, which needs potential
+# density.  Loading a subset without Theta/Salt fails deep inside
+# mixed_layer_depth with an unhelpful AttributeError, so check here.
+if {{"mld", "mld_mean"}} & set(LEVELS):
+    _need = {{"Theta", "Salt"}} - set(RAW_VARS)
+    assert not _need, (
+        f"LEVELS includes an MLD-based level, so RAW_VARS must include "
+        f"{{sorted(_need)}} -- MLD is derived from potential density.")
+
 print(f"subset   : {{SUBSET}}")
 print(f"channels : {{CHANNELS}}")\
 """
@@ -405,14 +414,28 @@ So this section measures it rather than eyeballing it, on {ab_label}:
 |---|---|
 | `dz_centred` | what the pipeline computes |
 | `dz_onesided` | the larger-magnitude one-sided slope straddling level k — what a non-cancelling estimate reports |
-| `dz_loss` | `1 − |centred| / |one-sided|`.  **0** = the two agree, **1** = the centred form cancelled away entirely |
+| `dz_asym` | `1 − |centred| / |one-sided|` |
+| `dz_signflip` | 1 where the two one-sided slopes have OPPOSITE signs |
 
-`dz_loss` is the map to read.  Expect it near zero in smooth water and
-large in a thin band at the pycnocline — which is exactly where the
-`_mld` extraction lands.  If that is what you see, the `_mld` row of
-every N²-derived field in this notebook is sitting on the noisiest
-part of the stencil, and that is a property of the discretisation, not
-of the ocean.
+**Read `dz_signflip`, not `dz_asym`.**  The two measure different
+things and only one of them is a defect:
+
+- **Curvature** — same-sign slopes of different magnitude, e.g. the
+  base of the mixed layer, where the gradient goes from ~0 above to
+  large below.  The centred form returns roughly their mean, which is
+  a *correct* second-order estimate at a place where the derivative
+  genuinely is not well defined.  This drives `dz_asym` toward 0.5 and
+  no further, and it is not an error.
+- **Cancellation** — opposite-sign slopes, i.e. level k is a vertical
+  extremum.  They partly annihilate, the centred form collapses toward
+  zero while both one-sided slopes are large, and *that* is the
+  vertical analogue of the horizontal sparkle.  `dz_signflip` marks
+  exactly these cells.
+
+On even spacing `dz_asym > 0.5` is reachable only through a sign flip,
+so the two agree at that boundary.  A large `dz_asym` at the MLD with
+no accompanying sign flips means the stencil is doing its job across a
+kink — worth knowing, but not a bug.
 """
 
 VERTICAL_AB_CELL = """\
@@ -425,7 +448,8 @@ ab_arrays = dfig.pack_tile_levels(
     verbose=False)
 
 dfig.depth_map_grid(
-    ["dz_centred", "dz_onesided", "dz_loss"], ab_arrays, CMAP_CFG,
+    ["dz_centred", "dz_onesided", "dz_asym", "dz_signflip"],
+    ab_arrays, CMAP_CFG,
     region=REGION, levels=LEVELS, diverging_cmaps=DIVERGING,
     zoom_half_km=ZOOM_HALF_KM,
     suptitle=(f"Figure 4 — vertical stencil A/B on {{AB_LABEL}}: "
@@ -433,22 +457,27 @@ dfig.depth_map_grid(
 plt.show()
 
 dfig.depth_pdf_grid(
-    ["dz_loss"], ab_arrays, CMAP_CFG, levels=LEVELS,
-    suptitle="Figure 5 — cancellation loss by depth level")
+    ["dz_asym", "dz_signflip"], ab_arrays, CMAP_CFG, levels=LEVELS,
+    suptitle="Figure 5 — stencil asymmetry and sign flips by level")
 plt.show()
 
-# How much of the tile is materially affected, level by level.
-print(f"{{'level':<10}}{{'loss>0.25':>11}}{{'loss>0.50':>11}}"
-      f"{{'median':>10}}")
-print("-" * 42)
+# Curvature and cancellation, separately.  The last column is the one
+# that matters: it is the fraction of the tile where the centred
+# stencil is straddling a vertical extremum.
+print(f"{{'level':<10}}{{'median asym':>13}}{{'asym>0.25':>11}}"
+      f"{{'SIGN FLIP':>11}}")
+print("-" * 45)
 for _lev in LEVELS:
-    _a = ab_arrays["dz_loss"][_lev][2]
-    _f = np.isfinite(_a)
-    if not _f.any():
+    _a = ab_arrays["dz_asym"][_lev][2]
+    _sf = ab_arrays["dz_signflip"][_lev][2]
+    if not np.isfinite(_a).any():
         continue
-    print(f"{{_lev:<10}}{{100 * np.nanmean(_a > 0.25):>10.1f}}%"
-          f"{{100 * np.nanmean(_a > 0.50):>10.1f}}%"
-          f"{{np.nanmedian(_a):>10.3f}}")\
+    print(f"{{_lev:<10}}{{np.nanmedian(_a):>13.3f}}"
+          f"{{100 * np.nanmean(_a > 0.25):>10.1f}}%"
+          f"{{100 * np.nanmean(_sf > 0.5):>10.1f}}%")
+print("")
+print("asym  = curvature (benign at a kink); "
+      "SIGN FLIP = true cancellation.")\
 """
 
 GUARD_CELL = """\
@@ -574,9 +603,12 @@ PROFILE_3D = {
     "N2": CFAD.buoyancy_frequency_squared(ds_merge),
 }
 
-# Everything except N2 (which comes from `store` at the four levels).
+
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
 live = dfig.compute_levels(
-    {k: v for k, v in PROFILE_3D.items() if k != "N2"},
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
     ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
@@ -876,13 +908,24 @@ mld = CFAD.mixed_layer_depth(ds_merge)
 U_model = xgrid.interp(ds_merge.U, 'X', boundary='fill')
 V_model = xgrid.interp(ds_merge.V, 'Y', boundary='fill')
 
+u_east, v_north = CF.geographic_velocity(ds_merge, xgrid)
+
 PROFILE_3D = {
     "Theta": ds_merge["Theta"],
     "Salt": ds_merge["Salt"],
     "U_model": U_model,
     "V_model": V_model,
+    "U": u_east,
+    "V": v_north,
+    "W": _interp_w_to_tracer_levels(ds_merge),
+    "Eta": ds_merge["Eta"],   # inherently 2D -- no profile, by nature
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)\
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
             "Theta": ["Theta"],
@@ -1043,9 +1086,12 @@ PROFILE_3D = {
     "vertical_shear": CFAD.vertical_shear_magnitude(ds_merge, xgrid),
     "Ri": CFAD.richardson_number(ds_merge, xgrid),
 }
+
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
 live = dfig.compute_levels(
-    {k: v for k, v in PROFILE_3D.items()
-     if k not in ("vertical_shear", "Ri")},
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
     ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
@@ -1167,6 +1213,16 @@ it, do not chase the noise.
 
 **Log colour scales** on every `grad*2` field: they span orders of
 magnitude and are meaningless linearly.
+
+**Expect the `at MLD` row to look blotchy, and do not read it as
+physics.**  `mixed_layer_depth` returns the *deepest model level*
+satisfying the density criterion, so MLD is a staircase: neighbouring
+columns whose true mixed layer differs by a metre can land on levels
+tens of metres apart.  Anything sampled at that level inherits the
+staircase.  This is a property of the MLD definition, not of the
+extraction (`_extract_at_mld` is exact given that definition) and not
+of this subset.  `mixed_layer_depth.ipynb` takes it apart and compares
+alternatives.
 """,
         "live_cell": """\
 store = get_compute_fn(PIPELINE, SUBSET)(ds_merge, xgrid, CHANNELS)
@@ -1180,11 +1236,21 @@ PROFILE_3D = {
     "Salt": ds_merge["Salt"],
     "rho": rho,
     "b": CF.buoyancy_of_field(ds_merge),
-    # Inherently 2D -- reduce_to_levels passes it straight through and
-    # pack_tile_levels repeats it down the depth rows.
+    # The finals, kept in 3D so Figure 3 can profile them.
+    "gradb2": CF.grad_b2(ds_merge, xgrid),
+    "gradtheta2": CF.grad_theta2(ds_merge, xgrid),
+    "gradsalt2": CF.grad_salt2(ds_merge, xgrid),
+    "gradrho2": CF.grad_rho2(ds_merge, xgrid),
+    "turner_angle": CF.turner_angle(ds_merge, xgrid, rho=rho),
+    # Inherently 2D -- no depth profile, by nature.
     "Eta": ds_merge["Eta"],
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)\
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
             "gradb2": ["Theta", "Salt", "rho", "b", "gradb2"],
@@ -1244,10 +1310,14 @@ CHECKS = [
     ("gradb2 spans orders of magnitude (fronts vs background)",
      _gb_ratio > 10.0,
      f"p99/p50 = {_gb_ratio:.1f}"),
+    # Compared against 25 m, NOT against the MLD.  Fronts really are
+    # surface-intensified, but the _mld row is contaminated by the
+    # staircase in the MLD field itself (see the note below), so it is
+    # the wrong yardstick for this claim.
     ("gradb2 strongest at the surface (fronts are surface-intensified)",
-     np.nanmedian(gb2) >= np.nanmedian(level_arrays["gradb2"]["mld"][2]),
-     f"median sfc {np.nanmedian(gb2):.2e} vs mld "
-     f"{np.nanmedian(level_arrays['gradb2']['mld'][2]):.2e}"),
+     np.nanmedian(gb2) >= np.nanmedian(level_arrays["gradb2"]["z25m"][2]),
+     f"median sfc {np.nanmedian(gb2):.2e} vs 25 m "
+     f"{np.nanmedian(level_arrays['gradb2']['z25m'][2]):.2e}"),
     ("Turner angle within [-180, 180] degrees",
      (np.nanmin(tu) >= -180.0) and (np.nanmax(tu) <= 180.0),
      f"[{np.nanmin(tu):.1f}, {np.nanmax(tu):.1f}]"),
@@ -1277,7 +1347,10 @@ CHECKS = [
 SPECS_C = {
 
     "kinematic": {
-        "raw_vars": '["U", "V"]',
+        # Theta/Salt are NOT optional: the mld / mld_mean depth
+        # strategies need MLD, which needs potential density.  Without
+        # them compute_kinematic dies in mixed_layer_depth.
+        "raw_vars": '["Theta", "Salt", "U", "V"]',
         "depth_invariant": {"coriolis_f"},
         "log_fields": set(),
         "ab_field": None,
@@ -1346,6 +1419,8 @@ u_east, v_north = CF.geographic_velocity(ds_merge, xgrid)
 # The velocity Jacobian, plotted HERE and referenced by frontogenesis.
 jac = CF.compute_velocity_jacobian(ds_merge, xgrid)
 
+_sm, _sn, _ss = CF.strain(ds_merge, xgrid, jacobian=jac)
+
 PROFILE_3D = {
     "U": u_east,
     "V": v_north,
@@ -1353,8 +1428,25 @@ PROFILE_3D = {
     "du_dy": jac.du_dy,
     "dv_dx": jac.dv_dx,
     "dv_dy": jac.dv_dy,
+    # The finals, kept in 3D so Figure 3 can profile them.
+    "relative_vorticity": CF.relative_vorticity(
+        ds_merge, xgrid, jacobian=jac),
+    "divergence": CF.divergence(ds_merge, xgrid, jacobian=jac),
+    "strain_mag": _sm, "strain_n": _sn, "strain_s": _ss,
+    "okubo_weiss": CF.okubo_weiss_parameter(ds_merge, xgrid),
+    "rossby_number": CF.rossby_number(ds_merge, xgrid, jacobian=jac),
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)\
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)
+
+# coriolis_f is 2D by nature -- it has no profile, and Ro simply reuses
+# the same surface value at every depth.
+live["coriolis_f"] = CF.coriolis_parameter(ds_merge, xgrid)
+live = dict(zip(live, dask.compute(*live.values(), retries=10)))\
 """,
         "chains": {
             "relative_vorticity": ["U", "V", "du_dy", "dv_dx",
@@ -1519,13 +1611,27 @@ print(f"computed : {sorted(store)}")
 mld = CFAD.mixed_layer_depth(ds_merge)
 bg = CF.compute_buoyancy_gradients(ds_merge, xgrid)
 
+_F = CF.frontogenesis_tendency(ds_merge, xgrid, buoyancy_gradients=bg)
+_Fg = CF.frontogenesis_geo(ds_merge, xgrid, buoyancy_gradients=bg)
+
 PROFILE_3D = {
     "b": CF.buoyancy_of_field(ds_merge),
     "db_dx": bg.zonal,
     "db_dy": bg.merid,
-    "Eta": ds_merge["Eta"],   # inherently 2D; repeats down the rows
+    # The finals, kept in 3D so Figure 3 can profile them.
+    "frontogenesis_tendency": _F,
+    "frontogenesis_geo": _Fg,
+    "frontogenesis_ageo": _F - _Fg,
+    "Wstar": CF.modified_okubo_weiss(ds_merge, xgrid),
+    # Inherently 2D -- no depth profile, by nature.
+    "Eta": ds_merge["Eta"],
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)\
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
             "frontogenesis_tendency": ["b", "db_dx", "db_dy",
@@ -1682,10 +1788,20 @@ mld = CFAD.mixed_layer_depth(ds_merge)
 PROFILE_3D = {
     "N2": CFAD.buoyancy_frequency_squared(ds_merge),
     "gradb2": CF.grad_b2(ds_merge, xgrid),
+    # The finals, kept in 3D so Figure 3 can profile them.
+    "Fr": CFAD.froude_number(ds_merge, xgrid, mld=mld),
+    "Ro": CF.rossby_number(ds_merge, xgrid),
+    "Bu": CFAD.burger_number(ds_merge, xgrid, mld=mld),
+    "R_ib": CFAD.balanced_richardson_number(ds_merge, xgrid),
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)
 
-# The two 2D fields the chains reference.
+# Both are 2D by nature, so neither has a depth profile.
 live["mixed_layer_depth"] = mld
 live["coriolis_f"] = CF.coriolis_parameter(ds_merge, xgrid)
 live = dict(zip(live, dask.compute(*live.values(), retries=10)))\
@@ -1841,13 +1957,25 @@ W_c = _interp_w_to_tracer_levels(ds_merge)
 w_x, w_y = NG.calculate_native_gradient_tracer(W_c, ds_merge, grid=xgrid)
 jac = CF.compute_velocity_jacobian(ds_merge, xgrid)
 
+_pv = CFAD.ertel_pv_terms(ds_merge, xgrid)
+
 PROFILE_3D = {
     "b_x": b_x, "b_y": b_y, "b_z": b_z,
     "u_z": u_z, "v_z": v_z, "w_x": w_x, "w_y": w_y,
     "relative_vorticity": jac.dv_dx - jac.du_dy,
+    # The finals, kept in 3D so Figure 3 can profile them.
+    "ertel_pv": _pv["ertel_pv"],
+    "ertel_pv_vertical": _pv["ertel_pv_vertical"],
+    "ertel_pv_tilt": _pv["ertel_pv_tilt"],
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)
 
+# 2D by nature -- no depth profile.
 live["coriolis_f"] = CF.coriolis_parameter(ds_merge, xgrid)
 live = dict(zip(live, dask.compute(*live.values(), retries=10)))\
 """,
@@ -1980,13 +2108,22 @@ print(f"computed : {sorted(store)}")
 mld = CFAD.mixed_layer_depth(ds_merge)
 u_east, v_north = CF.geographic_velocity(ds_merge, xgrid)
 
+_uB, _vB, _wB = CFAD.advective_buoyancy_fluxes(ds_merge, xgrid)
+
 PROFILE_3D = {
     "U": u_east,
     "V": v_north,
     "W": _interp_w_to_tracer_levels(ds_merge),
     "b": CF.buoyancy_of_field(ds_merge),
+    # The finals, kept in 3D so Figure 3 can profile them.
+    "uB": _uB, "vB": _vB, "wB": _wB,
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)\
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)\
 """,
         "chains": {
             "uB": ["U", "b", "uB"],
@@ -2102,14 +2239,26 @@ print(f"computed : {sorted(store)}")
 
 mld = CFAD.mixed_layer_depth(ds_merge)
 
+_gb2 = CF.grad_b2(ds_merge, xgrid)
+_f3d = CF.coriolis_parameter(ds_merge, xgrid)
+# KE is dispatcher-inline; reproduced here so it can be profiled in 3D.
+_KE = 0.5 * (mld * np.sqrt(_gb2) / _f3d) ** 2
+
 PROFILE_3D = {
     "b": CF.buoyancy_of_field(ds_merge),
-    "gradb2": CF.grad_b2(ds_merge, xgrid),
+    "gradb2": _gb2,
+    "KE": _KE,
 }
-live = dfig.compute_levels(PROFILE_3D, ds_merge, mld=mld, levels=LEVELS)
+# Fields the production call already reduced to levels: keep them in 3D
+# for the profiles, but do not recompute their level slices.
+STORE_BASES = {dfig.channel_base(k, LEVELS) for k in store}
+live = dfig.compute_levels(
+    {k: v for k, v in PROFILE_3D.items() if k not in STORE_BASES},
+    ds_merge, mld=mld, levels=LEVELS)
 
+# Both 2D by nature -- no depth profile.
 live["mixed_layer_depth"] = mld
-live["coriolis_f"] = CF.coriolis_parameter(ds_merge, xgrid)
+live["coriolis_f"] = _f3d
 live = dict(zip(live, dask.compute(*live.values(), retries=10)))\
 """,
         "chains": {

@@ -151,32 +151,51 @@ Practical effect on these notebooks: when a sparkle shows up in
 `kinematic` or `frontogenesis` at any depth, it is expected and
 already explained — note it, do not chase it.
 
-### 4b. And one the depth pipeline adds
+### 4b. And two the depth pipeline adds
 
-The production vertical derivative is **centred**:
-`(f[k+1] − f[k−1]) / (z[k+1] − z[k−1])`.  On even spacing that is
-identically the mean of the two one-sided slopes — the same −a/+a
-cancellation as the horizontal sparkle, except there is no separate
-interpolation step to reorder.  The stencil *is* the interpolation, and
-it never reads level k, so a one-level inversion or a sharp step is
-invisible to it.
+Both have their own notebook, because both show up across many subsets
+and neither is worth re-arguing in each one.
 
-Everything downstream of N² inherits it.  Ranked by how much each field
-amplifies it:
+**The centred vertical stencil** (`vertical_gradients.ipynb`).  The
+production vertical derivative is
+`(f[k+1] − f[k−1]) / (z[k+1] − z[k−1])`, which never reads level k.
+That averaging does two different things, and the distinction decides
+whether it is a defect:
 
-| Tier | Fields | Why |
-|---|---|---|
-| Worst | `ertel_pv` (esp. `_tilt`) | products of different directional components, mixing vertical and horizontal derivatives, and it differentiates W |
-| | `Ri`, `vertical_shear` | square AFTER interpolating (the pattern fixed for `strain_mag`); for Ri the artifact is in the denominator |
-| | `Bu` | squares a ratio of two carriers |
-| Inherits | `N2`, `Fr`, `R_ib` | carry it but do not amplify |
-| Clean | `grad*2`, `KE`, `turner_angle`, `uB/vB/wB` | square-before-interp, or no gradient-of-gradient |
+- *same-sign slopes* (a monotone kink, e.g. the mixed-layer base) — the
+  centred form returns their mean, which is a correct second-order
+  estimate where the derivative is not well defined.  **Not an error.**
+- *opposite-sign slopes* (a vertical extremum) — they annihilate and
+  the centred form collapses toward zero.  **This is the artifact**,
+  the true vertical analogue of the horizontal sparkle.
 
-**Testable prediction:** `_mld` uses nearest-k extraction (no
-interpolation, good) but lands exactly on the pycnocline, where the
-stencil artifact is largest.  So for every N²-derived field, expect
-`_mld` to be the noisiest of the four rows and `_mld_mean` the
-cleanest.  Section 5b measures this.
+A metric that does not separate them overstates the problem badly: the
+mixed-layer base is a kink almost everywhere, so it lights up the whole
+map.  The diagnostic reports `dz_asym` (curvature) and `dz_signflip`
+(cancellation) separately; **read the sign-flip rate.**
+
+Fields exposed, if the sign-flip rate turns out to be material:
+`ertel_pv` (worst — cross-direction products, and it differentiates W),
+then `Ri` and `vertical_shear` (square after interpolating; for Ri the
+artifact is in the denominator), then `Bu` (squares a ratio of two
+carriers).  `N2`, `Fr` and `R_ib` inherit without amplifying.  The
+`grad*2` family, `KE`, `turner_angle` and `uB/vB/wB` are clean.
+
+**The MLD staircase** (`mixed_layer_depth.ipynb`).  A separate
+mechanism with similar symptoms, and the likelier cause of blotchy
+`_mld` rows.  `mixed_layer_depth` returns *the deepest model level*
+satisfying the density criterion, so MLD can only take the 51 discrete
+values in `Z` — 10–20 m apart near typical mixed layers.  Neighbouring
+columns whose true mixed layer differs by a metre land on levels tens
+of metres apart, and anything sampled there inherits the jump.  The
+`_mld` maps are not noisy, they are **quantised**.
+
+Note this is *not* an extraction bug: given that definition,
+`_extract_at_mld`'s nearest-k lookup is exact.  Making the extraction
+interpolate would change nothing.  The fix, if we want one, is to make
+the MLD itself continuous first.  On synthetic columns that recovers
+the exact threshold crossing and removes the staircase; the notebook
+measures what it costs on real data.
 
 ---
 

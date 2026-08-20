@@ -126,7 +126,7 @@ cmaps:
 
   # --- frontal structure (surface-only, no suffix) ---
   density:      [dense,   "Potential density anomaly σ₀ (kg m⁻³)"]
-  buoyancy:     [balance, "Buoyancy b (m s⁻²)"]
+  buoyancy:     [dense,   "Buoyancy b (m s⁻²)"]
   gradb2:       [amp,     "Buoyancy gradient magnitude² (s⁻⁴)"]
   gradsalt2:    [amp,     "Salinity gradient magnitude² (psu² m⁻²)"]
   gradtheta2:   [amp,     "Temperature gradient magnitude² (°C² m⁻²)"]
@@ -253,7 +253,7 @@ cmaps:
   V_model:   [balance, "Model-y velocity at tracer pts (m s⁻¹)"]
 
   # Buoyancy and its three gradient components.
-  b:         [balance, "Buoyancy b (m s⁻²)"]
+  b:         [dense,   "Buoyancy b (m s⁻²)"]
   b_x:       [balance, "∂b/∂x (s⁻²)"]
   b_y:       [balance, "∂b/∂y (s⁻²)"]
   b_z:       [balance, "∂b/∂z (s⁻²)"]
@@ -271,7 +271,8 @@ cmaps:
   # is sequential, not diverging.
   dz_centred:  [balance, "∂/∂z, centred stencil"]
   dz_onesided: [balance, "∂/∂z, one-sided"]
-  dz_loss:     [amp,     "Cancellation loss 1 − |centred|/|one-sided|"]
+  dz_asym:     [amp,     "Stencil asymmetry 1 − |centred|/|one-sided|"]
+  dz_signflip: [amp,     "Sign flip (1 = vertical extremum at k)"]
   log_gradb: [amp,     "log₁₀ |∇b| (log₁₀ s⁻²)"]
   # Gradient components (tracer-point, CS/SN-rotated to east/north)
   dTheta_dx: [balance, "∂Θ/∂x (°C m⁻¹)"]
