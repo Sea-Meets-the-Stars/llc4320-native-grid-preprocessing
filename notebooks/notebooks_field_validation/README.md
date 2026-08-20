@@ -112,18 +112,29 @@ Extra channels are inherently 2D.
 
 | Notebook | Base fields (× suffixes) | Extra channels | Status |
 |---|---|---|---|
-| `stratification.ipynb` | N2 | mixed_layer_depth, ml_heat_content | **template — built** |
-| `vertical_shear.ipynb` | vertical_shear, Ri | — | planned |
-| `mixing_parameters.ipynb` | Fr, Ro, Bu, R_ib | — | planned |
-| `ertel_pv.ipynb` | ertel_pv, ertel_pv_vertical, ertel_pv_tilt | — | planned |
-| `buoyancy_fluxes.ipynb` | uB, vB, wB | — | planned |
-| `energetics.ipynb` | KE | — | planned |
-| `frontal_structure.ipynb` | gradb2, gradtheta2, gradsalt2, gradrho2, gradeta2, turner_angle | — | planned |
-| `kinematic.ipynb` | relative_vorticity, strain_n, strain_s, strain_mag, divergence, rossby_number, okubo_weiss | coriolis_f | planned |
-| `frontogenesis.ipynb` | frontogenesis_tendency, frontogenesis_geo, frontogenesis_ageo, ug, vg, Wstar | — | planned |
-| `native_fields.ipynb` | Theta, Salt, Eta, U, V, W | — | planned |
-| `surface_wind.ipynb` | surface-only; identical to SURF — one-line reference to the surface notebook | oceQnet (raw) | planned |
-| `icearea.ipynb` | SIarea (raw, surface-only) | — | planned |
+| `stratification.ipynb` | N2 | mixed_layer_depth, ml_heat_content | **built** (template) |
+| `native_fields.ipynb` | Theta, Salt, U, V, W | Eta_sfc | **built** |
+| `vertical_shear.ipynb` | vertical_shear, Ri | — | **built** (+ stencil A/B) |
+| `frontal_structure.ipynb` | gradb2, gradtheta2, gradsalt2, gradrho2, turner_angle | gradeta2_sfc | **built** |
+| `kinematic.ipynb` | relative_vorticity, strain_n/s/mag, divergence, rossby_number, okubo_weiss | coriolis_f | **built** |
+| `frontogenesis.ipynb` | frontogenesis_tendency/geo/ageo, Wstar | ug_sfc, vg_sfc | **built** |
+| `mixing_parameters.ipynb` | Fr, Ro, Bu, R_ib | — | **built** (+ stencil A/B) |
+| `ertel_pv.ipynb` | ertel_pv, ertel_pv_vertical, ertel_pv_tilt | — | **built** (+ stencil A/B) |
+| `buoyancy_fluxes.ipynb` | uB, vB, wB | — | **built** |
+| `energetics.ipynb` | KE | — | **built** |
+| `surface_wind.ipynb` | surface-only | — | pointer to `surface_fields/` |
+| `icearea.ipynb` | surface-only | — | pointer to `surface_fields/` |
+
+Each depth notebook carries three figures per field — maps (8 rows),
+PDFs (4 rows), and depth profiles at 5 seeded locations — plus, in the
+four marked `+ stencil A/B`, a **Section 5b** that measures the
+centred-vs-one-sided ∂/∂z cancellation directly.  That section exists
+because the production vertical derivative is a centred stencil, which
+is arithmetically the same −a/+a averaging as the horizontal
+"sparkle" (`docs/Gradients.md`) with no interpolation step to move:
+the stencil never reads level k.  It reports a `dz_loss` map
+(`1 − |centred|/|one-sided|`) and the fraction of the tile affected at
+each depth level.
 
 ## Conventions (fixed across all notebooks)
 

@@ -242,6 +242,36 @@ cmaps:
   # POSITIVE here.  Diverging and centred on zero so static
   # instability (negative) is unmistakable.
   drho_dz:   [balance, "∂ρ/∂z (kg m⁻⁴)"]
+
+  # ---- DEPTH validation-notebook intermediates -------------------------
+  # Plotted as dependency-chain columns by the depth_fields notebooks;
+  # not output channels.  See prompts/field_validation_depth.md.
+
+  # Model-axis velocity at tracer points -- the "before" of the CS/SN
+  # rotation, shown beside U/V so the rotation is visible.
+  U_model:   [balance, "Model-x velocity at tracer pts (m s⁻¹)"]
+  V_model:   [balance, "Model-y velocity at tracer pts (m s⁻¹)"]
+
+  # Buoyancy and its three gradient components.
+  b:         [balance, "Buoyancy b (m s⁻²)"]
+  b_x:       [balance, "∂b/∂x (s⁻²)"]
+  b_y:       [balance, "∂b/∂y (s⁻²)"]
+  b_z:       [balance, "∂b/∂z (s⁻²)"]
+
+  # Vertical shear components (geographic, tracer points).
+  u_z:       [balance, "∂u/∂z (s⁻¹)"]
+  v_z:       [balance, "∂v/∂z (s⁻¹)"]
+
+  # Horizontal gradients of vertical velocity -- the noisiest inputs in
+  # the project, and the reason ertel_pv_tilt is artifact-prone.
+  w_x:       [balance, "∂w/∂x (s⁻¹)"]
+  w_y:       [balance, "∂w/∂y (s⁻¹)"]
+
+  # Vertical-stencil A/B (Section 5b).  dz_loss is a 0-1 fraction, so it
+  # is sequential, not diverging.
+  dz_centred:  [balance, "∂/∂z, centred stencil"]
+  dz_onesided: [balance, "∂/∂z, one-sided"]
+  dz_loss:     [amp,     "Cancellation loss 1 − |centred|/|one-sided|"]
   log_gradb: [amp,     "log₁₀ |∇b| (log₁₀ s⁻²)"]
   # Gradient components (tracer-point, CS/SN-rotated to east/north)
   dTheta_dx: [balance, "∂Θ/∂x (°C m⁻¹)"]

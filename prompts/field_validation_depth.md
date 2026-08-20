@@ -35,7 +35,8 @@ Subsets, in build order:
 `surface_wind` and `icearea` are surface-only — one-line pointers to the
 surface notebooks, no new work.
 
-Build #1 first, review it, then roll out the rest.
+All ten are built.  `surface_wind` and `icearea` are pointer
+notebooks.
 
 ---
 
@@ -150,6 +151,33 @@ Practical effect on these notebooks: when a sparkle shows up in
 `kinematic` or `frontogenesis` at any depth, it is expected and
 already explained — note it, do not chase it.
 
+### 4b. And one the depth pipeline adds
+
+The production vertical derivative is **centred**:
+`(f[k+1] − f[k−1]) / (z[k+1] − z[k−1])`.  On even spacing that is
+identically the mean of the two one-sided slopes — the same −a/+a
+cancellation as the horizontal sparkle, except there is no separate
+interpolation step to reorder.  The stencil *is* the interpolation, and
+it never reads level k, so a one-level inversion or a sharp step is
+invisible to it.
+
+Everything downstream of N² inherits it.  Ranked by how much each field
+amplifies it:
+
+| Tier | Fields | Why |
+|---|---|---|
+| Worst | `ertel_pv` (esp. `_tilt`) | products of different directional components, mixing vertical and horizontal derivatives, and it differentiates W |
+| | `Ri`, `vertical_shear` | square AFTER interpolating (the pattern fixed for `strain_mag`); for Ri the artifact is in the denominator |
+| | `Bu` | squares a ratio of two carriers |
+| Inherits | `N2`, `Fr`, `R_ib` | carry it but do not amplify |
+| Clean | `grad*2`, `KE`, `turner_angle`, `uB/vB/wB` | square-before-interp, or no gradient-of-gradient |
+
+**Testable prediction:** `_mld` uses nearest-k extraction (no
+interpolation, good) but lands exactly on the pycnocline, where the
+stencil artifact is largest.  So for every N²-derived field, expect
+`_mld` to be the noisiest of the four rows and `_mld_mean` the
+cleanest.  Section 5b measures this.
+
 ---
 
 ## 5. Notebook structure
@@ -166,6 +194,9 @@ Same skeleton as the surface notebooks, so they read alike.
    where the code lives.
 5. **Per field** — Figure 1 (8-row maps), Figure 2 (4-row PDFs),
    Figure 3 (depth profiles at 5 locations).
+5b. **Vertical stencil check** — only in `stratification`,
+   `vertical_shear`, `mixing_parameters` and `ertel_pv`, the four whose
+   fields divide by or square a vertical derivative.  See §4b.
 6. **Literature comparison** — *left open.*  LH picks a figure from a
    paper, drops the PNG in `literature_figures/`, and only then do we
    decide which of our panels to put beside it.  Until then the section
