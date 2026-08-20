@@ -24,7 +24,11 @@ per-field Figure 3 layout until regenerated.)
 
 Shared plotting modules: `src/dbof/plotting/` — `regions.py`
 (validation domains), `pipeline_grids.py` (map grids),
-`pdfs.py` (PDF grids), `literature_comparison.py`.
+`pdfs.py` (PDF grids), `literature_comparison.py`, `depth_figures.py`
+(the DEPTH figures — rows are depth levels — plus the shaping they
+need).  "Grid" throughout these modules means the rows × columns array
+of panels in a figure, NOT the model's Arakawa C-grid, which is
+`docs/Grid.md` and `utils/native_gradient.py`.
 
 `precision_provenance.ipynb` (this folder) documents the dtype flow
 (raw float32 → JMD95 float64 → store float32) and why the
@@ -76,6 +80,31 @@ Channel lists are verbatim from
 
 ## Depth subsets (DEPTH) — `depth_fields/`
 
+**Different figure layout from the surface notebooks.**  Plan:
+`prompts/field_validation_depth.md`.  A depth notebook fixes ONE region
+(set in its Section 1; default Gulf Stream) and puts the **depth level**
+on each figure row instead of the region: Figure 1 is 8 rows — the four
+levels over the whole tile, then the same four zoomed to a
+200 × 200 km box, whose position is the crimson square on the
+whole-tile rows.  Figure 2 (PDFs) is the four whole-tile rows only,
+with bins shared down each column so the change with depth is readable.
+Columns are unchanged: the dependency chain, raw → final.
+
+**Different data path, too.**  Depth notebooks do NOT run
+`generate-global`.  Each works on ONE 720 × 720 × 51 tile
+(`dbof.tiles`, ≈1400 × 1400 km, one LLC face, full water column) of
+`s3://dbof/LLC4320_RAW/DEPTH/20121109T12.zarr`, picked by the region's
+`zoom` anchor in `regions.py`.  A tile is exactly one chunk of the
+store, so it costs one S3 GET per variable.  The production
+`depth_subsets.compute_*` function then runs on it — same code, one
+tile's worth of data.  Because the tile's xgcm grid has no face
+connections, the `edge_margin` rim recorded in
+`tiles/field_registry.py` is NaN'd (0 / 1 / 3 cells by field).
+Note a tile SAMPLES a region rather than covering it: "Gulf Stream"
+means the tile at 60°W / 37°N, not the 80–40°W box the surface
+notebooks use as a row.
+Generator: `builders/build_depth_validation_notebooks.py`.
+
 Base channels expand with the active depth suffixes
 (`_sfc`, `_z25m`, `_mld`, `_mld_mean` by default; bases in
 `SURFACE_ONLY_BASES` — Eta, gradeta2, ug, vg — emit `_sfc` only).
@@ -83,7 +112,7 @@ Extra channels are inherently 2D.
 
 | Notebook | Base fields (× suffixes) | Extra channels | Status |
 |---|---|---|---|
-| `stratification.ipynb` | N2 | mixed_layer_depth, ml_heat_content | planned |
+| `stratification.ipynb` | N2 | mixed_layer_depth, ml_heat_content | **template — built** |
 | `vertical_shear.ipynb` | vertical_shear, Ri | — | planned |
 | `mixing_parameters.ipynb` | Fr, Ro, Bu, R_ib | — | planned |
 | `ertel_pv.ipynb` | ertel_pv, ertel_pv_vertical, ertel_pv_tilt | — | planned |

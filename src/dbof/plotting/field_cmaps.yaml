@@ -248,3 +248,31 @@ cmaps:
   du_dy:     [curl,    "∂u/∂y (s⁻¹)"]
   dv_dx:     [curl,    "∂v/∂x (s⁻¹)"]
   dv_dy:     [curl,    "∂v/∂y (s⁻¹)"]
+
+  # --- depth-neutral base names -------------------------------------------
+  # The DEPTH validation notebooks (notebooks_field_validation/depth_fields/)
+  # put the depth LEVEL on the figure rows, so a column needs ONE colormap
+  # and ONE label for the base name -- the row title says which level it is.
+  # Same colormaps as the suffixed entries above, labels with the depth
+  # qualifier removed.
+  N2:                [tempo,   "N² (s⁻²)"]
+  vertical_shear:    [speed,   "Shear |S| (s⁻¹)"]
+  Ri:                [curl,    "Ri"]
+  Fr:                [amp,     "Fr"]
+  Ro:                [balance, "Ro"]
+  Bu:                [matter,  "Bu"]
+  ertel_pv:          [curl,    "Ertel PV (s⁻³)"]
+  ertel_pv_vertical: [curl,    "PV vertical (s⁻³)"]
+  ertel_pv_tilt:     [curl,    "PV tilt (s⁻³)"]
+  uB:                [balance, "uB (m² s⁻³)"]
+  vB:                [balance, "vB (m² s⁻³)"]
+  wB:                [balance, "wB (m² s⁻³)"]
+  KE:                [speed,   "Kinetic energy (m² s⁻²)"]
+
+  # R_ib (balanced Richardson number) had NO entry at any suffix -- it is an
+  # output channel of mixing_parameters, so it gets the full set here.
+  R_ib:              [amp, "R_ib (balanced Richardson number)"]
+  R_ib_sfc:          [amp, "R_ib surface"]
+  R_ib_z25m:         [amp, "R_ib at 25 m"]
+  R_ib_mld:          [amp, "R_ib at MLD"]
+  R_ib_mld_mean:     [amp, "R_ib ML mean"]
