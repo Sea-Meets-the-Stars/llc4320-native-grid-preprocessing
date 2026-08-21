@@ -767,6 +767,151 @@ depth pipeline and the `_mld` blotchiness has another cause — see
 """)
 
     md(cells, """\
+## Section 4c — Would differentiating on the interfaces fix it?
+
+The natural proposal: instead of the centred stencil at level k, take
+the plain one-sided difference between adjacent levels.  That lands on
+the **interface** between them, uses both of them, and has no blind
+spot — so it cannot cancel.
+
+There is a catch, and it is decisive.  Everything downstream (`N2` in
+`Ri`, `b_z` in `ertel_pv`, the four depth strategies) wants a value at
+the cell **centre**.  So you would compute on interfaces and average
+back.  Do that and:
+
+    thickness-weighted mean of the two interfaces around level k
+      = [(f_k − f_{k−1}) + (f_{k+1} − f_k)] / (z_{k+1} − z_{k−1})
+      = (f_{k+1} − f_{k−1}) / (z_{k+1} − z_{k−1})
+      = the centred stencil, exactly
+
+Not approximately — **algebraically identical**, on a stretched grid as
+much as a uniform one.  The next cell checks it numerically rather than
+taking the algebra on trust.
+
+So the interface form buys **nothing on its own**.  It only helps if
+whatever consumes it *stays on the interfaces* — which is precisely the
+horizontal square-before-interpolate rule, transposed into the
+vertical.
+""")
+    code(cells, """\
+# 1. The identity: interface derivative, averaged back = centred.
+d_if, Z_IF = dfig.vertical_derivative_iface(rho, ds_merge)
+back = dfig.iface_to_centre(d_if, ds_merge)
+cen = dfig.vertical_stencil_ab(rho, ds_merge)["dz_centred"]
+
+_b, _c = dask.compute(back, cen)
+_d = np.abs(np.asarray(_b.values) - np.asarray(_c.values))
+print(f"max |interface-averaged-back  −  centred| = {np.nanmax(_d):.3e}")
+print(f"identical to machine precision: {np.nanmax(_d) < 1e-12}")
+print("")
+print("So 'compute on interfaces, interpolate to centres' IS the")
+print("centred stencil.  Any gain has to come from staying on the")
+print("interfaces, not from the derivative itself.")\
+""")
+    code(cells, """\
+# 2. What the interface form recovers, WHERE the centred one cancels.
+#
+# The statistic must be computed PER CELL and then aggregated -- taking
+# the ratio of two independently-computed medians is not bounded and
+# came out negative in testing.  dz_asym already is the per-cell
+# quantity: 1 - |centred| / |larger one-sided slope|, which lies in
+# [0, 1] because a weighted mean of two numbers never exceeds the
+# larger of them in magnitude.
+ab = dfig.vertical_stencil_ab(rho, ds_merge)
+_flip = ab["dz_signflip"] > 0.5
+_hdims = [d for d in ab["dz_signflip"].dims if d != "k"]
+
+med_lost, med_cen, med_one, n_flip = dask.compute(
+    ab["dz_asym"].where(_flip).median(dim=_hdims),
+    np.abs(ab["dz_centred"]).where(_flip).median(dim=_hdims),
+    np.abs(ab["dz_onesided"]).where(_flip).median(dim=_hdims),
+    _flip.sum(dim=_hdims),
+)
+ml = np.asarray(med_lost.values, dtype=float)
+mc = np.asarray(med_cen.values, dtype=float)
+mo = np.asarray(med_one.values, dtype=float)
+nf = np.asarray(n_flip.values, dtype=float)
+
+_ok = np.isfinite(ml) & (nf > 100)
+print(f"{'depth (m)':>10}{'n flipped':>11}{'|centred|':>12}"
+      f"{'|one-sided|':>13}{'lost':>9}")
+print("-" * 55)
+for _k in np.where(_ok)[0][::6]:
+    print(f"{Z[_k]:>10.0f}{int(nf[_k]):>11d}{mc[_k]:>12.3e}"
+          f"{mo[_k]:>13.3e}{100 * ml[_k]:>8.0f}%")
+print("")
+print("'lost' is the median per-cell fraction of the gradient the")
+print("centred stencil cancelled away at the flipped cells.")
+print("Near 100% means it returned essentially zero where a real")
+print("gradient exists.")
+_lo, _hi = np.nanmin(ml[_ok]), np.nanmax(ml[_ok])
+assert -1e-9 <= _lo and _hi <= 1 + 1e-9, "dz_asym must be in [0,1]"\
+""")
+    code(cells, """\
+# 3. The cost.  The interface form does not resolve a 2Δz zig-zag --
+# it REPORTS it, where the centred form silently zeroed it.  For a
+# consumer like Ri = N²/S² that can be worse, not better: a spuriously
+# large shear drives Ri spuriously LOW, i.e. toward "unstable".
+_alt = ((d_if * d_if.shift({"k": -1})) < 0)
+frac_alt, med_all_if, med_all_cen = dask.compute(
+    _alt.mean(dim=_hdims),
+    np.abs(d_if).median(dim=_hdims),
+    np.abs(ab["dz_centred"]).median(dim=_hdims),
+)
+fa = 100 * np.asarray(frac_alt.values, dtype=float)
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 6.5), sharey=True)
+axes[0].plot(np.asarray(med_all_cen.values), Z, color="#0072B2",
+             linewidth=2, label="centred (production)")
+axes[0].plot(np.asarray(med_all_if.values), Z_IF, color="#D55E00",
+             linewidth=2, label="one-sided, on interfaces")
+axes[0].set_xlabel("median |∂ρ/∂z|  (kg m⁻⁴)", fontsize=9)
+axes[0].set_title("Amplitude", fontsize=10)
+axes[1].plot(fa, Z_IF, color="#009E73", linewidth=2)
+axes[1].set_xlabel("% of interfaces where the sign alternates",
+                   fontsize=9)
+axes[1].set_title("2Δz content the interface form exposes", fontsize=10)
+for ax in axes:
+    ax.set_ylim(np.nanmax(Z), 0)
+    ax.grid(alpha=0.25, linewidth=0.6)
+axes[0].legend(fontsize=8, loc="lower right")
+axes[0].set_ylabel("depth (m)", fontsize=9)
+fig.suptitle("Figure 4 — interface vs centred: amplitude gained, and "
+             "the grid-scale content that comes with it", fontsize=11)
+fig.tight_layout()
+plt.show()\
+""")
+
+    md(cells, """\
+### What Section 4c settles
+
+1. **Interface-then-interpolate is not a fix.**  It is the centred
+   stencil, exactly.  Verified numerically above, not just argued.
+2. **Interface-and-stay-there does recover real amplitude** wherever
+   the centred form cancelled — the "recovered" column.
+3. **It is not free.**  The centred stencil was hiding the 2Δz zig-zag;
+   the interface form reports it.  For `Ri = N²/S²` that cuts both
+   ways: a spuriously large shear drives Ri *low*, toward "unstable",
+   which is a worse failure than the current bias toward "stable".
+
+So the honest recommendation is conditional, and the numbers above
+decide it:
+
+- If the flipped cells carry **little 2Δz content**, the cancellation
+  is destroying real signal and moving `N2` onto the interfaces is
+  worth doing — with `Ri` and `vertical_shear` computed there too, so
+  nothing averages back.
+- If the flipped cells are **mostly 2Δz**, the centred stencil is
+  accidentally acting as a filter, and switching would inject grid
+  noise into `Ri`.  The right response would then be an explicit
+  filter (the 1-2-1 option), not a different stencil.
+
+Either way this is a change to `_vertical_derivative` and everything
+below it, so it belongs in its own PR with the surface-notebook
+regression suite re-run — not folded into the validation work.
+""")
+
+    md(cells, """\
 ## Section 5 — Order of operations: reduce-then-combine vs combine-then-reduce
 
 Everything above is about one derivative.  This section is about what
