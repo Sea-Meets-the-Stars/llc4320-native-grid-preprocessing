@@ -126,6 +126,24 @@ LAND = dfig.tile_land_mask(ds_grid)
 Z = np.asarray(VH._get_depth_coord(ds_merge).values, dtype=float)
 print(f"levels : {len(Z)}, {Z[0]:.1f} m to {Z[-1]:.1f} m")
 
+# ---------------------------------------------------------------------
+# MEMORY -- this one line is why the notebook fits in RAM
+# ---------------------------------------------------------------------
+# The tile arrives as ONE 720x720x51 chunk, so dask cannot stream: peak
+# memory is the whole array, and vertical_stencil_ab holds ~8 full 3D
+# intermediates at once, in float64 (the depth coordinate is float64,
+# so everything downstream upcasts).  That is ~1.7 GB per field before
+# ertel_pv adds ~10 more of its own -- enough to kill the kernel.
+#
+# Rechunk the HORIZONTAL axes only, ONCE, here.  k must stay whole: the
+# mld / mld_mean strategies need entire columns.  Doing it here rather
+# than per-section means there is exactly one dataset in the notebook
+# and no way to use the wrong one by accident.
+CHUNK = 180          # 16 blocks of ~13 MB; lower it if memory is tight
+ds_merge = ds_merge.chunk({"j": CHUNK, "i": CHUNK})
+print(f"chunks : j,i -> {CHUNK} ({(720 // CHUNK) ** 2} blocks), "
+      f"k whole")
+
 # Two lazy fields every section below needs.
 rho = CF.potential_density(ds_merge)
 mld = CFAD.mixed_layer_depth(ds_merge)\
@@ -152,7 +170,8 @@ FIELD_ZOO = """\
 # diagnostic is COUNTERFACTUAL -- it answers a question the pipeline
 # never asks.  They are still worth plotting, but for a different
 # reason: see the note under Figure 2.
-rho = CF.potential_density(ds_merge)
+# ds_merge was already rechunked in Section 1, so every graph built
+# here streams.  jac is shared by two of the probe fields.
 jac = CF.compute_velocity_jacobian(ds_merge, xgrid)
 
 # Group A -- the pipeline really does take d/dz of these.
@@ -187,8 +206,13 @@ ZOO_KIND = {
     "N2": "probe: already a vertical gradient",
     "ertel_pv": "probe: vertical x horizontal product",
 }
+# Trim this if the kernel still dies -- ertel_pv is by far the heaviest.
+ZOO_FIELDS = list(ZOO)
+
 print(f"differentiated by the pipeline : {list(DIFFERENTIATED)}")
-print(f"roughness probes only          : {list(ROUGHNESS_PROBE)}")\
+print(f"roughness probes only          : {list(ROUGHNESS_PROBE)}")
+print(f"running                        : {ZOO_FIELDS}")
+\
 """
 
 
@@ -367,26 +391,51 @@ computing, but as a measure of something else — see Figure 2.
 """)
     code(cells, FIELD_ZOO)
     code(cells, """\
-# Sign-flip fraction and median asymmetry per level, for every field.
-rows = []
-for nm, fld in ZOO.items():
-    ab_f = dfig.pack_tile_levels(
-        dfig.compute_levels(
-            dfig.vertical_stencil_ab(fld, ds_merge),
-            ds_merge, mld=mld, levels=LEVELS),
-        XC, YC, edge_margin=3, land_mask=LAND, levels=LEVELS,
-        verbose=False)
-    rows.append((nm, ab_f))
-    print(f"  done: {nm}")
+# ONE pass per field.  Three things make this fit in memory where the
+# obvious version does not:
+#
+#   1. only dz_signflip and dz_asym are computed -- dz_centred and
+#      dz_onesided are not needed here and would double the graph;
+#   2. everything is cast to float32;
+#   3. the per-level table AND the depth profile come from a SINGLE
+#      dask.compute per field, so the shared 3D graph is built once
+#      rather than twice.
+#
+# If the kernel still dies: lower CHUNK, or trim ZOO_FIELDS (drop
+# ertel_pv first -- it is several times heavier than anything else).
+def _mask(a):
+    \"\"\"Squeeze to 2D and blank the land.\"\"\"
+    return np.where(LAND, np.nan, np.squeeze(np.asarray(a)))
 
-print("")
-print(f"{'field':<20}{'kind':<36}" + "".join(f"{l:>11}" for l in LEVELS))
-print("-" * (56 + 11 * len(LEVELS)))
-for nm, ab_f in rows:
-    cells_pct = "".join(
-        f"{100 * np.nanmean(ab_f['dz_signflip'][l][2]):>10.1f}%"
-        for l in LEVELS)
-    print(f"{nm:<20}{ZOO_KIND[nm]:<36}{cells_pct}")
+
+table, profiles = {}, {}
+for nm in ZOO_FIELDS:
+    ab = dfig.vertical_stencil_ab(ZOO[nm], ds_merge)
+    sf = ab["dz_signflip"].astype("float32")
+    asym = ab["dz_asym"].astype("float32")
+
+    lazy = dfig.reduce_to_levels(sf, "sf", ds_merge, mld, LEVELS)
+    lazy.update(dfig.reduce_to_levels(asym, "asym", ds_merge, mld, LEVELS))
+    # The depth profile is a 1D reduction -- cheap, and it streams.
+    lazy["profile"] = sf.mean(dim=[d for d in sf.dims if d != "k"])
+
+    got = dict(zip(lazy, dask.compute(*lazy.values(), retries=10)))
+    table[nm] = {lev: (_mask(got[f"sf_{lev}"]), _mask(got[f"asym_{lev}"]))
+                 for lev in LEVELS}
+    profiles[nm] = 100 * np.asarray(got["profile"].values, dtype=float)
+
+    del ab, sf, asym, lazy, got
+    print(f"  done: {nm}")\
+""")
+
+    code(cells, """\
+print(f"{'field':<20}{'kind':<32}"
+      + "".join(f"{l:>11}" for l in LEVELS))
+print("-" * (52 + 11 * len(LEVELS)))
+for nm in ZOO_FIELDS:
+    pct = "".join(f"{100 * np.nanmean(table[nm][l][0]):>10.1f}%"
+                  for l in LEVELS)
+    print(f"{nm:<20}{ZOO_KIND[nm]:<32}{pct}")
 print("")
 print("% of the tile where ∂/∂z of that field straddles a vertical "
       "extremum.")
@@ -395,19 +444,17 @@ print("Only the DIFFERENTIATED rows describe a real pipeline operation.")
 print("The probe rows say how much vertical fine structure a field has,")
 print("which matters for MLD sampling, not for any ∂/∂z we compute.")\
 """)
+
     code(cells, """\
 # SOLID  = a derivative the pipeline really takes.
 # DASHED = counterfactual; read as vertical roughness, not as error.
 fig, axes = plt.subplots(1, 2, figsize=(12, 6.5), sharey=True)
 palette = dfig.LOCATION_COLORS + ("0.35", "0.6")
-for i, (nm, _) in enumerate(rows):
-    sf3 = dfig.vertical_stencil_ab(ZOO[nm], ds_merge)["dz_signflip"]
-    frac = 100 * np.asarray(dask.compute(
-        sf3.mean(dim=[d for d in sf3.dims if d != "k"]))[0].values)
+for i, nm in enumerate(ZOO_FIELDS):
     real = nm in DIFFERENTIATED
     ax = axes[0] if real else axes[1]
-    ax.plot(frac, Z, color=palette[i % len(palette)], linewidth=2,
-            linestyle="-" if real else "--", label=nm)
+    ax.plot(profiles[nm], Z, color=palette[i % len(palette)],
+            linewidth=2, linestyle="-" if real else "--", label=nm)
 
 axes[0].set_title("Derivatives the pipeline actually takes", fontsize=10)
 axes[1].set_title("Counterfactual — vertical roughness probe",
@@ -487,9 +534,10 @@ u_z, v_z = CFAD.vertical_shear_components(ds_merge, xgrid)
 term = v_z * b_x                      # one tilting-term factor pair
 
 # A: combine in 3D, then reduce.  B: reduce each, then combine.
-A = dfig.compute_levels({"A": term}, ds_merge, mld=mld, levels=LEVELS)
+A = dfig.compute_levels({"A": term}, ds_merge, mld=mld, levels=LEVELS,
+                        verbose=False)
 P = dfig.compute_levels({"vz": v_z, "bx": b_x}, ds_merge, mld=mld,
-                        levels=LEVELS)
+                        levels=LEVELS, verbose=False)
 B = {f"B_{l}": P[f"vz_{l}"] * P[f"bx_{l}"] for l in LEVELS}
 
 order = dfig.pack_tile_levels(
