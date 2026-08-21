@@ -848,63 +848,95 @@ _lo, _hi = np.nanmin(ml[_ok]), np.nanmax(ml[_ok])
 assert -1e-9 <= _lo and _hi <= 1 + 1e-9, "dz_asym must be in [0,1]"\
 """)
     code(cells, """\
-# 3. The cost.  The interface form does not resolve a 2Δz zig-zag --
-# it REPORTS it, where the centred form silently zeroed it.  For a
-# consumer like Ri = N²/S² that can be worse, not better: a spuriously
-# large shear drives Ri spuriously LOW, i.e. toward "unstable".
-_alt = ((d_if * d_if.shift({"k": -1})) < 0)
-frac_alt, med_all_if, med_all_cen = dask.compute(
-    _alt.mean(dim=_hdims),
-    np.abs(d_if).median(dim=_hdims),
-    np.abs(ab["dz_centred"]).median(dim=_hdims),
+# 3. Where the two stencils actually DIFFER, and whether the
+#    difference is real signal or grid noise.
+#
+# Comparing medians over ALL cells is useless here: centred and
+# one-sided agree wherever the profile is smooth, which is most of the
+# tile, so the two curves sit on top of each other by construction.
+# The comparison has to be restricted to the flipped cells.
+noise = dfig.vertical_noise_ab(rho, ds_merge)
+_ext, _2dz = noise["dz_extremum"], noise["dz_2dz"]
+
+amp_cen_f, amp_one_f, frac_ext, frac_2dz = dask.compute(
+    np.abs(ab["dz_centred"]).where(_flip).median(dim=_hdims),
+    np.abs(ab["dz_onesided"]).where(_flip).median(dim=_hdims),
+    _ext.mean(dim=_hdims),
+    _2dz.mean(dim=_hdims),
 )
-fa = 100 * np.asarray(frac_alt.values, dtype=float)
+ac = np.asarray(amp_cen_f.values, dtype=float)
+ao = np.asarray(amp_one_f.values, dtype=float)
+fe = 100 * np.asarray(frac_ext.values, dtype=float)
+f2 = 100 * np.asarray(frac_2dz.values, dtype=float)
 
 fig, axes = plt.subplots(1, 2, figsize=(11, 6.5), sharey=True)
-axes[0].plot(np.asarray(med_all_cen.values), Z, color="#0072B2",
-             linewidth=2, label="centred (production)")
-axes[0].plot(np.asarray(med_all_if.values), Z_IF, color="#D55E00",
-             linewidth=2, label="one-sided, on interfaces")
-axes[0].set_xlabel("median |∂ρ/∂z|  (kg m⁻⁴)", fontsize=9)
-axes[0].set_title("Amplitude", fontsize=10)
-axes[1].plot(fa, Z_IF, color="#009E73", linewidth=2)
-axes[1].set_xlabel("% of interfaces where the sign alternates",
+axes[0].plot(ac, Z, color="#0072B2", linewidth=2,
+             label="centred (production)")
+axes[0].plot(ao, Z, color="#D55E00", linewidth=2,
+             label="one-sided, on interfaces")
+axes[0].set_xlabel("median |∂ρ/∂z| AT THE FLIPPED CELLS (kg m⁻⁴)",
                    fontsize=9)
-axes[1].set_title("2Δz content the interface form exposes", fontsize=10)
+axes[0].set_title("Amplitude where the two differ", fontsize=10)
+axes[1].plot(fe, Z, color="#0072B2", linewidth=2, linestyle="--",
+             label="cells that would change (any extremum)")
+axes[1].plot(f2, Z, color="#D55E00", linewidth=2,
+             label="of which 2Δz zig-zag")
+axes[1].set_xlabel("% of tile", fontsize=9)
+axes[1].set_title("How much would change, and how much is noise",
+                  fontsize=10)
 for ax in axes:
     ax.set_ylim(np.nanmax(Z), 0)
     ax.grid(alpha=0.25, linewidth=0.6)
-axes[0].legend(fontsize=8, loc="lower right")
+    ax.legend(fontsize=8, loc="lower right")
 axes[0].set_ylabel("depth (m)", fontsize=9)
-fig.suptitle("Figure 4 — interface vs centred: amplitude gained, and "
-             "the grid-scale content that comes with it", fontsize=11)
+fig.suptitle("Figure 4 — switching to interfaces: what changes, where, "
+             "and whether it is signal or noise", fontsize=11)
 fig.tight_layout()
-plt.show()\
+plt.show()
+
+_tot_e, _tot_2 = np.nanmean(fe), np.nanmean(f2)
+print(f"cells where switching would change the answer : {_tot_e:.1f}%")
+print(f"   of those, grid-scale 2Δz zig-zag           : "
+      f"{100 * _tot_2 / max(_tot_e, 1e-30):.0f}%")
+print(f"   of those, resolved structure               : "
+      f"{100 * (1 - _tot_2 / max(_tot_e, 1e-30)):.0f}%")
+print("")
+print("The other ~{:.0f}% of cells are bit-identical either way."
+      .format(100 - _tot_e))\
 """)
 
     md(cells, """\
 ### What Section 4c settles
 
 1. **Interface-then-interpolate is not a fix.**  It is the centred
-   stencil, exactly.  Verified numerically above, not just argued.
-2. **Interface-and-stay-there does recover real amplitude** wherever
-   the centred form cancelled — the "recovered" column.
-3. **It is not free.**  The centred stencil was hiding the 2Δz zig-zag;
-   the interface form reports it.  For `Ri = N²/S²` that cuts both
-   ways: a spuriously large shear drives Ri *low*, toward "unstable",
-   which is a worse failure than the current bias toward "stable".
+   stencil, exactly — verified numerically above, not just argued.
+2. **Over the whole tile the two are indistinguishable**, and that is
+   not a null result, it is the correct one: they agree wherever the
+   profile is smooth, which is most of it.  Switching stencils would
+   leave the great majority of `N2` bit-identical.
+3. **The difference is confined to the flipped cells**, and Figure 4
+   is restricted to those.  There the centred form is throwing away
+   most of the gradient.
+4. **Whether that matters depends on the last panel.**  Of the cells
+   that would change, the fraction that is 2Δz zig-zag is noise the
+   centred stencil is accidentally filtering out; the rest is real
+   structure it is destroying.
 
-So the honest recommendation is conditional, and the numbers above
-decide it:
+The decision, from the printed numbers:
 
-- If the flipped cells carry **little 2Δz content**, the cancellation
-  is destroying real signal and moving `N2` onto the interfaces is
-  worth doing — with `Ri` and `vertical_shear` computed there too, so
-  nothing averages back.
-- If the flipped cells are **mostly 2Δz**, the centred stencil is
-  accidentally acting as a filter, and switching would inject grid
-  noise into `Ri`.  The right response would then be an explicit
-  filter (the 1-2-1 option), not a different stencil.
+- **Mostly resolved structure** → the cancellation is destroying
+  signal, and moving `N2` onto the interfaces is worth doing — with
+  `Ri` and `vertical_shear` computed there too, so nothing averages
+  back and undoes it.
+- **Mostly 2Δz** → the centred stencil is doing useful filtering by
+  accident, and switching would inject grid noise straight into `Ri`,
+  where a spuriously large shear drives Ri *low*, toward "unstable".
+  An explicit 1-2-1 filter would then be the right response, not a
+  different stencil.
+
+Note the affected cells are confined to the upper ocean in `rho`.
+Below that the profile is monotonic and the two stencils agree
+exactly, so nothing about this changes the deep water.
 
 Either way this is a change to `_vertical_derivative` and everything
 below it, so it belongs in its own PR with the surface-notebook
