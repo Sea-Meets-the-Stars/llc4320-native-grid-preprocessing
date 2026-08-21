@@ -417,6 +417,13 @@ So this section measures it rather than eyeballing it, on {ab_label}:
 | `dz_asym` | `1 − |centred| / |one-sided|` |
 | `dz_signflip` | 1 where the two one-sided slopes have OPPOSITE signs |
 
+Note how `dz_signflip` reduces.  At `sfc`, `z25m` and `mld` the depth
+strategy picks a single level, so the value stays 0 or 1 and its mean
+is the fraction of cells affected.  At `mld_mean` it is
+thickness-weighted over the whole layer, so it arrives as a fraction in
+[0, 1] and is essentially never exactly 1 — which is why it must be
+averaged, not thresholded.
+
 **Read `dz_signflip`, not `dz_asym`.**  The two measure different
 things and only one of them is a defect:
 
@@ -472,12 +479,21 @@ for _lev in LEVELS:
     _sf = ab_arrays["dz_signflip"][_lev][2]
     if not np.isfinite(_a).any():
         continue
+    # nanmean, NOT a threshold count.  At sfc / z25m / mld the strategy
+    # picks ONE level so dz_signflip is 0 or 1 and the mean is the
+    # fraction of cells flipped.  At mld_mean it is thickness-weighted
+    # over the layer, so the value is already a fraction in [0, 1] and
+    # is almost never exactly 1 -- thresholding it at 0.5 reported 0.0%
+    # for a level that is genuinely affected.
     print(f"{{_lev:<10}}{{np.nanmedian(_a):>13.3f}}"
           f"{{100 * np.nanmean(_a > 0.25):>10.1f}}%"
-          f"{{100 * np.nanmean(_sf > 0.5):>10.1f}}%")
+          f"{{100 * np.nanmean(_sf):>10.1f}}%")
 print("")
-print("asym  = curvature (benign at a kink); "
-      "SIGN FLIP = true cancellation.")\
+print("asym  = curvature (benign at a kink).")
+print("SIGN FLIP = % affected by true cancellation.  At mld_mean this "
+      "is the")
+print("            thickness-weighted fraction of the layer, not a "
+      "per-cell flag.")\
 """
 
 GUARD_CELL = """\

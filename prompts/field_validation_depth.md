@@ -159,43 +159,70 @@ and neither is worth re-arguing in each one.
 **The centred vertical stencil** (`vertical_gradients.ipynb`).  The
 production vertical derivative is
 `(f[k+1] − f[k−1]) / (z[k+1] − z[k−1])`, which never reads level k.
-That averaging does two different things, and the distinction decides
-whether it is a defect:
+That averaging does two different things:
 
 - *same-sign slopes* (a monotone kink, e.g. the mixed-layer base) — the
-  centred form returns their mean, which is a correct second-order
-  estimate where the derivative is not well defined.  **Not an error.**
+  centred form returns their mean, a correct second-order estimate
+  where the derivative is not well defined.  **Not an error.**
+  Reported as `dz_asym`.
 - *opposite-sign slopes* (a vertical extremum) — they annihilate and
-  the centred form collapses toward zero.  **This is the artifact**,
-  the true vertical analogue of the horizontal sparkle.
+  the centred form collapses toward zero.  **This is the artifact.**
+  Reported as `dz_signflip`, and it must be **measured directly**: an
+  `asym > 0.5` proxy undercounts it badly on this strongly non-uniform
+  vertical grid.
 
-A metric that does not separate them overstates the problem badly: the
-mixed-layer base is a kink almost everywhere, so it lights up the whole
-map.  The diagnostic reports `dz_asym` (curvature) and `dz_signflip`
-(cancellation) separately; **read the sign-flip rate.**
+Measured on the Gulf Stream tile, ∂ρ/∂z: **5.5% of cells flipped at
+25 m and 7.2% at the MLD**, peaking near 14% around 40–50 m and falling
+to ~0 below 200 m.  So the MLD row is the worst of the four for
+cancellation as well as for curvature — it samples close to the peak.
 
-Fields exposed, if the sign-flip rate turns out to be material:
-`ertel_pv` (worst — cross-direction products, and it differentiates W),
-then `Ri` and `vertical_shear` (square after interpolating; for Ri the
-artifact is in the denominator), then `Bu` (squares a ratio of two
-carriers).  `N2`, `Fr` and `R_ib` inherit without amplifying.  The
-`grad*2` family, `KE`, `turner_angle` and `uB/vB/wB` are clean.
+`dz_signflip` reduces differently per level.  At `sfc`, `z25m` and
+`mld` one level is picked, so it stays 0/1 and its mean is the fraction
+of cells affected.  At `mld_mean` it is thickness-weighted over the
+layer, arrives as a fraction, and is essentially never exactly 1 —
+average it, never threshold it.
+
+`vertical_gradients.ipynb` runs the diagnostic across six field types
+(raw tracer → buoyancy → horizontal gradient → Jacobian → vertical
+gradient → vertical×horizontal product), because a field that is
+*already a derivative* is rougher in the vertical and cancels more.
+It also settles the `mld_mean` order-of-operations question:
+`mean(a·b) ≠ mean(a)·mean(b)`, and the difference is the mixed-layer
+covariance — a real quantity, not an error.  Production computes
+`mean(a·b)`; `docs/Fields.md` should say so.
 
 **The MLD staircase** (`mixed_layer_depth.ipynb`).  A separate
 mechanism with similar symptoms, and the likelier cause of blotchy
 `_mld` rows.  `mixed_layer_depth` returns *the deepest model level*
 satisfying the density criterion, so MLD can only take the 51 discrete
-values in `Z` — 10–20 m apart near typical mixed layers.  Neighbouring
-columns whose true mixed layer differs by a metre land on levels tens
-of metres apart, and anything sampled there inherits the jump.  The
-`_mld` maps are not noisy, they are **quantised**.
+values in `Z` — 10–20 m apart near typical mixed layers.  The `_mld`
+maps are not noisy, they are **quantised**.
 
-Note this is *not* an extraction bug: given that definition,
-`_extract_at_mld`'s nearest-k lookup is exact.  Making the extraction
-interpolate would change nothing.  The fix, if we want one, is to make
-the MLD itself continuous first.  On synthetic columns that recovers
-the exact threshold crossing and removes the staircase; the notebook
-measures what it costs on real data.
+Not an extraction bug: given that definition, `_extract_at_mld`'s
+nearest-k lookup is exact.  Making the extraction interpolate would
+change nothing.  The MLD itself has to become continuous first.
+
+**Three possible orders, and they are not equivalent:**
+
+| | Order | Meaning |
+|---|---|---|
+| A | compute in 3D → snap to nearest level | production today |
+| B | compute in 3D → interpolate in z | removes the staircase, keeps the along-level meaning |
+| C | interpolate inputs to the MLD → compute | gradient along the tilted MLD *surface* |
+
+C is a trap for anything with a horizontal gradient: ∇ along the MLD
+surface adds `(∂b/∂z)·∇(MLD)`, and with a staircase MLD that term is a
+field of spikes at the level boundaries.  Verified on synthetic data —
+C comes out 16× rougher, correlating at 0.96 with the predicted
+`A + (∂b/∂z·∇MLD)²`.  **Rule C out explicitly.**
+
+`mixed_layer_depth_DI` — **DI = Depth Integration** — defines the MLD
+as the N²-weighted mean depth over a fixed integration depth.  It maps
+smoothest of the three, but *because it is an integral*: it averages
+over the whole profile by construction.  That is not evidence it is a
+better MLD, and its values sit well below the threshold definitions.
+Choose it, if at all, on a physics argument about what the consumer
+needs — not on a smoothness contest.
 
 ---
 

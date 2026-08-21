@@ -97,6 +97,7 @@ import dbof.preprocessing.calculate_fields as CF
 import dbof.preprocessing.calculate_fields_at_depth as CFAD
 from dbof.plotting import depth_figures as dfig
 from dbof.plotting.field_cmaps import load_field_cmaps
+import dbof.utils.native_gradient as NG
 from dbof.preprocessing import vertical_helpers as VH
 from dbof.tiles import tile_utils
 from dbof.tiles.tile_mapping import rect_ij_to_tile
@@ -115,7 +116,7 @@ print(f"tile   : idx {tile.tile_idx}, face {tile.face_idx}")
 
 ds_grid = tile_utils._load_grid_for_tile(S3, tile)
 ds_raw = tile_utils._load_tracers_for_tile(
-    S3, DATE, tile, ["Theta", "Salt"])
+    S3, DATE, tile, ["Theta", "Salt", "U", "V", "W"])
 ds_merge, xgrid = tile_utils._build_tile_context(ds_raw, ds_grid)
 
 XC, YC = dfig.tile_coords(ds_grid)
@@ -123,7 +124,48 @@ LAND = dfig.tile_land_mask(ds_grid)
 
 # Depth coordinate, positive downward, and the layer thicknesses.
 Z = np.asarray(VH._get_depth_coord(ds_merge).values, dtype=float)
-print(f"levels : {len(Z)}, {Z[0]:.1f} m to {Z[-1]:.1f} m")\
+print(f"levels : {len(Z)}, {Z[0]:.1f} m to {Z[-1]:.1f} m")
+
+# Two lazy fields every section below needs.
+rho = CF.potential_density(ds_merge)
+mld = CFAD.mixed_layer_depth(ds_merge)\
+"""
+
+
+FIELD_ZOO = """\
+# Six fields spanning the kinds of thing the pipeline computes, so the
+# diagnostics below are not answered on potential density alone.
+#
+#   Theta              raw tracer, vertically smooth
+#   b                  buoyancy: a scaled tracer, so also smooth
+#   gradb2             HORIZONTAL gradient (squared before interp)
+#   relative_vorticity HORIZONTAL Jacobian (ECCO recipe)
+#   N2                 VERTICAL gradient -- already one d/dz deep
+#   ertel_pv           product of a VERTICAL and a HORIZONTAL gradient
+#
+# The last two matter most: a field that is already a derivative is
+# rougher in the vertical than the tracer it came from, so ITS vertical
+# derivative cancels more often.
+jac = CF.compute_velocity_jacobian(ds_merge, xgrid)
+
+ZOO = {
+    "Theta": ds_merge["Theta"],
+    "b": CF.buoyancy_of_field(ds_merge),
+    "gradb2": CF.grad_b2(ds_merge, xgrid),
+    "relative_vorticity": CF.relative_vorticity(
+        ds_merge, xgrid, jacobian=jac),
+    "N2": CFAD.buoyancy_frequency_squared(ds_merge),
+    "ertel_pv": CFAD.ertel_pv_terms(ds_merge, xgrid)["ertel_pv"],
+}
+ZOO_KIND = {
+    "Theta": "raw tracer",
+    "b": "scaled tracer",
+    "gradb2": "horizontal gradient (squared first)",
+    "relative_vorticity": "horizontal Jacobian",
+    "N2": "vertical gradient",
+    "ertel_pv": "vertical x horizontal product",
+}
+print("field zoo ready:", list(ZOO))\
 """
 
 
@@ -237,16 +279,22 @@ is the whole distinction, and everything below rests on it.
 """)
 
     md(cells, """\
-## Section 3 — The same diagnostic on the tile
+## Section 3 — The same diagnostic on the tile, on potential density
 
 `dfig.vertical_stencil_ab` computes all four fields lazily on the full
 3D volume, then they are reduced to the four depth levels the pipeline
-actually stores.
+stores.
+
+**How `dz_signflip` reduces matters.**  At `sfc`, `z25m` and `mld` the
+depth strategy picks a single level, so the flag stays 0 or 1 and its
+mean is the fraction of cells affected.  At `mld_mean` it is
+thickness-weighted over the whole layer, so it arrives as a fraction in
+[0, 1] and is essentially never exactly 1.  Thresholding it reports
+0.0% for a level that is genuinely affected — so it is **averaged, not
+thresholded**, and the number means "fraction of the mixed layer
+affected" rather than "fraction of cells flagged".
 """)
     code(cells, """\
-rho = CF.potential_density(ds_merge)
-mld = CFAD.mixed_layer_depth(ds_merge)
-
 AB = dfig.vertical_stencil_ab(rho, ds_merge)
 ab = dfig.pack_tile_levels(
     dfig.compute_levels(AB, ds_merge, mld=mld, levels=LEVELS),
@@ -259,103 +307,190 @@ dfig.depth_map_grid(
     diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
     suptitle=("Figure 1 — centred vs one-sided ∂ρ/∂z, with curvature "
               "(asym) and cancellation (signflip) separated"))
-plt.show()\
-""")
+plt.show()
 
-    code(cells, """\
 print(f"{'level':<10}{'median asym':>13}{'asym>0.25':>11}"
-      f"{'SIGN FLIP':>11}")
+      f"{'% flipped':>11}")
 print("-" * 45)
 for lev in LEVELS:
-    a = ab["dz_asym"][lev][2]
-    sf = ab["dz_signflip"][lev][2]
+    a, sf = ab["dz_asym"][lev][2], ab["dz_signflip"][lev][2]
     if not np.isfinite(a).any():
         continue
     print(f"{lev:<10}{np.nanmedian(a):>13.3f}"
           f"{100 * np.nanmean(a > 0.25):>10.1f}%"
-          f"{100 * np.nanmean(sf > 0.5):>10.1f}%")
+          f"{100 * np.nanmean(sf):>10.1f}%")
 print("")
-print("asym  = curvature, benign at a kink.")
-print("SIGN FLIP = true cancellation -- the number that matters.")\
+print("asym = curvature (benign at a kink).")
+print("% flipped = true cancellation; at mld_mean it is the "
+      "thickness-weighted")
+print("            fraction of the layer, not a per-cell flag.")\
 """)
 
     md(cells, """\
-**Read the last column.**  A high `asym` with a low sign-flip rate at
-the `at MLD` level is the signature of a kink, not of a defect: the
-mixed-layer base is a curvature feature almost everywhere on the tile,
-so the centred stencil is correctly reporting the mean slope across
-it.  Cancellation, if it is anywhere, tends to be nearer the surface
-where inversions and one-level steps live.
+## Section 4 — Does the answer depend on which field you differentiate?
 
-If the sign-flip rate is a few percent at 25 m and under a percent at
-the MLD, the honest conclusion is that the vertical stencil is **not**
-the dominant error in the depth pipeline, and blotchiness in the `at
-MLD` rows has another cause — see
-[`mixed_layer_depth.ipynb`](mixed_layer_depth.ipynb).
+Section 3 answers for potential density.  But the pipeline takes `∂/∂z`
+of several different things, and a field that is **already a
+derivative** is rougher in the vertical than the tracer it came from —
+so its vertical derivative should cancel more often.  That is the
+hypothesis; this section tests it across six representative fields.
 """)
+    code(cells, FIELD_ZOO)
+    code(cells, """\
+# Sign-flip fraction and median asymmetry per level, for every field.
+rows = []
+for nm, fld in ZOO.items():
+    ab_f = dfig.pack_tile_levels(
+        dfig.compute_levels(
+            dfig.vertical_stencil_ab(fld, ds_merge),
+            ds_merge, mld=mld, levels=LEVELS),
+        XC, YC, edge_margin=3, land_mask=LAND, levels=LEVELS,
+        verbose=False)
+    rows.append((nm, ab_f))
+    print(f"  done: {nm}")
 
-    md(cells, """\
-## Section 4 — Where the sign flips actually are, in depth
-
-The level-reduced maps only sample four depths.  This is the full
-column: what fraction of the tile has a sign flip at each of the 51
-model levels.
+print("")
+print(f"{'field':<20}{'kind':<36}" + "".join(f"{l:>11}" for l in LEVELS))
+print("-" * (56 + 11 * len(LEVELS)))
+for nm, ab_f in rows:
+    cells_pct = "".join(
+        f"{100 * np.nanmean(ab_f['dz_signflip'][l][2]):>10.1f}%"
+        for l in LEVELS)
+    print(f"{nm:<20}{ZOO_KIND[nm]:<36}{cells_pct}")
+print("")
+print("% of the tile where ∂/∂z of that field straddles a vertical "
+      "extremum.")\
 """)
     code(cells, """\
-sf3d = AB["dz_signflip"]
-asym3d = AB["dz_asym"]
-frac_flip, med_asym = dask.compute(
-    sf3d.mean(dim=[d for d in sf3d.dims if d != "k"]),
-    asym3d.median(dim=[d for d in asym3d.dims if d != "k"]),
-)
-frac = np.asarray(frac_flip.values, dtype=float)
-med = np.asarray(med_asym.values, dtype=float)
-
-fig, axes = plt.subplots(1, 2, figsize=(10, 5.5), sharey=True)
-axes[0].plot(100 * frac, Z, color="#D55E00", linewidth=2)
-axes[0].set_xlabel("% of tile with a sign flip", fontsize=9)
-axes[0].set_ylabel("depth (m)", fontsize=9)
-axes[1].plot(med, Z, color="#0072B2", linewidth=2)
-axes[1].set_xlabel("median stencil asymmetry", fontsize=9)
-for ax in axes:
-    ax.set_ylim(Z.max(), 0)
-    ax.grid(alpha=0.25, linewidth=0.6)
-fig.suptitle("Figure 2 — cancellation and curvature vs depth "
+# The same thing as a depth profile, all six fields on one axis.
+fig, ax = plt.subplots(figsize=(7.5, 7))
+for (nm, _), c in zip(rows, dfig.LOCATION_COLORS + ("0.35",)):
+    sf3 = dfig.vertical_stencil_ab(ZOO[nm], ds_merge)["dz_signflip"]
+    frac = dask.compute(
+        sf3.mean(dim=[d for d in sf3.dims if d != "k"]))[0]
+    ax.plot(100 * np.asarray(frac.values), Z, color=c, linewidth=2,
+            label=f"{nm} ({ZOO_KIND[nm]})")
+ax.set_ylim(Z.max(), 0)
+ax.set_xlabel("% of tile with a sign flip in ∂/∂z", fontsize=9)
+ax.set_ylabel("depth (m)", fontsize=9)
+ax.grid(alpha=0.25, linewidth=0.6)
+ax.legend(fontsize=8, loc="lower right")
+fig.suptitle("Figure 2 — cancellation by field type and depth "
              "(surface at top)", fontsize=12)
 fig.tight_layout()
-plt.show()
-
-k_worst = int(np.nanargmax(frac))
-print(f"worst level for cancellation: k={k_worst} "
-      f"(z = {Z[k_worst]:.0f} m), {100 * frac[k_worst]:.1f}% of the tile")
-print(f"worst level for curvature   : k={int(np.nanargmax(med))} "
-      f"(z = {Z[int(np.nanargmax(med))]:.0f} m)")\
+plt.show()\
 """)
 
     md(cells, """\
-## Section 5 — What this means for the subset notebooks
+**What to conclude.**  If `Theta` and `b` sit low while `N2`,
+`relative_vorticity` and `ertel_pv` sit much higher, then the vertical
+stencil is not really a property of the discretisation alone — it is a
+property of *how many derivatives deep* a field already is.  That has a
+direct consequence: taking `∂/∂z` of an already-differentiated field is
+the expensive operation, and `ertel_pv`, which does exactly that and
+then multiplies across directions, should be the worst.
 
-Fill this in from the numbers above rather than from the prior
-expectation.  The two questions worth answering:
+It also means the fix, if there is one, belongs upstream: smoothing or
+re-staggering `N2` would help everything below it, while patching
+`ertel_pv` alone would not.
+""")
 
-1. **Is the sign-flip rate large enough to matter?**  If it is a few
-   percent, then `Ri`, `Fr`, `Bu` and `ertel_pv` will show isolated
-   extreme pixels rather than systematic bias, and the right response
-   is to note them, not to change the stencil.
-2. **Is there a depth band where it concentrates?**  Figure 2 answers
-   this directly.  If cancellation peaks well above the pycnocline, it
-   is surface inversions, and it will contaminate the `_sfc` and
-   `_z25m` rows rather than `_mld`.
+    md(cells, """\
+## Section 5 — Order of operations: reduce-then-combine vs combine-then-reduce
 
-### If a fix is ever warranted
+Everything above is about one derivative.  This section is about what
+happens when two of them meet, which is where the depth pipeline has a
+real choice to make.
+
+`ertel_pv`'s tilting term contains products like `v_z · b_x` — a
+**vertical** gradient times a **horizontal** one.  The pipeline computes
+the product in 3D and reduces afterwards.  The alternative is to reduce
+each factor to the level first and multiply the 2D results:
+
+- **A (production)**: `reduce(v_z · b_x)`
+- **B**: `reduce(v_z) · reduce(b_x)`
+
+For `sfc`, `z25m` and `mld` these are **identical** — the strategy picks
+one level, and picking a level commutes with multiplication.
+
+For `mld_mean` they are **not**, because a thickness-weighted mean does
+not commute with a product: `mean(a·b) ≠ mean(a)·mean(b)`.  The
+difference is the covariance of `a` and `b` over the mixed layer, which
+is a real physical quantity, not an error.  A is the mixed-layer
+average of the flux; B is the flux of the mixed-layer averages.  They
+answer different questions and the pipeline should be explicit about
+which one it means.
+""")
+    code(cells, """\
+b = CF.buoyancy_of_field(ds_merge)
+b_x, b_y = NG.calculate_native_gradient_tracer(b, ds_merge, grid=xgrid)
+u_z, v_z = CFAD.vertical_shear_components(ds_merge, xgrid)
+
+term = v_z * b_x                      # one tilting-term factor pair
+
+# A: combine in 3D, then reduce.  B: reduce each, then combine.
+A = dfig.compute_levels({"A": term}, ds_merge, mld=mld, levels=LEVELS)
+P = dfig.compute_levels({"vz": v_z, "bx": b_x}, ds_merge, mld=mld,
+                        levels=LEVELS)
+B = {f"B_{l}": P[f"vz_{l}"] * P[f"bx_{l}"] for l in LEVELS}
+
+order = dfig.pack_tile_levels(
+    {**{f"combine_then_reduce_{l}": A[f"A_{l}"] for l in LEVELS},
+     **{f"reduce_then_combine_{l}": B[f"B_{l}"] for l in LEVELS}},
+    XC, YC, edge_margin=3, land_mask=LAND, levels=LEVELS,
+    verbose=False)
+
+print(f"{'level':<12}{'max |A-B| / rms(A)':>22}  verdict")
+print("-" * 56)
+for lev in LEVELS:
+    a = order["combine_then_reduce"][lev][2]
+    bb = order["reduce_then_combine"][lev][2]
+    rel = np.nanmax(np.abs(a - bb)) / max(
+        float(np.sqrt(np.nanmean(a ** 2))), 1e-30)
+    same = rel < 1e-4
+    print(f"{lev:<12}{rel:>22.3e}  "
+          + ("identical (as expected)" if same
+             else "DIFFERENT -- covariance term"))\
+""")
+    code(cells, """\
+dfig.depth_map_grid(
+    ["combine_then_reduce", "reduce_then_combine"], order, CMAP_CFG,
+    region=REGION, levels=LEVELS, diverging_cmaps=DIVERGING,
+    zoom_half_km=ZOOM_HALF_KM,
+    suptitle=("Figure 3 — v_z · b_x: combining in 3D then reducing "
+              "(production) vs reducing then combining"))
+plt.show()\
+""")
+
+    md(cells, """\
+## Section 6 — Decision
+
+Fill in from the numbers above.  Three separable questions:
+
+1. **Is the sign-flip rate material?**  Section 3 gives it for density;
+   Section 4 gives it per field type.  A few percent means isolated bad
+   pixels in `Ri`, `Fr`, `Bu` and `ertel_pv` — worth annotating, not
+   worth re-plumbing.  Ten percent or more at the MLD, on the fields
+   that feed the sampled products, is a different conversation.
+2. **Does it concentrate where we sample?**  Figure 2 answers this.  If
+   the peak sits near typical MLD depths, the `_mld` row is sampling
+   the worst part of the column and that is worth stating in every
+   subset notebook.
+3. **Which order do we mean for `mld_mean`?**  Section 5 shows the two
+   are genuinely different for products.  Production computes
+   `mean(a·b)`, the mixed-layer average of the quantity — which is
+   almost certainly the intended meaning, but it has never been written
+   down, and `docs/Fields.md` should say so.
+
+### If a stencil fix is ever warranted
 
 The vertical grid is staggered: `k_l` levels sit between tracer levels.
 A one-sided difference lands naturally on `k_l`, so the vertical
-analogue of the horizontal square-before-interp fix exists — compute
-`∂ρ/∂z` on `k_l` and only interpolate to `k` after whatever squaring
-the consumer needs.  That would change `N2` and every field below it,
-so it is not a change to make on the strength of a map.  Make it on
-the strength of the number in Section 3.
+analogue of the horizontal square-before-interp fix does exist —
+compute `∂ρ/∂z` on `k_l` and interpolate to `k` only after whatever
+squaring the consumer needs.  That changes `N2` and everything below
+it, so it is not a change to make on the strength of a map.  Make it on
+the strength of Section 4.
 
 ---
 
@@ -363,8 +498,8 @@ the strength of the number in Section 3.
 
 - **The horizontal artifact** — `docs/Gradients.md`,
   `field_validation_sparkle.ipynb`.
-- **The MLD staircase**, which is a different mechanism with similar
-  symptoms — `mixed_layer_depth.ipynb`.
+- **The MLD staircase**, a different mechanism with similar symptoms —
+  `mixed_layer_depth.ipynb`.
 - **The fields affected** — `depth_fields/vertical_shear.ipynb`,
   `mixing_parameters.ipynb`, `ertel_pv.ipynb`.
 """)
@@ -577,21 +712,68 @@ smooth, the staircase is confirmed and quantified.
 """)
 
     md(cells, """\
-## Section 4 — Does a continuous MLD actually fix the blotches?
+### What DI stands for, and why it looks smoothest
 
-The question that matters is not whether the MLD map looks nicer, but
-whether a *field sampled at* the MLD comes out smoother.  Buoyancy is
-the test case: it feeds `gradb2`, `R_ib` and `KE`.
+**DI = Depth Integration.**  `mixed_layer_depth_DI` defines the MLD as
+the **N²-weighted mean depth** over a fixed integration depth — a
+centroid of the stratification profile, not a threshold crossing.
+
+That is why it is the smoothest of the three, and the reason is worth
+being suspicious of: **it is smooth because it is an integral.**  Every
+column averages over the whole profile, so single-level structure is
+smoothed away by construction.  That is not evidence that it is a
+better estimate of the mixed-layer depth — it is a different quantity
+with different units of meaning, and Figure 2 shows its *values* sit
+well below the threshold definitions.
+
+So do not pick DI because the map looks nicer.  Pick it, if at all,
+because an N²-weighted centroid is what a downstream field actually
+wants.  `Fr` and `KE` divide by MLD as a length scale, and a centroid
+may genuinely suit them better than a threshold crossing — but that is
+a physics argument to make explicitly, not a smoothness contest.
 """)
+
+    md(cells, """\
+## Section 4 — Order of operations
+
+This is the question that actually decides what to change.  To get a
+property "at the MLD" there are three orders available, and they are
+not equivalent:
+
+| | Order | What it means |
+|---|---|---|
+| **A** | compute in 3D → **snap** to nearest level | production today |
+| **B** | compute in 3D → **interpolate** in z to a continuous MLD | keeps the along-level meaning, removes the staircase |
+| **C** | interpolate the **inputs** to the MLD → compute | computes along the MLD *surface*, not along a level |
+
+**A and B differ only in the sampling.**  Both compute the property on
+level surfaces and then ask "what is its value at the mixed-layer
+depth".  B removes the staircase.
+
+**C is a different physical quantity, and for horizontal gradients it
+is dangerous.**  A gradient taken along the tilted MLD surface is
+
+    ∇b|_MLD-surface  =  ∇b|_z  +  (∂b/∂z)·∇(MLD)
+
+so it picks up the slope of the MLD field itself.  Since the production
+MLD is a *staircase*, ∇(MLD) is a field of spikes at the level
+boundaries — C would inject those straight into `gradb2`.  Section 5
+shows this happening.
+
+The pipeline uses **A** everywhere.  This section measures what B would
+buy, across the six field types.
+""")
+    code(cells, FIELD_ZOO)
     code(cells, """\
-b = CF.buoyancy_of_field(ds_merge)
+mld_i = mld_interpolated(ds_merge)
 
 
 def field_at_depth_interp(field3d, depth2d):
     \"\"\"Sample a 3D field at a continuous depth, linear in z.
 
     The counterpart of ``VH._extract_at_mld`` for a continuous MLD:
-    interpolates between bracketing levels instead of snapping.
+    interpolates between the bracketing levels instead of snapping to
+    the nearer one.
 
     Inputs
     ------
@@ -626,74 +808,141 @@ def field_at_depth_interp(field3d, depth2d):
     )
 
 
-b_snap = VH._extract_at_mld(b, mld, ds_merge)        # production
-b_interp = field_at_depth_interp(b, mld_i)           # continuous
-
-bv = dfig.pack_tile_levels(
-    dict(zip(["b_at_mld_snapped", "b_at_mld_interp"],
-             dask.compute(b_snap, b_interp))),
-    XC, YC, edge_margin=0, land_mask=LAND, levels=("sfc",),
-    verbose=False)
-
-dfig.depth_map_grid(
-    ["b_at_mld_snapped", "b_at_mld_interp"], bv, CMAP_CFG,
-    region=REGION, levels=("sfc",),
-    row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
-    diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
-    suptitle=("Figure 4 — buoyancy at the MLD: production (snapped to "
-              "a model level) vs continuous"))
-plt.show()\
+# A vs B for every field in the zoo.
+pairs = {}
+for nm, fld in ZOO.items():
+    pairs[f"{nm}__A_snap"] = VH._extract_at_mld(fld, mld, ds_merge)
+    pairs[f"{nm}__B_interp"] = field_at_depth_interp(fld, mld_i)
+vals = dict(zip(pairs, dask.compute(*pairs.values(), retries=10)))
+print("computed:", len(vals), "fields")\
 """)
     code(cells, """\
-# Roughness: median |Laplacian|.  A staircase has large cell-to-cell
-# jumps at the level boundaries, so it scores high; smooth physical
-# structure scores low.
 def roughness(a):
-    \"\"\"Median absolute discrete Laplacian, ignoring NaNs.\"\"\"
+    \"\"\"Median absolute discrete Laplacian, ignoring NaNs.
+
+    A staircase makes large cell-to-cell jumps at the level boundaries
+    and so scores high; smooth physical structure scores low.
+    \"\"\"
     lap = (a[2:, 1:-1] + a[:-2, 1:-1] + a[1:-1, 2:] + a[1:-1, :-2]
            - 4 * a[1:-1, 1:-1])
     return np.nanmedian(np.abs(lap))
 
 
-print(f"{'field':<22}{'roughness':>12}{'vs production':>16}")
-print("-" * 50)
-r0 = roughness(bv["b_at_mld_snapped"]["sfc"][2])
-for nm in ("b_at_mld_snapped", "b_at_mld_interp"):
-    r = roughness(bv[nm]["sfc"][2])
-    print(f"{nm:<22}{r:>12.3e}{r / r0:>15.2f}x")
+def _clean(v):
+    a = np.squeeze(np.asarray(getattr(v, "values", v))).astype("float32")
+    return np.where(LAND, np.nan, a)
+
+
+print(f"{'field':<20}{'kind':<36}{'A snap':>12}{'B interp':>12}"
+      f"{'smoother by':>13}")
+print("-" * 93)
+for nm in ZOO:
+    ra = roughness(_clean(vals[f"{nm}__A_snap"]))
+    rb = roughness(_clean(vals[f"{nm}__B_interp"]))
+    print(f"{nm:<20}{ZOO_KIND[nm]:<36}{ra:>12.3e}{rb:>12.3e}"
+          f"{ra / max(rb, 1e-30):>12.1f}x")
 print("")
-print("If the continuous version is materially smoother, the staircase")
-print("was the dominant source of blotchiness in every _mld channel.")\
+print("'smoother by' > 1 means interpolating removed roughness that the")
+print("snap-to-level sampling had introduced.  Watch whether the gain is")
+print("bigger for the already-differentiated fields.")\
+""")
+    code(cells, """\
+# Maps for two contrasting cases: a raw tracer and a derived field.
+for nm in ("Theta", "ertel_pv"):
+    mv2 = dfig.pack_tile_levels(
+        {"A_snap": vals[f"{nm}__A_snap"],
+         "B_interp": vals[f"{nm}__B_interp"]},
+        XC, YC, edge_margin=3, land_mask=LAND, levels=("sfc",),
+        verbose=False)
+    dfig.depth_map_grid(
+        ["A_snap", "B_interp"], mv2, CMAP_CFG, region=REGION,
+        levels=("sfc",),
+        row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
+        diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
+        suptitle=(f"Figure 3 — {nm} at the MLD: snapped to a model "
+                  f"level (A) vs interpolated (B)"))
+    plt.show()\
 """)
 
     md(cells, """\
-## Section 5 — Decision
+## Section 5 — Why order C is a trap for horizontal gradients
 
-Fill in from the numbers above.  The options, in increasing order of
-disruption:
+Order C — interpolate the inputs to the MLD, then take the horizontal
+gradient — sounds like the natural way to "get the gradient at the
+MLD".  It is not, and this section shows why in one figure.
+
+Taking ∇ along the MLD surface adds a `(∂b/∂z)·∇(MLD)` term.  With a
+staircase MLD, `∇(MLD)` is zero almost everywhere and enormous at the
+level boundaries, so C turns those boundaries into artificial fronts.
+""")
+    code(cells, """\
+b = CF.buoyancy_of_field(ds_merge)
+
+# A: gradient computed on level surfaces, then sampled at the MLD.
+gradb2_A = VH._extract_at_mld(CF.grad_b2(ds_merge, xgrid), mld, ds_merge)
+
+# C: buoyancy sampled at the MLD first, then a horizontal gradient of
+# that 2D field.  Uses the same staggered machinery, so the only
+# difference is the order.
+b_at_mld = VH._extract_at_mld(b, mld, ds_merge)
+ds_c = ds_merge.assign(_b_mld=b_at_mld)
+bx_c, by_c = NG.calculate_native_gradient_tracer(
+    ds_c["_b_mld"], ds_merge, grid=xgrid)
+gradb2_C = bx_c ** 2 + by_c ** 2
+
+gv = dfig.pack_tile_levels(
+    dict(zip(["A_grad_then_sample", "C_sample_then_grad"],
+             dask.compute(gradb2_A, gradb2_C))),
+    XC, YC, edge_margin=3, land_mask=LAND, levels=("sfc",),
+    verbose=False)
+
+dfig.depth_map_grid(
+    ["A_grad_then_sample", "C_sample_then_grad"], gv, CMAP_CFG,
+    region=REGION, levels=("sfc",),
+    row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
+    diverging_cmaps=DIVERGING, log_scale_channels={"A_grad_then_sample",
+                                                   "C_sample_then_grad"},
+    zoom_half_km=ZOOM_HALF_KM,
+    suptitle=("Figure 4 — |∇b|² at the MLD: gradient-then-sample "
+              "(production) vs sample-then-gradient"))
+plt.show()
+
+ra = roughness(gv["A_grad_then_sample"]["sfc"][2])
+rc = roughness(gv["C_sample_then_grad"]["sfc"][2])
+print(f"roughness  A (production) {ra:.3e}   C {rc:.3e}   "
+      f"C is {rc / max(ra, 1e-30):.1f}x rougher")
+print("")
+print("If C is dramatically rougher and its structure traces the MLD")
+print("level boundaries rather than the fronts, the extra term is the")
+print("staircase gradient and order C should never be used.")\
+""")
+
+    md(cells, """\
+## Section 6 — Decision
+
+Options, in increasing order of disruption:
 
 1. **Change nothing.**  Document that `_mld` is quantised to model
-   levels and should be read as such.  Correct, and free.
-2. **Continuous MLD, snapped extraction.**  Make `mixed_layer_depth`
-   interpolate to the exact threshold crossing, keep `_extract_at_mld`
-   as-is.  This makes the MLD *channel* smooth but leaves every
-   `_mld` field still sampling a model level — probably the worst of
-   both, since the MLD channel would no longer match the level the
-   other channels are drawn from.
-3. **Continuous MLD and interpolated extraction.**  Both together, as
-   in Section 4.  Internally consistent, and the only option that
-   actually smooths the `_mld` channels.  Costs a vertical
-   interpolation per field and changes every `_mld` output in the
-   global store.
-4. **A different criterion entirely** (N²-max, DI).  Section 3 compares
-   these; they answer a different question and are not drop-in
-   replacements.
+   levels and read it accordingly.  Free, and honest.
+2. **Continuous MLD + interpolated extraction** (order B throughout).
+   Internally consistent, and the only option that actually smooths the
+   `_mld` channels.  Section 4 measures what it buys per field type;
+   the interesting question is whether the gain is concentrated in the
+   already-differentiated fields, because those are the ones whose
+   `_mld` rows look worst.
+3. **Switch the MLD definition** (DI or an N²-max criterion).  A
+   different quantity, not a smoothing fix — see the note above
+   Section 4.
 
-Note that option 3 is not free of artifacts either: interpolating in z
-near a sharp pycnocline is its own approximation, and it will smooth
-real structure along with the staircase.  The question is which error
-we would rather have, and that is a judgement call for LH, not
-something the numbers settle on their own.
+Whatever is chosen, order **C** should be ruled out explicitly for any
+horizontal gradient, and `docs/Fields.md` should say which order the
+`_mld` and `_mld_mean` channels mean.  Right now it does not, and the
+difference is not obvious from the channel name.
+
+Note that B is not free of artifacts either: interpolating in z across
+a sharp pycnocline smooths real structure along with the staircase.
+The question is which error we would rather have, and that is LH's
+call, not something these numbers settle.
 
 ---
 
@@ -703,9 +952,10 @@ something the numbers settle on their own.
   symptoms — `vertical_gradients.ipynb`.
 - **N² and the MLD channels themselves** —
   `depth_fields/stratification.ipynb`.
-- **The fields most affected by a blotchy `_mld`** —
+- **The fields whose `_mld` rows look worst** —
   `depth_fields/frontal_structure.ipynb`,
-  `depth_fields/mixing_parameters.ipynb`.
+  `depth_fields/mixing_parameters.ipynb`,
+  `depth_fields/ertel_pv.ipynb`.
 """)
     write("mixed_layer_depth", cells)
 
