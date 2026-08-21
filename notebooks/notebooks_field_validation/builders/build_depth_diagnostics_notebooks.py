@@ -556,30 +556,40 @@ discretisation resolves anything.  Section 4b tests both.
 """)
     code(cells, """\
 # Candidate 1: the staggering audit.  What levels does each raw
-# variable live on, and which depth coordinate does the derivative use?
-print(f"{'variable':<10}{'dims':<34}{'zdim':<7}{'coord':<7}"
+# variable live on, and which depth coordinate applies?
+#
+# _get_depth_coord only maps k->Z and k_l->Zl, so ask it only where the
+# mapping exists.  W is on the INTERFACES -- k_p1 in this store, 52 of
+# them, NOT k_l as the module docstring says -- and is interpolated to
+# tracer levels before any depth coordinate is needed, so that gap
+# never bites in production.
+_ZMAP = {"k": "Z", "k_l": "Zl", "k_u": "Zu", "k_p1": "Zp1"}
+print(f"{'variable':<10}{'dims':<34}{'zdim':<7}{'n':<5}{'coord':<7}"
       f"{'first 3 depths (m)'}")
-print("-" * 92)
+print("-" * 96)
 _seen = {}
 for _nm in ("Theta", "U", "V", "W"):
     _da = ds_merge[_nm]
     _zd = VH._get_vertical_dim(_da)
-    _zc = VH._get_depth_coord(ds_merge, zdim=_zd)
-    _cn = {"k": "Z", "k_l": "Zl"}[_zd]
-    _seen[_nm] = (_zd, tuple(np.round(_zc.values[:3], 2)))
-    print(f"{_nm:<10}{str(_da.dims):<34}{_zd:<7}{_cn:<7}"
-          f"{np.round(_zc.values[:3], 2)}")
+    _cn = _ZMAP.get(_zd, "-")
+    _z3 = (np.round(ds_merge[_cn].values[:3], 2)
+           if _cn in ds_merge else "(no coord in ds_merge)")
+    _seen[_nm] = (_zd, _da.sizes[_zd])
+    print(f"{_nm:<10}{str(_da.dims):<34}{_zd:<7}{_da.sizes[_zd]:<5}"
+          f"{_cn:<7}{_z3}")
 
 print("")
-assert _seen["U"][0] == _seen["Theta"][0] == "k", "U is not on tracer levels"
-assert _seen["V"][0] == _seen["Theta"][0] == "k", "V is not on tracer levels"
-assert _seen["U"][1] == _seen["Theta"][1], "U depths differ from tracer"
-assert _seen["W"][0] == "k_l", "W is not on the staggered levels"
+assert _seen["U"][0] == _seen["Theta"][0] == "k", "U not on tracer levels"
+assert _seen["V"][0] == _seen["Theta"][0] == "k", "V not on tracer levels"
+assert _seen["W"][0] != _seen["Theta"][0], "W should be on interfaces"
 print("U and V are on 'k' with coordinate Z -- the SAME vertical levels")
 print("as the tracers.  They are staggered HORIZONTALLY (i_g, j_g), not")
-print("vertically.  Only W is vertically staggered (k_l, Zl), and")
-print("_get_depth_coord maps k->Z and k_l->Zl, so every derivative uses")
-print("the coordinate matching its own field.")
+print("vertically, so _vertical_derivative uses the right coordinate.")
+print("")
+print(f"W is on '{_seen['W'][0]}' ({_seen['W'][1]} interfaces) and is")
+print("interpolated to tracer levels before any depth coordinate is")
+print("needed -- _interp_w_to_tracer_levels reads the dim off the data")
+print("rather than assuming it, so k_l and k_p1 both work.")
 print("")
 print("=> Candidate 1 is RULED OUT.  The staggering is handled correctly.")\
 """)
