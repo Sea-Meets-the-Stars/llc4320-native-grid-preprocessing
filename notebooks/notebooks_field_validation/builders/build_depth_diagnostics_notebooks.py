@@ -272,32 +272,47 @@ its own argument.
 | Applies to | the four `_vertical_derivative` call sites — ρ, U, V (and b ≡ ρ×const) — and everything downstream of them |
 | Companions | `docs/Gradients.md`, `prompts/field_validation_depth.md` §4b |
 
-## The claim, and the correction to it
+## First: what "centred stencil" means
 
-`vertical_helpers._vertical_derivative` is **centred** at interior
-levels:
+A **stencil** is just the list of neighbouring points a calculation
+looks at.  To work out how fast density changes with depth at level
+`k` you need at least two points, and there are three obvious ways to
+pick them:
 
-    (f[k+1] − f[k−1]) / (z[k+1] − z[k−1])
+| | formula | name |
+|---|---|---|
+| look **down** | (ρ[k+1] − ρ[k]) / Δz | one-sided |
+| look **up** | (ρ[k] − ρ[k−1]) / Δz | one-sided |
+| look **both ways, skip yourself** | (ρ[k+1] − ρ[k−1]) / (2Δz) | **centred** |
 
-On even spacing that is identically the mean of the two one-sided
-slopes either side of level k.  So it never reads level k, and the
-first thing anyone notices is that this looks exactly like the
-horizontal sparkle with the interpolation baked into the stencil.
+The pipeline uses the third.  It is the textbook choice because on a
+smooth profile it is more accurate than either one-sided version.  It
+has one quirk: **it never looks at level k itself.**
 
-**That framing is half wrong, and the half that is wrong matters.**
-Averaging two one-sided slopes does two different things depending on
-their signs:
+Picture estimating the steepness of a hill by comparing the ground one
+step ahead of you with the ground one step behind.  On an even slope
+that works well.  Standing exactly on the summit it returns **zero** —
+both neighbours are lower, they cancel, and the answer says "flat"
+while you are standing on a peak.
 
-- **Same sign, different magnitude** — a monotone *kink*, e.g. the base
-  of the mixed layer where the gradient goes from ~0 above to large
-  below.  The centred form returns roughly their mean.  That is a
-  correct second-order estimate at a place where the derivative is
-  genuinely not well defined.  **Not an error.**
-- **Opposite signs** — level k is a vertical *extremum*: an inversion,
-  a spike, a one-level step.  The two slopes partly annihilate, the
-  centred form collapses toward zero while both one-sided slopes stay
-  large.  **This is the artifact**, and it is the real vertical
-  analogue of the sparkle.
+That is the whole mechanism.  Everything below is about when it matters
+and when it does not.
+
+## The correction to the obvious reading
+
+Standing on a summit, "flat" is often the *right* answer — at a genuine
+peak the slope really is zero.  A cancelling stencil is only a problem
+when the peak is not real.  Two cases:
+
+- **Same sign, different size** — a monotone kink, e.g. the base of the
+  mixed layer where the gradient goes from ~0 above to large below.
+  The centred form returns roughly their average, a fair estimate
+  somewhere the derivative is not well defined anyway.  **Not an
+  error.**
+- **Opposite signs** — the profile turns around at level k.  The two
+  slopes partly cancel and the centred form collapses toward zero.
+  Whether this is an error depends on whether the turn is real, which
+  Section 4b takes apart.
 
 A metric that does not separate these two overstates the problem
 badly, because the mixed-layer base is a kink almost everywhere and
@@ -595,22 +610,71 @@ print("=> Candidate 1 is RULED OUT.  The staggering is handled correctly.")\
 """)
 
     md(cells, """\
-So the placement is right.  That leaves candidate 2 — and it comes with
-a correction to how Figure 2 should be read.
+So the placement is right.  That leaves candidate 2, which needs one
+more distinction.
 
-`dz_signflip` marks "level k is a vertical extremum".  It does **not**
-distinguish:
+`dz_signflip` marks "the profile turns around at level k".  It does not
+say whether that turn is real:
 
-- a **resolved** extremum — a jet core, a shear reversal, an
-  internal-wave crest.  Here ∂U/∂z genuinely is ~0 and the centred
-  stencil is *right*.  Not an error.
-- a **2Δz checkerboard** — the slope alternating sign at consecutive
-  interfaces.  The field is oscillating at the grid scale, nothing
-  resolves it, and the centred stencil is averaging noise.
+- A **resolved** turning point — a jet core, a shear reversal, an
+  internal-wave crest.  ∂U/∂z genuinely *is* ~0 there, so the centred
+  stencil is **right**.  Not an error.
+- A **2Δz zig-zag** — the profile going up, down, up, down from one
+  level to the next.
 
-Only the second is a problem.  `vertical_noise_ab` separates them: it
-flags a level only when the slope alternates across *three* consecutive
-interfaces, which no physical profile does at the grid scale.
+### What "2Δz" means, and why it is the danger case
+
+Δz is the thickness of a model level.  **2Δz is the shortest wave a
+grid can represent**: up on one level, down on the next — two levels
+per full wavelength.  Anything finer cannot be written down on the grid
+at all; it gets folded (aliased) into this zig-zag.
+
+In a zig-zag *every* level is a turning point, so the centred stencil
+cancels everywhere, and there is no resolved structure underneath for
+it to be right about.  That is the case worth finding.
+`vertical_noise_ab` separates the two by requiring the slope to
+alternate across **three** consecutive interfaces: a single resolved
+peak flips once, a zig-zag keeps flipping.
+
+### What causes a 2Δz zig-zag
+
+1. **Real structure finer than the grid can hold.**  LLC4320's levels
+   thicken enormously with depth — from **1 m** at the surface to
+   **45 m** at 900 m (`docs/Grid.md`).  So the shortest wave the grid
+   can represent grows from about 2 m near the surface to about **90 m**
+   at depth.  Internal waves with vertical wavelengths of tens of
+   metres are comfortably resolved in the upper ocean and fall *below
+   the grid scale* deeper down; as they cross that threshold they can
+   only appear as a zig-zag.  This is the **model's** resolution limit
+   showing up in our diagnostic, not a bug in our code.
+2. **Numerical modes.**  A discretisation can support a grid-scale
+   oscillation the equations do not damp.  Where the real signal is
+   weak — the deep ocean — whatever remains is proportionally large.
+
+### Why density is immune and velocity is not
+
+A stably stratified ocean requires density to **increase downward
+everywhere**.  ρ(z) is therefore monotonic, and a turning point in it
+is a density inversion — rare, and physically meaningful when it
+happens.  Velocity has no such constraint: it reverses with depth as
+often as the flow likes.  That asymmetry, not any difference in how
+they are handled, is why `rho` sits near zero below 200 m while `U` and
+`V` do not.
+
+### If we wanted to fix it
+
+| Option | What it does | Cost |
+|---|---|---|
+| **Do nothing** | If the zig-zag is under-resolved real physics, "fixing" it deletes model signal rather than correcting an error | the noise stays |
+| **1-2-1 smoothing in z before differentiating** | On an even grid this filter's response at exactly 2Δz is **zero**, while resolved structure passes almost untouched | our grid is uneven, so the null is only approximate, and it blurs real structure slightly |
+| **Differentiate on the interfaces (`k_l`)** | A one-sided difference between adjacent levels lives naturally at the interface and **never skips a point**, so it cannot cancel.  The vertical twin of the horizontal square-before-interpolate fix | changes `N2` and everything downstream |
+| **Detect and report** | What this notebook does now | no correction, but no surprises either |
+
+For `N2` the third is the principled option: `∂ρ/∂z` between two levels
+genuinely *is* an interface quantity, and computing it where it belongs
+is exactly the lesson the horizontal sparkle taught us.  For deep
+`U`/`V` shear the first may be the honest one, because there the
+zig-zag is probably real, under-resolved wave energy.
 """)
     code(cells, """\
 # Candidate 2: how many of the flips are grid-scale checkerboard?
@@ -660,6 +724,46 @@ fig.suptitle("Figure 3 — resolved extrema (dashed) vs grid-scale "
              fontsize=11)
 fig.tight_layout()
 plt.show()\
+""")
+
+    md(cells, """\
+### How to read Figure 3
+
+Dashed is every turning point.  Solid is the subset that is a 2Δz
+zig-zag.  **Only the solid line is an error**; the gap between them is
+real vertical structure that the centred stencil handles correctly.
+
+**`rho` — clean, and structurally so.**  Both curves fall to ~0 below
+200 m.  Density is monotonic in a stably stratified ocean, so it has
+almost nothing to turn around about.  The activity in the upper 200 m
+is the seasonal thermocline and mixed layer, where real structure
+lives, and only a small share of it is grid-scale.
+
+**`U` and `V` — nearly identical, and rising with depth.**  Turning
+points climb steadily from the surface downward.  The zig-zag share
+follows the same shape.
+
+That rise is the level thickening, not a deteriorating calculation.
+Levels go from 1 m to 45 m over this range, so the shortest wave the
+grid can hold grows from ~2 m to ~90 m.  A vertical feature of a few
+tens of metres is well resolved at 100 m depth and *unresolvable* at
+900 m.  The diagnostic is reporting where the model runs out of
+vertical resolution.
+
+**Does it matter?**  Two observations, and the second is reasoning
+rather than measurement — check it against the numbers above:
+
+1. Where shear physically matters — the upper 200 m, where `Ri < 0.25`
+   is a meaningful statement — the zig-zag share is at its smallest.
+2. Where it is largest, the deep ocean, the velocity signal itself is
+   weakest.  And the cancellation biases shear *low*, which biases
+   `Ri = N²/S²` *high*, i.e. toward "stably stratified" — which is the
+   correct answer for the deep ocean anyway.  So the error is pointing
+   in a direction that does not flip the physical conclusion.
+
+If both hold, the vertical stencil is not the dominant error in the
+depth pipeline and the `_mld` blotchiness has another cause — see
+[`mixed_layer_depth.ipynb`](mixed_layer_depth.ipynb).
 """)
 
     md(cells, """\
