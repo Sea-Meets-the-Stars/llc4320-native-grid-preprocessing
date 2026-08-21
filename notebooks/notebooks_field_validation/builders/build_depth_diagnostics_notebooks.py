@@ -117,6 +117,39 @@ print(f"tile   : idx {tile.tile_idx}, face {tile.face_idx}")
 ds_grid = tile_utils._load_grid_for_tile(S3, tile)
 ds_raw = tile_utils._load_tracers_for_tile(
     S3, DATE, tile, ["Theta", "Salt", "U", "V", "W"])
+
+# ---------------------------------------------------------------------
+# MEMORY -- why this is a SLICE and not a rechunk
+# ---------------------------------------------------------------------
+# vertical_stencil_ab holds ~8 full 3D intermediates at once, in float64
+# (the depth coordinate is float64, so everything downstream upcasts).
+# On a full 720x720x51 tile that is ~1.7 GB per field, and ertel_pv adds
+# ~10 more of its own.  Across eight fields it kills the kernel.
+#
+# Rechunking the horizontal LOOKS like the fix and is a trap.  The
+# production depth strategies index a 3D field and the 2D MLD together
+# inside ONE dask block (_extract_at_mld), so their chunks must match
+# exactly -- and xgcm's diff/interp re-block derived fields, so a
+# gradient chain ends up chunked differently from the MLD.  The failure
+# is an IndexError deep inside the ufunc.  Production never sees it
+# because _ensure_depth_chunking uses a single 720x720 block.
+#
+# So: keep ONE horizontal block, and make the tile SMALLER instead.
+# These diagnostics are statistical -- they report fractions over the
+# tile -- and a quarter tile is 130k columns, plenty for that.  Slicing
+# happens BEFORE _build_tile_context so the grid, the metrics and the
+# xgcm object all agree.
+SUBTILE = 360        # None = whole tile; 360 = a quarter, 4x less memory
+
+if SUBTILE:
+    _sl = {d: slice(0, SUBTILE) for d in ("j", "i", "j_g", "i_g")}
+    ds_grid = ds_grid.isel({d: v for d, v in _sl.items()
+                            if d in ds_grid.dims})
+    ds_raw = ds_raw.isel({d: v for d, v in _sl.items()
+                          if d in ds_raw.dims})
+    print(f"sub-tile : {SUBTILE}x{SUBTILE} "
+          f"({(720 / SUBTILE) ** 2:.0f}x less memory than the full tile)")
+
 ds_merge, xgrid = tile_utils._build_tile_context(ds_raw, ds_grid)
 
 XC, YC = dfig.tile_coords(ds_grid)
@@ -125,28 +158,6 @@ LAND = dfig.tile_land_mask(ds_grid)
 # Depth coordinate, positive downward, and the layer thicknesses.
 Z = np.asarray(VH._get_depth_coord(ds_merge).values, dtype=float)
 print(f"levels : {len(Z)}, {Z[0]:.1f} m to {Z[-1]:.1f} m")
-
-# ---------------------------------------------------------------------
-# MEMORY -- this one line is why the notebook fits in RAM
-# ---------------------------------------------------------------------
-# The tile arrives as ONE 720x720x51 chunk, so dask cannot stream: peak
-# memory is the whole array, and vertical_stencil_ab holds ~8 full 3D
-# intermediates at once, in float64 (the depth coordinate is float64,
-# so everything downstream upcasts).  That is ~1.7 GB per field before
-# ertel_pv adds ~10 more of its own -- enough to kill the kernel.
-#
-# Rechunk the HORIZONTAL axes only, ONCE, here.  k must stay whole: the
-# mld / mld_mean strategies need entire columns.  Doing it here rather
-# than per-section means there is exactly one dataset in the notebook
-# and no way to use the wrong one by accident.
-# CHUNK = 180 -> 16 blocks of ~13 MB.  Lower it if memory is tight.
-# CHUNK = 720 restores production's single-block behaviour: no memory
-# benefit, but also no chunk-alignment concerns at all -- use it as the
-# escape hatch if anything downstream misbehaves.
-CHUNK = 180
-ds_merge = ds_merge.chunk({"j": CHUNK, "i": CHUNK})
-print(f"chunks : j,i -> {CHUNK} ({(720 // CHUNK) ** 2} blocks), "
-      f"k whole")
 
 # Two lazy fields every section below needs.
 rho = CF.potential_density(ds_merge)
@@ -174,8 +185,7 @@ FIELD_ZOO = """\
 # diagnostic is COUNTERFACTUAL -- it answers a question the pipeline
 # never asks.  They are still worth plotting, but for a different
 # reason: see the note under Figure 2.
-# ds_merge was already rechunked in Section 1, so every graph built
-# here streams.  jac is shared by two of the probe fields.
+# jac is shared by two of the probe fields.
 jac = CF.compute_velocity_jacobian(ds_merge, xgrid)
 
 # Group A -- the pipeline really does take d/dz of these.
@@ -210,7 +220,8 @@ ZOO_KIND = {
     "N2": "probe: already a vertical gradient",
     "ertel_pv": "probe: vertical x horizontal product",
 }
-# Trim this if the kernel still dies -- ertel_pv is by far the heaviest.
+# Trim this if the kernel still dies, or lower SUBTILE in Section 1.
+# ertel_pv is by far the heaviest entry.
 ZOO_FIELDS = list(ZOO)
 
 print(f"differentiated by the pipeline : {list(DIFFERENTIATED)}")
@@ -405,8 +416,9 @@ computing, but as a measure of something else — see Figure 2.
 #      dask.compute per field, so the shared 3D graph is built once
 #      rather than twice.
 #
-# If the kernel still dies: lower CHUNK, or trim ZOO_FIELDS (drop
-# ertel_pv first -- it is several times heavier than anything else).
+# If the kernel still dies: lower SUBTILE in Section 1, or trim
+# ZOO_FIELDS (drop ertel_pv first -- it is several times heavier than
+# anything else).
 def _mask(a):
     \"\"\"Squeeze to 2D and blank the land.\"\"\"
     return np.where(LAND, np.nan, np.squeeze(np.asarray(a)))
