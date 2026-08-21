@@ -142,7 +142,13 @@ ds_raw = tile_utils._load_tracers_for_tile(
 SUBTILE = 360        # None = whole tile; 360 = a quarter, 4x less memory
 
 if SUBTILE:
-    _sl = {d: slice(0, SUBTILE) for d in ("j", "i", "j_g", "i_g")}
+    # CENTRED, not slice(0, SUBTILE).  A corner slice moves the data
+    # away from the region anchor, which then puts the zoom box outside
+    # the plotted domain -- matplotlib rescales the axes around it and
+    # you get a blank margin with the box jammed into a corner.
+    _off = (720 - SUBTILE) // 2
+    _sl = {d: slice(_off, _off + SUBTILE)
+           for d in ("j", "i", "j_g", "i_g")}
     ds_grid = ds_grid.isel({d: v for d, v in _sl.items()
                             if d in ds_grid.dims})
     ds_raw = ds_raw.isel({d: v for d, v in _sl.items()
@@ -154,6 +160,15 @@ ds_merge, xgrid = tile_utils._build_tile_context(ds_raw, ds_grid)
 
 XC, YC = dfig.tile_coords(ds_grid)
 LAND = dfig.tile_land_mask(ds_grid)
+
+# Zoom on the centre of the domain we are ACTUALLY plotting, not on the
+# region anchor -- with SUBTILE set they are not the same point, and a
+# box outside the data silently wrecks the figure.  depth_map_grid
+# raises if the box does not fit, so this is checked, not assumed.
+ZOOM_CENTER = (float(np.nanmedian(XC)), float(np.nanmedian(YC)))
+print(f"domain : lon [{np.nanmin(XC):.2f}, {np.nanmax(XC):.2f}], "
+      f"lat [{np.nanmin(YC):.2f}, {np.nanmax(YC):.2f}]")
+print(f"zoom   : centred at ({ZOOM_CENTER[0]:.2f}, {ZOOM_CENTER[1]:.2f})")
 
 # Depth coordinate, positive downward, and the layer thicknesses.
 Z = np.asarray(VH._get_depth_coord(ds_merge).values, dtype=float)
@@ -366,7 +381,8 @@ ab = dfig.pack_tile_levels(
 dfig.depth_map_grid(
     ["dz_centred", "dz_onesided", "dz_asym", "dz_signflip"], ab,
     CMAP_CFG, region=REGION, levels=LEVELS,
-    diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
+    diverging_cmaps=DIVERGING,
+    zoom_half_km=ZOOM_HALF_KM, zoom_center=ZOOM_CENTER,
     suptitle=("Figure 1 — centred vs one-sided ∂ρ/∂z, with curvature "
               "(asym) and cancellation (signflip) separated"))
 plt.show()
@@ -517,6 +533,126 @@ jumps between neighbouring columns.  The right panel is effectively a
 """)
 
     md(cells, """\
+## Section 4b — Why U and V flip so much more than density
+
+The left panel of Figure 2 is startling: `rho` sits near zero below
+200 m while `U` and `V` climb to 25–37%.  Two candidate explanations,
+and they lead to opposite conclusions.
+
+**Candidate 1 — the vertical staggering is wrong.**  U and V are
+staggered on the C-grid, so maybe `_vertical_derivative` is using the
+tracer depth coordinate for fields that do not live on tracer levels.
+The next cell tests this directly.
+
+**Candidate 2 — velocity genuinely has more vertical structure.**
+LLC4320 resolves internal tides; the deep flow is weak, wavy and
+reverses often.  Every genuine extremum of U(z) is a sign flip.
+
+The distinction matters because of something `dz_signflip` cannot see
+on its own: **at a resolved extremum the derivative really is ~0, so
+the centred stencil returning ~0 is CORRECT.**  A sign flip is only an
+error when the field is oscillating at the grid scale, where no
+discretisation resolves anything.  Section 4b tests both.
+""")
+    code(cells, """\
+# Candidate 1: the staggering audit.  What levels does each raw
+# variable live on, and which depth coordinate does the derivative use?
+print(f"{'variable':<10}{'dims':<34}{'zdim':<7}{'coord':<7}"
+      f"{'first 3 depths (m)'}")
+print("-" * 92)
+_seen = {}
+for _nm in ("Theta", "U", "V", "W"):
+    _da = ds_merge[_nm]
+    _zd = VH._get_vertical_dim(_da)
+    _zc = VH._get_depth_coord(ds_merge, zdim=_zd)
+    _cn = {"k": "Z", "k_l": "Zl"}[_zd]
+    _seen[_nm] = (_zd, tuple(np.round(_zc.values[:3], 2)))
+    print(f"{_nm:<10}{str(_da.dims):<34}{_zd:<7}{_cn:<7}"
+          f"{np.round(_zc.values[:3], 2)}")
+
+print("")
+assert _seen["U"][0] == _seen["Theta"][0] == "k", "U is not on tracer levels"
+assert _seen["V"][0] == _seen["Theta"][0] == "k", "V is not on tracer levels"
+assert _seen["U"][1] == _seen["Theta"][1], "U depths differ from tracer"
+assert _seen["W"][0] == "k_l", "W is not on the staggered levels"
+print("U and V are on 'k' with coordinate Z -- the SAME vertical levels")
+print("as the tracers.  They are staggered HORIZONTALLY (i_g, j_g), not")
+print("vertically.  Only W is vertically staggered (k_l, Zl), and")
+print("_get_depth_coord maps k->Z and k_l->Zl, so every derivative uses")
+print("the coordinate matching its own field.")
+print("")
+print("=> Candidate 1 is RULED OUT.  The staggering is handled correctly.")\
+""")
+
+    md(cells, """\
+So the placement is right.  That leaves candidate 2 — and it comes with
+a correction to how Figure 2 should be read.
+
+`dz_signflip` marks "level k is a vertical extremum".  It does **not**
+distinguish:
+
+- a **resolved** extremum — a jet core, a shear reversal, an
+  internal-wave crest.  Here ∂U/∂z genuinely is ~0 and the centred
+  stencil is *right*.  Not an error.
+- a **2Δz checkerboard** — the slope alternating sign at consecutive
+  interfaces.  The field is oscillating at the grid scale, nothing
+  resolves it, and the centred stencil is averaging noise.
+
+Only the second is a problem.  `vertical_noise_ab` separates them: it
+flags a level only when the slope alternates across *three* consecutive
+interfaces, which no physical profile does at the grid scale.
+""")
+    code(cells, """\
+# Candidate 2: how many of the flips are grid-scale checkerboard?
+noise = {}
+for nm in DIFFERENTIATED:
+    nb = dfig.vertical_noise_ab(ZOO[nm], ds_merge)
+    ex, oz = dask.compute(
+        nb["dz_extremum"].mean(dim=[d for d in nb["dz_extremum"].dims
+                                    if d != "k"]),
+        nb["dz_2dz"].mean(dim=[d for d in nb["dz_2dz"].dims if d != "k"]),
+    )
+    noise[nm] = (100 * np.asarray(ex.values, dtype=float),
+                 100 * np.asarray(oz.values, dtype=float))
+    print(f"  done: {nm}")
+
+print("")
+print(f"{'field':<8}{'mean extrema':>14}{'mean 2dz':>11}"
+      f"{'2dz share':>12}   verdict")
+print("-" * 74)
+for nm, (ex, oz) in noise.items():
+    share = np.nanmean(oz) / max(np.nanmean(ex), 1e-30)
+    print(f"{nm:<8}{np.nanmean(ex):>13.1f}%{np.nanmean(oz):>10.1f}%"
+          f"{100 * share:>11.1f}%   "
+          + ("GRID NOISE dominates" if share > 0.33 else
+             "mostly resolved structure"))
+print("")
+print("A low 2dz share means the flips are real vertical structure and")
+print("the centred stencil is answering correctly (d/dz IS ~0 at an")
+print("extremum).  A high share means the profile is oscillating at the")
+print("grid scale and the derivative there is meaningless.")\
+""")
+    code(cells, """\
+fig, axes = plt.subplots(1, len(noise), figsize=(4.6 * len(noise), 6.5),
+                         sharey=True)
+for ax, (nm, (ex, oz)) in zip(np.atleast_1d(axes), noise.items()):
+    ax.plot(ex, Z, color="#0072B2", linewidth=2, linestyle="--",
+            label="any extremum")
+    ax.plot(oz, Z, color="#D55E00", linewidth=2, label="2Δz checkerboard")
+    ax.set_ylim(Z.max(), 0)
+    ax.set_xlabel("% of tile", fontsize=9)
+    ax.set_title(nm, fontsize=10)
+    ax.grid(alpha=0.25, linewidth=0.6)
+    ax.legend(fontsize=8, loc="lower right")
+np.atleast_1d(axes)[0].set_ylabel("depth (m)", fontsize=9)
+fig.suptitle("Figure 3 — resolved extrema (dashed) vs grid-scale "
+             "oscillation (solid).  Only the solid line is an error.",
+             fontsize=11)
+fig.tight_layout()
+plt.show()\
+""")
+
+    md(cells, """\
 ## Section 5 — Order of operations: reduce-then-combine vs combine-then-reduce
 
 Everything above is about one derivative.  This section is about what
@@ -578,7 +714,7 @@ for lev in LEVELS:
 dfig.depth_map_grid(
     ["combine_then_reduce", "reduce_then_combine"], order, CMAP_CFG,
     region=REGION, levels=LEVELS, diverging_cmaps=DIVERGING,
-    zoom_half_km=ZOOM_HALF_KM,
+    zoom_half_km=ZOOM_HALF_KM, zoom_center=ZOOM_CENTER,
     suptitle=("Figure 3 — v_z · b_x: combining in 3D then reducing "
               "(production) vs reducing then combining"))
 plt.show()\
@@ -589,12 +725,16 @@ plt.show()\
 
 Fill in from the numbers above.  Three separable questions:
 
-1. **Is the sign-flip rate material?**  Judge this from the LEFT panel
-   of Figure 2 only — `rho`, `U`, `V`.  Those are the only vertical
-   derivatives the pipeline takes, so they bound the real exposure.
-   A few percent means isolated bad pixels in `Ri`, `Fr`, `Bu` and
-   `ertel_pv` — worth annotating, not worth re-plumbing.  The right
-   panel is loud but counterfactual; it must not drive this decision.
+1. **Is the sign-flip rate material?**  Judge from the LEFT panel of
+   Figure 2 (only `rho`, `U`, `V` are actually differentiated) AND from
+   Figure 3, which is the one that separates error from physics.  A
+   sign flip at a *resolved* extremum is not an error — ∂/∂z genuinely
+   is ~0 at a jet core or a wave crest, and the centred stencil is
+   right.  Only the **2Δz share** in Figure 3 counts.  U and V flip far
+   more often than density because velocity has far more real vertical
+   structure (internal tides, shear reversals, weak wavy deep flow),
+   not because their staggering is mishandled — Section 4b rules that
+   out with an assertion.
 2. **Does it concentrate where we sample?**  Figure 2 answers this.  If
    the peak sits near typical MLD depths, the `_mld` row is sampling
    the worst part of the column and that is worth stating in every
@@ -727,7 +867,8 @@ dfig.depth_map_grid(
     ["mixed_layer_depth", "k_of_mld"], vals, CMAP_CFG,
     region=REGION, levels=("sfc",),
     row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
-    diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
+    diverging_cmaps=DIVERGING,
+    zoom_half_km=ZOOM_HALF_KM, zoom_center=ZOOM_CENTER,
     suptitle=("Figure 1 — MLD in metres, and the model level it snaps "
               "to.  The second panel is the staircase."))
 plt.show()\
@@ -822,7 +963,8 @@ dfig.depth_map_grid(
     ["mld_threshold", "mld_interp", "mld_DI"], mv, CMAP_CFG,
     region=REGION, levels=("sfc",),
     row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
-    diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
+    diverging_cmaps=DIVERGING,
+    zoom_half_km=ZOOM_HALF_KM, zoom_center=ZOOM_CENTER,
     suptitle="Figure 2 — three MLD definitions on the same tile")
 plt.show()
 
@@ -995,7 +1137,8 @@ for nm in ("Theta", "ertel_pv"):
         ["A_snap", "B_interp"], mv2, CMAP_CFG, region=REGION,
         levels=("sfc",),
         row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
-        diverging_cmaps=DIVERGING, zoom_half_km=ZOOM_HALF_KM,
+        diverging_cmaps=DIVERGING,
+    zoom_half_km=ZOOM_HALF_KM, zoom_center=ZOOM_CENTER,
         suptitle=(f"Figure 3 — {nm} at the MLD: snapped to a model "
                   f"level (A) vs interpolated (B)"))
     plt.show()\
@@ -1041,7 +1184,7 @@ dfig.depth_map_grid(
     row_labels=("whole tile", f"{2 * ZOOM_HALF_KM:.0f} km zoom"),
     diverging_cmaps=DIVERGING, log_scale_channels={"A_grad_then_sample",
                                                    "C_sample_then_grad"},
-    zoom_half_km=ZOOM_HALF_KM,
+    zoom_half_km=ZOOM_HALF_KM, zoom_center=ZOOM_CENTER,
     suptitle=("Figure 4 — |∇b|² at the MLD: gradient-then-sample "
               "(production) vs sample-then-gradient"))
 plt.show()
