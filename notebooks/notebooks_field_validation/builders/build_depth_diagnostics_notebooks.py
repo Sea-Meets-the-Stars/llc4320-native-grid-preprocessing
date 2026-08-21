@@ -133,39 +133,62 @@ mld = CFAD.mixed_layer_depth(ds_merge)\
 
 
 FIELD_ZOO = """\
-# Six fields spanning the kinds of thing the pipeline computes, so the
-# diagnostics below are not answered on potential density alone.
+# ---------------------------------------------------------------------
+# WHAT THE PIPELINE ACTUALLY DIFFERENTIATES IN z
+# ---------------------------------------------------------------------
+# Every _vertical_derivative call site in src/dbof, in full:
 #
-#   Theta              raw tracer, vertically smooth
-#   b                  buoyancy: a scaled tracer, so also smooth
-#   gradb2             HORIZONTAL gradient (squared before interp)
-#   relative_vorticity HORIZONTAL Jacobian (ECCO recipe)
-#   N2                 VERTICAL gradient -- already one d/dz deep
-#   ertel_pv           product of a VERTICAL and a HORIZONTAL gradient
+#   calculate_fields_at_depth.py:153   _vertical_derivative(rho)  -> N2
+#   calculate_fields_at_depth.py:313   _vertical_derivative(U)    -> u_z
+#   calculate_fields_at_depth.py:314   _vertical_derivative(V)    -> v_z
+#   calculate_fields_at_depth.py:574   _vertical_derivative(b)    -> b_z
 #
-# The last two matter most: a field that is already a derivative is
-# rougher in the vertical than the tracer it came from, so ITS vertical
-# derivative cancels more often.
+# That is the complete list.  Three distinct inputs: potential density,
+# U and V.  (b = g*sigma0/rho0 is rho times a constant, so d(b)/dz and
+# d(rho)/dz have IDENTICAL sign structure -- a useful self-check.)
+#
+# We NEVER take the vertical derivative of a horizontal gradient, of a
+# Jacobian, of N2, or of ertel_pv.  So for those fields the stencil
+# diagnostic is COUNTERFACTUAL -- it answers a question the pipeline
+# never asks.  They are still worth plotting, but for a different
+# reason: see the note under Figure 2.
+rho = CF.potential_density(ds_merge)
 jac = CF.compute_velocity_jacobian(ds_merge, xgrid)
 
-ZOO = {
+# Group A -- the pipeline really does take d/dz of these.
+DIFFERENTIATED = {
+    "rho": rho,
+    "U": ds_merge["U"],
+    "V": ds_merge["V"],
+}
+
+# Group B -- never differentiated in z.  Here the same diagnostic reads
+# as a VERTICAL ROUGHNESS probe: how much fine structure the field has
+# from one level to the next.  That is not a stencil error, but it IS
+# what governs how badly a field blotches when sampled at a
+# staircase-quantised MLD (see mixed_layer_depth.ipynb).
+ROUGHNESS_PROBE = {
     "Theta": ds_merge["Theta"],
-    "b": CF.buoyancy_of_field(ds_merge),
     "gradb2": CF.grad_b2(ds_merge, xgrid),
     "relative_vorticity": CF.relative_vorticity(
         ds_merge, xgrid, jacobian=jac),
     "N2": CFAD.buoyancy_frequency_squared(ds_merge),
     "ertel_pv": CFAD.ertel_pv_terms(ds_merge, xgrid)["ertel_pv"],
 }
+
+ZOO = {**DIFFERENTIATED, **ROUGHNESS_PROBE}
 ZOO_KIND = {
-    "Theta": "raw tracer",
-    "b": "scaled tracer",
-    "gradb2": "horizontal gradient (squared first)",
-    "relative_vorticity": "horizontal Jacobian",
-    "N2": "vertical gradient",
-    "ertel_pv": "vertical x horizontal product",
+    "rho": "DIFFERENTIATED -> N2",
+    "U": "DIFFERENTIATED -> u_z",
+    "V": "DIFFERENTIATED -> v_z",
+    "Theta": "probe: raw tracer",
+    "gradb2": "probe: horizontal gradient",
+    "relative_vorticity": "probe: horizontal Jacobian",
+    "N2": "probe: already a vertical gradient",
+    "ertel_pv": "probe: vertical x horizontal product",
 }
-print("field zoo ready:", list(ZOO))\
+print(f"differentiated by the pipeline : {list(DIFFERENTIATED)}")
+print(f"roughness probes only          : {list(ROUGHNESS_PROBE)}")\
 """
 
 
@@ -192,7 +215,7 @@ its own argument.
 | | |
 |---|---|
 | Domain | one 720 × 720 × 51 tile (Section 1) |
-| Applies to | every field downstream of `∂/∂z`: N², Ri, vertical_shear, Fr, Bu, R_ib, ertel_pv |
+| Applies to | the four `_vertical_derivative` call sites — ρ, U, V (and b ≡ ρ×const) — and everything downstream of them |
 | Companions | `docs/Gradients.md`, `prompts/field_validation_depth.md` §4b |
 
 ## The claim, and the correction to it
@@ -327,13 +350,20 @@ print("            fraction of the layer, not a per-cell flag.")\
 """)
 
     md(cells, """\
-## Section 4 — Does the answer depend on which field you differentiate?
+## Section 4 — What does the pipeline actually differentiate?
 
-Section 3 answers for potential density.  But the pipeline takes `∂/∂z`
-of several different things, and a field that is **already a
-derivative** is rougher in the vertical than the tracer it came from —
-so its vertical derivative should cancel more often.  That is the
-hypothesis; this section tests it across six representative fields.
+Before comparing fields, the question has to be asked in the right
+order: **which vertical derivatives does the pipeline actually take?**
+
+There are exactly four call sites in `src/dbof`, and the next cell
+lists them.  They reduce to three distinct inputs — **potential
+density, U and V** — all of them raw or one constant away from raw.
+
+The pipeline **never** takes `∂/∂z` of a horizontal gradient, of a
+Jacobian, of `N2`, or of `ertel_pv`.  So for those fields this
+diagnostic is **counterfactual**, and plotting them on the same axes as
+the real ones without saying so is misleading.  They are still worth
+computing, but as a measure of something else — see Figure 2.
 """)
     code(cells, FIELD_ZOO)
     code(cells, """\
@@ -359,40 +389,68 @@ for nm, ab_f in rows:
     print(f"{nm:<20}{ZOO_KIND[nm]:<36}{cells_pct}")
 print("")
 print("% of the tile where ∂/∂z of that field straddles a vertical "
-      "extremum.")\
+      "extremum.")
+print("")
+print("Only the DIFFERENTIATED rows describe a real pipeline operation.")
+print("The probe rows say how much vertical fine structure a field has,")
+print("which matters for MLD sampling, not for any ∂/∂z we compute.")\
 """)
     code(cells, """\
-# The same thing as a depth profile, all six fields on one axis.
-fig, ax = plt.subplots(figsize=(7.5, 7))
-for (nm, _), c in zip(rows, dfig.LOCATION_COLORS + ("0.35",)):
+# SOLID  = a derivative the pipeline really takes.
+# DASHED = counterfactual; read as vertical roughness, not as error.
+fig, axes = plt.subplots(1, 2, figsize=(12, 6.5), sharey=True)
+palette = dfig.LOCATION_COLORS + ("0.35", "0.6")
+for i, (nm, _) in enumerate(rows):
     sf3 = dfig.vertical_stencil_ab(ZOO[nm], ds_merge)["dz_signflip"]
-    frac = dask.compute(
-        sf3.mean(dim=[d for d in sf3.dims if d != "k"]))[0]
-    ax.plot(100 * np.asarray(frac.values), Z, color=c, linewidth=2,
-            label=f"{nm} ({ZOO_KIND[nm]})")
-ax.set_ylim(Z.max(), 0)
-ax.set_xlabel("% of tile with a sign flip in ∂/∂z", fontsize=9)
-ax.set_ylabel("depth (m)", fontsize=9)
-ax.grid(alpha=0.25, linewidth=0.6)
-ax.legend(fontsize=8, loc="lower right")
+    frac = 100 * np.asarray(dask.compute(
+        sf3.mean(dim=[d for d in sf3.dims if d != "k"]))[0].values)
+    real = nm in DIFFERENTIATED
+    ax = axes[0] if real else axes[1]
+    ax.plot(frac, Z, color=palette[i % len(palette)], linewidth=2,
+            linestyle="-" if real else "--", label=nm)
+
+axes[0].set_title("Derivatives the pipeline actually takes", fontsize=10)
+axes[1].set_title("Counterfactual — vertical roughness probe",
+                  fontsize=10)
+for ax in axes:
+    ax.set_ylim(Z.max(), 0)
+    ax.set_xlabel("% of tile with a sign flip in ∂/∂z", fontsize=9)
+    ax.grid(alpha=0.25, linewidth=0.6)
+    ax.legend(fontsize=8, loc="lower right")
+axes[0].set_ylabel("depth (m)", fontsize=9)
 fig.suptitle("Figure 2 — cancellation by field type and depth "
-             "(surface at top)", fontsize=12)
+             "(surface at top).  Left panel is the pipeline; right "
+             "panel is not.", fontsize=11)
 fig.tight_layout()
-plt.show()\
+plt.show()
+
+print("Self-check: d(b)/dz is d(rho)/dz times a constant, so if b were")
+print("plotted it would lie exactly on the rho curve.")\
 """)
 
     md(cells, """\
-**What to conclude.**  If `Theta` and `b` sit low while `N2`,
-`relative_vorticity` and `ertel_pv` sit much higher, then the vertical
-stencil is not really a property of the discretisation alone — it is a
-property of *how many derivatives deep* a field already is.  That has a
-direct consequence: taking `∂/∂z` of an already-differentiated field is
-the expensive operation, and `ertel_pv`, which does exactly that and
-then multiplies across directions, should be the worst.
+**Read the two panels differently.**
 
-It also means the fix, if there is one, belongs upstream: smoothing or
-re-staggering `N2` would help everything below it, while patching
-`ertel_pv` alone would not.
+The **left** panel is the pipeline's real exposure: `rho`, `U` and `V`
+are the only things it differentiates in z.  Whatever number appears
+there is the honest size of the vertical stencil problem, and it is the
+only one that should influence a decision about `_vertical_derivative`.
+
+The **right** panel is not an error rate.  Those fields are never
+differentiated in z, so a high value there does not mean anything is
+wrong with them.  It means they have a lot of **vertical fine
+structure** — which is a real and useful thing to know, because it
+predicts something else entirely:
+
+> A field with lots of vertical structure, sampled at a
+> **staircase-quantised** MLD, blotches badly.
+
+That is the mechanism in `mixed_layer_depth.ipynb`, and it explains
+why the `_mld` rows of `gradb2`, `relative_vorticity` and `ertel_pv`
+look worse than those of `Theta` — not because of any vertical
+derivative, but because the MLD sampling lands them on a level that
+jumps between neighbouring columns.  The right panel is effectively a
+**ranking of which fields need a continuous MLD most.**
 """)
 
     md(cells, """\
@@ -467,11 +525,12 @@ plt.show()\
 
 Fill in from the numbers above.  Three separable questions:
 
-1. **Is the sign-flip rate material?**  Section 3 gives it for density;
-   Section 4 gives it per field type.  A few percent means isolated bad
-   pixels in `Ri`, `Fr`, `Bu` and `ertel_pv` — worth annotating, not
-   worth re-plumbing.  Ten percent or more at the MLD, on the fields
-   that feed the sampled products, is a different conversation.
+1. **Is the sign-flip rate material?**  Judge this from the LEFT panel
+   of Figure 2 only — `rho`, `U`, `V`.  Those are the only vertical
+   derivatives the pipeline takes, so they bound the real exposure.
+   A few percent means isolated bad pixels in `Ri`, `Fr`, `Bu` and
+   `ertel_pv` — worth annotating, not worth re-plumbing.  The right
+   panel is loud but counterfactual; it must not drive this decision.
 2. **Does it concentrate where we sample?**  Figure 2 answers this.  If
    the peak sits near typical MLD depths, the `_mld` row is sampling
    the worst part of the column and that is worth stating in every
@@ -481,6 +540,12 @@ Fill in from the numbers above.  Three separable questions:
    `mean(a·b)`, the mixed-layer average of the quantity — which is
    almost certainly the intended meaning, but it has never been written
    down, and `docs/Fields.md` should say so.
+
+4. **Which fields most need a continuous MLD?**  The right panel of
+   Figure 2 ranks them by vertical roughness, which is what governs
+   staircase sensitivity.  Take that ranking to
+   `mixed_layer_depth.ipynb` rather than treating it as a stencil
+   result.
 
 ### If a stencil fix is ever warranted
 

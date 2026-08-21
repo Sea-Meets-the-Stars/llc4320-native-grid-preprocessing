@@ -171,10 +171,33 @@ That averaging does two different things:
   `asym > 0.5` proxy undercounts it badly on this strongly non-uniform
   vertical grid.
 
+**What the pipeline actually differentiates in z — the complete list,
+four call sites in `calculate_fields_at_depth.py`:**
+
+| Line | Input | Produces |
+|---|---|---|
+| 153 | `rho` | `N2` |
+| 313 | `U` | `u_z` |
+| 314 | `V` | `v_z` |
+| 574 | `b` (= ρ × const) | `b_z` in `ertel_pv` |
+
+Three distinct inputs — **potential density, U and V** — all raw or one
+constant from raw.  We **never** take `∂/∂z` of a horizontal gradient,
+a Jacobian, `N2`, or `ertel_pv`.  So the stencil diagnostic run on
+those fields is **counterfactual** and must be labelled as such;
+`vertical_gradients.ipynb` Figure 2 separates the two panels.
+
 Measured on the Gulf Stream tile, ∂ρ/∂z: **5.5% of cells flipped at
 25 m and 7.2% at the MLD**, peaking near 14% around 40–50 m and falling
-to ~0 below 200 m.  So the MLD row is the worst of the four for
-cancellation as well as for curvature — it samples close to the peak.
+to ~0 below 200 m.  That is the real exposure.  ρ, U and V are the
+smooth end of the spectrum, which is the reassuring part.
+
+The counterfactual curves (gradb2, relative_vorticity, N2, ertel_pv
+reach 20–48%) are **not an error rate**.  They measure **vertical
+roughness**, and that predicts something else: a vertically-rough field
+sampled at a staircase-quantised MLD blotches badly.  So that panel is
+really a ranking of *which fields most need a continuous MLD* — which
+is the other notebook's question, not this one's.
 
 `dz_signflip` reduces differently per level.  At `sfc`, `z25m` and
 `mld` one level is picked, so it stays 0/1 and its mean is the fraction
