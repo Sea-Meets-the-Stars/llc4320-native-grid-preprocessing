@@ -1,5 +1,5 @@
 run:
-  run_id: "2_02/"
+  run_id: "2_03/"
   log_dir: "logs/"
 
 # Source: generate-global output consumed as cutout input.
@@ -9,7 +9,7 @@ run:
 input:
   s3_endpoint: "https://s3-west.nrp-nautilus.io"
   bucket: "dbof"
-  folder: "globals_for_cutouts/v2_2_01/"
+  folder: "globals_for_cutouts/v2_2_02/"
   #date_prefixes:                                # including no dates should process all. 
   grid_access:                                  # rectangular llc4320 grid store
     s3_endpoint: "https://s3-west.nrp-nautilus.io"
