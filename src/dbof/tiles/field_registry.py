@@ -164,7 +164,7 @@ TILE_PROPERTIES: dict[str, TileProperty] = {
         "northward velocity (tracer points, CS/SN rotated)", "v",
         _pick(CF.geographic_velocity, 1), edge_margin=1),
     "W": TileProperty(
-        "W", ("W",), "W", "m s-1",
+        "W", ("W", "Theta"), "W", "m s-1",
         "vertical velocity (centred to tracer levels)", "w",
         _w_centred),
     # --- stratification ----------------------------------------------------
