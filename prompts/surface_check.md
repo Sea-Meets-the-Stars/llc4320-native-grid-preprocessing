@@ -35,6 +35,10 @@ Write a report named `surface_report.md` that answers the question.  Put it in t
     - Make a quantitative estimate of the improvement in the quality of the calculations.
 Use Fable, Log your work.
 
+4. Please check:
+    - Check whether the old stack really mis-estimated the gradients.  The LLC4320 was first interpolated to a constant 2.25km grid and then the gradient was performed.  Why would this lead to such large errors?
+Use Fable, Log your work.
+
 ## Logging
 
 The "Logs" section will record Claude's work.  Please use the following format:
@@ -119,3 +123,25 @@ Findings, as written into §4.3:
 - **Headline number**: systematic error on the core frontal diagnostics reduced from 20–80% (latitude-correlated) plus factors of 10³–10⁶ (Fs, cross-family) to the few-percent unbiased truncation floor — conservatively a one-to-two order-of-magnitude reduction, and "not a physical quantity → correct" for Fs. Added to the exec-summary quality row and the bottom line.
 
 Lesson recorded: my first synthetic experiment had two bugs worth remembering — a forgotten DC-zeroing (K[0,0]=1e-9 with K⁻²·⁵ makes the "divergent" test field a near-constant, producing absurd 10¹³% relative errors) and an unfair comparison of corner-located native C-grid vorticity against center-located truth; the corrected run emulates dbof's actual interp-to-centre chain from `calculate_jacobian`.
+
+### 2026-08-24 (Prompt 4: verified the gradient mis-estimate claim against the actual ingestion code and data — the "interpolated to constant 2.25 km" premise is a misrecollection)
+
+Executed Prompt 4 (Fable): checked whether the old stack really mis-estimated the gradients, against the hypothesis that LLC4320 was first interpolated to a constant 2.25 km grid (which would make dividing by 2.25 correct). **Verdict: the mis-estimate is real; no interpolation to a constant grid ever happened.** Evidence chain, all checked directly:
+
+1. `fronts/scripts/slurp_llc.py` (the script that produced every pre-staged file) calls `xmitgcm.llcreader.llcmodel.faces_dataset_to_latlon(ds, metric_vector_pairs=[])` — despite the name, this only *rearranges* the 13 faces into a rectangle (concatenate sector faces, rotate faces 7–12, drop the Arctic cap). No resampling of any kind.
+2. Opened the actual pre-staged file `$OS_OGCM/LLC/data/ThetaUVWSaltEta/LLC4320_2011-09-13T00_00_00.nc`: shape (12960, 17280) = 3×4320 by 4×4320 native cells (the very rectangle the new pipeline stitches), bare integer i/j indices, **no lat/lon coordinates**, and U/V still on staggered `i_g`/`j_g` dims — impossible for an interpolated product.
+3. Measured the grid in `$OS_OGCM/LLC/data/CC/LLC_coords.nc` (the coords lookup `ex_ogcm.llc_datetime` actually used): meridional spacing 2.16 km at the equator → 1.85 km at 30° → 1.38 km at 51° → 0.97 km at 65°S; zonal 2.32·cos(lat). Never constant, never 2.25.
+4. The extraction code itself presumes varying spacing: `dr = round(144/dlat_km)` recomputes the native pixel count per cutout from the *local* spacing — pointless on a uniform grid (would always be 64).
+5. Located where 2.25 comes from and where it is legitimate: 144/64, the *post-resize* spacing (`mk_json.py` writes `'dx': 144./64`); gradients on already-resized images (e.g. `gallery()`'s `calc_gradb`) are fine. But the DB's derived fields set `resize: True` in `fronts/dbof/defs.py` and every `pp_ogcm` wrapper computes the gradient on the native-resolution cutout FIRST and resizes the result — the output grid's spacing was applied to the input grid.
+
+Report changes: (a) added §4.4 answering the question with the five-point evidence chain and the corrected causal story ("resize-then-differentiate would have justified 2.25; the pipeline differentiated-then-resized"); (b) upgraded the §4.3-A bias table from the Mercator idealization (2.31·cos lat) to spacing *measured* from `LLC_coords.nc` — the measured grid is 4–7% tighter at low-mid latitudes, so the biases are slightly larger than first reported: ≈0% at the equator (2.25 luckily sits between dy=2.16 and dx=2.32), −26% at 30°, −50% at 45°, −71% at 57°N, −81% at 65°S for squared-gradient fields; area-weighted over the sampled −70°..+57° domain: **−20% (first derivatives), −33% (squared)**. The bias is monotone poleward — largest exactly where LLC4320's fronts are strongest (Southern Ocean).
+
+What I learned beyond the verdict: the equatorial near-cancellation means low-latitude-only comparisons would (misleadingly) validate the old fields; and LLC4320's meridional spacing at the equator (2.16 km) is measurably tighter than the zonal 1/48° (2.32 km) — the grid is mildly anisotropic there, so the report's per-axis table now lists dy and dx separately.
+
+**Follow-up (same day): full line-by-line read of `wrangler/preproc/pp_ogcm.py` and `wrangler/preproc/field.py`** (at JXP's request, to be sure), plus the historical fronts twins they shadow (`fronts/preproc/process.py`, `fronts/llc/extract.py`, `fronts/po/fronts.py` at commit 94ef7fb — all three since deleted from the repo). This confirmed the §4.3/§4.4 claim where it matters and surfaced one genuinely new nuance, now written into §4.4 as a "Route audit":
+
+- **Route 1 (biased)** — the DBOF database's derived fields: every `pp_ogcm` wrapper computes the gradient on the native-resolution cutout with constant dx=2.25 and resizes the *result* (verified per-line: `gradb2_cutout` 95→100, `gradfield2_cutout` 57→61, `Fs_cutout` 134→138, `current_cutout` 218–228→234). `fronts/dbof/fields.py:66` injects `cutout_size: 64` into the defs.py pdicts, so `resize=True` executes as intended.
+- **Route 2 (biased)** — the `sst_ssh_unet` U-Net *target*: historical `po_fronts.gradb2_cutout` has the same compute-then-resize order (calc at 38, resize at 43). The Divb2 target carries the full latitude bias.
+- **Route 3 (NOT biased)** — the generic preprocessor (`preproc_field`/`main`) resizes *early* (to 64 px ≡ 2.25 km/px) and applies its `div2` gradient *last*, so the `sst_ssh_unet` DivSST2 training *inputs* (pdict `"div2": 2.25`) were differentiated on the resized grid where 2.25 is correct.
+
+New insight from the audit: within the `sst_ssh_unet` training pairs, the input (route 3, correct scale) and target (route 2, biased scale) use inconsistent gradient conventions, so the input→target amplitude mapping the network had to learn drifts with latitude by the §4.3-A factors (up to ~3× at the poleward edge). Also re-confirmed two latent wrangler bugs with exact locations: `field.py:156` `resize is not None` truthiness (resize unconditional; defanged by the injected cutout_size) and `field.py:217` `div2` branch referencing `po_utils` without an import (NameError if ever hit — the div2 route only worked via the fronts copy, which imports it). Full reads also re-verified the §4.3-B unit facts at exact lines: `calc_F_s` velocity gradients per-index (296–300) vs buoyancy gradients per-km (304–309); `calc_grad2` per-km both axes; kinematics /(dx·10³); OW /(dx·10³)²; `calc_curvatureradius` divides a length by dx·10³ (478).
