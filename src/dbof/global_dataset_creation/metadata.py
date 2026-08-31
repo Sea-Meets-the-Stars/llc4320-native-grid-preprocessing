@@ -10,7 +10,7 @@ import logging
 import subprocess
 from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -94,10 +94,12 @@ def save_run_metadata(cfg, log_file: Path, fs=None, clobber: bool = False) -> Pa
         Local path to the metadata file.
     """
     meta_path = log_file.parent / "run_meta.yaml"
-    s3_key = (
-        f"{cfg.output.bucket}{cfg.output.folder}"
-        f"{cfg.run.run_id}/run_meta.yaml"
-    )
+    s3_key = str(PurePosixPath(
+        cfg.output.bucket.strip().strip("/"),
+        (cfg.output.folder or "").strip().strip("/"),
+        cfg.run.run_id,
+        "run_meta.yaml",
+    ))
 
     # -- Load existing metadata as the merge base (local first, then S3) --
     meta = None
