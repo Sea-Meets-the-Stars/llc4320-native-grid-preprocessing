@@ -83,16 +83,51 @@ under its exact channel name (`density`, `N2`, `relative_vorticity`,
 `frontogenesis_tendency`, `oceTAUX`, ...). The legacy names
 `temperature` → `Theta` and `salinity` → `Salt` still work as aliases.
 
-Each entry declares the S3 variables it needs, a compute callback
-`compute(ds_merge, grid) -> lazy DataArray`, output metadata, and an
-`edge_margin` (see below). **Physics never lives in the registry**:
-every callback points at the single canonical implementation in
-`preprocessing.calculate_fields` / `calculate_fields_at_depth`; only
-passthroughs and trivial component extraction are local. The
-authoritative field list, units, and equations are documented per
-subset in `subset_definitions.py` and the field-validation notebooks —
 `tests/test_tile_field_registry.py` asserts that every subset channel
 has a registry entry, so the registry cannot silently fall behind.
+Per-channel definitions, equations and units are catalogued in
+[Fields.md](Fields.md) — note that tiles use the base channel name
+(`N2`, not `N2_sfx`), since a tile is a single extraction rather than a
+depth-suffix sweep.
+
+### How the registry works
+
+Each entry is a `TileProperty`, a frozen dataclass holding everything
+needed to fetch, compute and label one field. `resolve_property()`
+looks entries up by channel name or legacy alias; the `TileProperty`
+docstring documents each attribute.
+
+The registry is a lookup table, not a second implementation of the
+physics. Every `compute` callback points at the canonical function in
+`preprocessing.calculate_fields` (CF) or `calculate_fields_at_depth`
+(CFAD) — only passthroughs and component extraction are local. The one
+exception is `frontogenesis_ageo`: the residual F(u,v) − F(ug,vg) has no
+canonical function, so the registry mirrors the inline definition in
+`surface_subsets.compute_frontogenesis`.
+
+Callbacks all share one signature, `compute(ds_merge, grid) ->
+xr.DataArray`, and must stay lazy. `ds_merge` is the merged tile
+(tracers + grid), `grid` the local xgcm grid; materialisation happens
+once, downstream.
+
+A *passthrough* returns a stored variable unchanged, which only works
+for scalars already on tracer points — `Theta`, `Eta`, `oceQnet`.
+Velocity and wind stress are neither: `U`, `V`, `oceTAUX` and `oceTAUY`
+sit on staggered C-grid faces and follow the model's x/y axes, which on
+the rotated LLC faces point roughly north rather than east. Those
+entries go through the CS/SN rotation instead (see
+[Vector rotation](#vector-rotation)). Never add a raw-vector
+passthrough — it would emit wrong-point, wrong-direction data under a
+correct-looking `long_name`.
+
+Canonical functions don't all take the same arguments, so entries wrap
+them in small adapters — plumbing only, no physics:
+
+| Adapter | Use |
+|---|---|
+| `_passthrough(var)` | Return a stored tracer-point scalar as-is |
+| `_no_grid(fn)` | Canonical function whose signature is `fn(ds_merge)` |
+| `_pick(fn, index)` | Take one component from a multi-output function, by position or key |
 
 ### Tile context: a local xgcm grid
 
@@ -112,7 +147,11 @@ Fields with horizontal stencils (gradients, vorticity, frontogenesis,
    connections exist for one tile. Vertical coordinate vars
    (`Z`/`Zl`/`Zu`/`Zp1`/`drF`) are dropped from what xgcm sees, same
    as `grid_setup.set_up_grid_depth` in the DEPTH pipeline; the merged
-   dataset handed to compute callbacks keeps them. Consequence: horizontal stencils are
+   dataset handed to compute callbacks keeps them.
+
+### Edge margin
+
+Because a tile carries no face connections, horizontal stencils are
 invalid in a rim of cells at the tile boundary. Each registry entry
 declares that rim as `edge_margin` (0 = rim-free passthroughs /
 verticals, 1 = staggered-point interpolation only, 3 = horizontal
@@ -362,7 +401,9 @@ conda run -n ocean14 python -m pytest \
   implementation, in `preprocessing.calculate_fields` /
   `calculate_fields_at_depth`; the registry's `compute` callbacks point
   straight at those canonical functions, and neither `tile_utils` nor
-  `field_registry` holds field math of its own. The generalization to
+  `field_registry` holds field math of its own — the sole exception is
+  the `frontogenesis_ageo` residual (see
+  [How the registry works](#how-the-registry-works)). The generalization to
   every subset channel (the former `tile_fields` follow-up) is done —
   see `prompts/tiles_fields.md` for the design decisions (tile context,
   edge rim, staggered-dim slicing, 2D outputs, vector rotation).

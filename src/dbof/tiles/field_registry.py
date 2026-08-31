@@ -9,27 +9,9 @@ subset channels in ``global_dataset_creation.subset_definitions``
 legacy aliases (``temperature`` -> ``Theta``, ``salinity`` ->
 ``Salt``; ``density`` is itself a channel name).
 
-Design rules (prompts/tiles_fields.md):
-
-- Physics NEVER lives here.  Every ``compute`` points at the single
-  canonical implementation in ``preprocessing.calculate_fields`` (CF)
-  or ``calculate_fields_at_depth`` (CFAD); only passthroughs and
-  trivial component extraction are local.
-- Uniform compute signature ``compute(ds_merge, grid) ->
-  xr.DataArray`` where ``ds_merge`` is the merged tile
-  (tracers + grid) and ``grid`` a LOCAL xgcm grid
-  (``use_connections=False``).
-- **Vector fields are NEVER passthroughs**: raw U/V/oceTAUX/oceTAUY
-  are staggered and in MODEL x/y directions; the entries below go
-  through the canonical CS/SN rotation (``geographic_velocity``,
-  ``geographic_wind_stress``, tensor-rotated Jacobian).  Do not add
-  raw-vector passthrough entries.
-- ``edge_margin``: cells at the tile boundary that are invalid for
-  fields with horizontal stencils (no face connections on a single
-  tile).  ``compute_tile_property`` sets that rim to NaN; the value
-  is recorded as an output attr.  0 = rim-free (verticals,
-  passthroughs), 1 = staggered interp only, 3 = horizontal
-  derivative / Jacobian chains.
+Design rules and rationale: docs/Tiles.md (§How the registry works,
+§Edge margin, §Vector rotation).  Per-channel definitions, units and
+equations: docs/Fields.md.
 """
 
 from __future__ import annotations
@@ -86,6 +68,12 @@ class TileProperty:
 
 def _passthrough(var):
     """Adapter: return a stored (tracer-point, scalar) variable as-is.
+
+    Valid only for scalars already on tracer points (``Theta``,
+    ``Eta``, ``oceQnet``, ...).  Never use it for a vector component:
+    ``U``/``V``/``oceTAUX``/``oceTAUY`` are on staggered C-grid faces
+    and follow the MODEL x/y axes, so they need the canonical CS/SN
+    rotation instead (docs/Tiles.md §Vector rotation).
 
     Inputs: var (str) — variable name in the tile dataset.
     Outputs: callable ``(ds_merge, grid) -> xr.DataArray``.
