@@ -53,7 +53,9 @@ from dbof.global_dataset_creation.data_sources import get_data_source
 # NOTE (PR #10): in a future PR ``iterations`` moves to
 # ``llc4320_ingestion.date_iterations`` (a backwards-compatible shim is kept at
 # the old location), so this import will keep working after the rebase.
-from dbof.global_dataset_creation.iterations import mit_date_to_iteration, DATE_FMT
+from dbof.global_dataset_creation.iterations import (
+    mit_date_to_iteration, date_to_run_id, DATE_FMT,
+)
 # ``_git_commit_hash`` moved from ``global_dataset_creation.logging`` to
 # ``global_dataset_creation.metadata`` on main.  Prefer the new location and
 # fall back to the old one so the import survives both before and after the
@@ -140,44 +142,97 @@ def _resolve_s3_source(config_path: Path | None) -> dict:
     return s3
 
 
+#: Leaf directory for tile output under ``{netcdf_base}/{run_id}/{date_prefix}``.
+#: Fixed so tiles stay separate from the per-channel global NetCDFs that
+#: ``run_all_subsets`` writes into the same date folder.
+TILE_SUBDIR = "tiles"
+
+
 def _build_output_path(
     user_output: str | None,
     tile_idx: int,
     date_str: str,
     filename_prefix: str,
+    netcdf_base: str | None = None,
+    run_id: str | None = None,
 ) -> Path:
     """Resolve the NetCDF output path with per-property defaults.
+
+    Three layouts, in precedence order:
+
+    1. ``user_output`` given -- honoured verbatim (or as a directory to
+       drop the default filename into).  Always wins.
+    2. ``netcdf_base`` AND ``run_id`` given -- the repo's standard
+       output tree with a ``tiles`` leaf::
+
+           {netcdf_base}/{run_id}/{date_prefix}/tiles/{default_name}
+
+       matching ``run_all_subsets``'s
+       ``{netcdf_base}/{run_id}/{date_prefix}`` convention, where
+       ``date_prefix`` is ``YYYYMMDD_HHMMSS`` from ``date_to_run_id``.
+    3. neither -- the default filename in CWD (legacy behaviour).
 
     Parameters
     ----------
     user_output : str or None
         User-supplied output path.  Three accepted forms:
-          * ``None`` -- use the default name in CWD.
+          * ``None`` -- fall through to layout 2 or 3.
           * existing directory -- place the default name inside it.
           * full file path -- used verbatim.
     tile_idx : int
         Flat rect-grid tile index, 0..431.
     date_str : str
-        Timestamp string in ``DATE_FMT``; used to build ``YYYYMMDDTHH``.
+        Timestamp string in ``DATE_FMT``; used to build both the
+        ``YYYYMMDDTHH`` filename stamp and the ``YYYYMMDD_HHMMSS``
+        directory prefix.
     filename_prefix : str
         Property-specific prefix (e.g. ``'density'``, ``'theta'``, ``'salt'``).
+    netcdf_base : str or None
+        Root of the output tree (e.g.
+        ``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts``).  Requires
+        ``run_id``.
+    run_id : str or None
+        Dataset version directory under ``netcdf_base`` (e.g. ``'V4'``).
+        Requires ``netcdf_base``.
 
     Returns
     -------
     Path
-        Resolved absolute output path.  Default form is
-        ``./{filename_prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc``.
+        Resolved absolute output path.  The filename is always
+        ``{filename_prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc`` unless
+        ``user_output`` names a file explicitly.
+
+    Raises
+    ------
+    ValueError
+        If exactly one of ``netcdf_base`` / ``run_id`` is supplied -- the
+        structured layout needs both, and silently falling back to CWD
+        would scatter output where the user did not expect it.
     """
     dt = datetime.strptime(date_str, DATE_FMT)
     stamp = dt.strftime("%Y%m%dT%H")
     default_name = f"{filename_prefix}_tile{tile_idx:03d}_{stamp}.nc"
 
-    if user_output is None:
-        return Path(default_name).resolve()
-    p = Path(user_output)
-    if p.is_dir():
-        return (p / default_name).resolve()
-    return p.resolve()
+    # An explicit --output always wins.
+    if user_output is not None:
+        p = Path(user_output)
+        if p.is_dir():
+            return (p / default_name).resolve()
+        return p.resolve()
+
+    if (netcdf_base is None) != (run_id is None):
+        raise ValueError(
+            "netcdf_base and run_id must be supplied together (got "
+            f"netcdf_base={netcdf_base!r}, run_id={run_id!r})."
+        )
+
+    if netcdf_base is not None:
+        return (
+            Path(netcdf_base) / run_id / date_to_run_id(date_str)
+            / TILE_SUBDIR / default_name
+        ).resolve()
+
+    return Path(default_name).resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -241,8 +296,52 @@ def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
 # Data loading
 # ---------------------------------------------------------------------------
 
+def _tile_indexer(ds: xr.Dataset, tile: TileInfo) -> dict:
+    """Build an ``isel`` indexer covering tracer AND staggered horizontal dims.
+
+    Tracer variables live on ``(j, i)``; staggered velocity variables live on
+    ``(j, i_g)`` (U) and ``(j_g, i)`` (V), and some grid metrics use both
+    (e.g. ``rAz`` on ``(j_g, i_g)``).  xarray's ``isel`` slices *dimensions*,
+    so one indexer handles every variable in the dataset at once.  Because
+    rect tiles are chunk-aligned (720-wide, 720-aligned), the staggered dims
+    take the **same** slice as their tracer counterparts -- the tile then
+    carries the staggered point on its low edge; the missing high-edge point
+    is why derivative-based properties NaN an edge rim (see field_registry).
+    Vertical dims (``k``/``k_l``) are left untouched (full column).
+
+    Ported from the retired ``tiles_field`` branch.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Dataset whose dims decide which entries appear in the indexer.
+    tile : TileInfo
+        Resolved tile metadata.
+
+    Returns
+    -------
+    dict
+        Mapping of dim name -> slice, restricted to dims present in ``ds``.
+
+    Generated by LH and Claude
+    """
+    candidates = {
+        "j":   tile.j_face_slice,
+        "j_g": tile.j_face_slice,
+        "i":   tile.i_face_slice,
+        "i_g": tile.i_face_slice,
+    }
+    return {d: sl for d, sl in candidates.items() if d in ds.dims}
+
+
 def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
     """Fetch ``grid.zarr`` from S3 and reduce it to the tile extent.
+
+    Staggered dims are sliced too: the grid metrics ``dxC``/``dyG``
+    live on ``(j, i_g)``, ``dyC``/``dxG`` on ``(j_g, i)`` and ``rAz``
+    on ``(j_g, i_g)``; without the staggered slices they would come
+    down at full-face size and misalign with the sliced tracers when
+    merged into the tile context.
 
     Parameters
     ----------
@@ -255,7 +354,8 @@ def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
     -------
     xr.Dataset
         Eagerly loaded grid for the tile, containing at least ``XC``, ``YC``,
-        ``Z``, ``hFacC``, with dims ``(face=1, k=51, j=720, i=720)`` (subset).
+        ``Z``, ``hFacC``, with dims ``(face=1, k=51, j=720, i=720)`` (subset;
+        staggered dims, when present, also 720-wide).
     """
     logging.info(
         f"Loading grid (face={tile.face_idx}, "
@@ -269,8 +369,7 @@ def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
     ds_grid = preproc_llc_core_data.process_llc4320_3d_grid(co)
     ds_grid_tile = ds_grid.isel(
         face=[tile.face_idx],
-        j=tile.j_face_slice,
-        i=tile.i_face_slice,
+        **_tile_indexer(ds_grid, tile),
     ).compute()
     return ds_grid_tile
 
@@ -320,121 +419,88 @@ def _load_tracers_for_tile(
             s3_cfg["s3_endpoint"]
         ),
     )
-    ds_tile = ds.isel(j=tile.j_face_slice, i=tile.i_face_slice)
+    # One shared indexer slices tracer AND staggered horizontal dims
+    # (identical ranges -- tiles are chunk-aligned); k/k_l stay full.
+    ds_tile = ds.isel(**_tile_indexer(ds, tile))
     return ds_tile
 
 
 # ---------------------------------------------------------------------------
-# Property registry + per-property compute callbacks
+# Property registry
 # ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class TileProperty:
-    """Specification for a single property that can be extracted as a tile.
-
-    Attributes
-    ----------
-    name : str
-        Public name used at the CLI (``'density'``, ``'temperature'``, ...).
-    vars_needed : tuple of str
-        S3 tracer variables required to compute the field.
-    out_name : str
-        Variable name written to the output NetCDF.
-    units : str
-        ``units`` attribute for the output variable.
-    long_name : str
-        ``long_name`` attribute for the output variable.
-    filename_prefix : str
-        Prefix used in the default output filename.
-    compute : Callable
-        Callback ``(ds_tracers_tile) -> xr.DataArray``.  Must return a lazy
-        (or eager) DataArray on dims ``(face, k, j, i)``.  Materialization
-        and dtype handling are done by :func:`compute_tile_property`.
-    """
-    name:             str
-    vars_needed:      tuple[str, ...]
-    out_name:         str
-    units:            str
-    long_name:        str
-    filename_prefix:  str
-    compute:          Callable[[xr.Dataset], xr.DataArray]
+# The registry moved to ``dbof.tiles.field_registry`` when the tile
+# workflow was generalized from {density, temperature, salinity} to
+# every subset channel (prompts/tiles_fields.md).  Re-exported here for
+# backward compatibility -- ``from dbof.tiles.tile_utils import
+# TILE_PROPERTIES`` keeps working.
+from dbof.tiles.field_registry import (  # noqa: F401
+    TILE_PROPERTIES,
+    TileProperty,
+    resolve_property,
+)
+from dbof.llc4320_ingestion.grid import set_xgcm_grid
+from dbof.global_dataset_creation.grid_setup import _VERTICAL_VARS
 
 
-# NOTE: property *calculations* deliberately do NOT live in this module.  Each
-# calculated field has exactly one implementation in
-# ``preprocessing.calculate_fields`` (e.g. potential density is
-# ``potential_density_anomaly``); the registry below points ``compute`` at
-# those canonical functions.  Only trivial native-variable *selection*
-# (temperature/salinity passthroughs) stays here, since there is nothing to
-# compute for a field the model already stores.
+def _build_tile_context(
+    ds_tracers_tile: xr.Dataset,
+    ds_grid_tile: xr.Dataset,
+):
+    """Merge tile tracers + grid and build a LOCAL xgcm grid.
 
+    A single-face tile has no face connections, so the xgcm grid is
+    built with ``use_connections=False``.  Consequence: fields with
+    horizontal stencils are invalid in an ``edge_margin``-cell rim at
+    the tile boundary (NaN'd by :func:`compute_tile_property`).
 
-def _compute_theta(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
-    """Potential temperature passthrough.
+    xgcm is built from ``ds_grid_tile`` ALONE, never from ``ds_merge``
+    -- same convention as ``grid_setup.set_up_grid_depth`` (the DEPTH
+    pipeline).  This is load-bearing: only the grid coords carry the
+    comodo ``axis`` attrs (stamped in ``get_llc_depth_gridfile``) that
+    xgcm needs to detect X/Y.  The timestep store carries none, and
+    ``xr.merge`` defaults to ``combine_attrs="override"`` -- attrs come
+    from the FIRST object -- so a merged dataset reaches xgcm with those
+    annotations stripped, ``Grid()`` silently finds zero axes, and every
+    stencil field dies later with ``KeyError: 'X'``.
+
+    Vertical coordinate variables (``Z``/``Zl``/``Zu``/``Zp1``/``drF``)
+    are dropped from what xgcm sees -- xgcm only needs the horizontal
+    stencil.  The set is imported from ``grid_setup`` so it stays
+    defined once.  The returned ``ds_merge`` KEEPS them -- the compute
+    callbacks need ``Z``/``drF`` (N2, MLD, ...).
 
     Parameters
     ----------
     ds_tracers_tile : xr.Dataset
-        Tile dataset with ``Theta``.
+        Lazy tracer dataset sliced to the tile (face=1).
+    ds_grid_tile : xr.Dataset
+        Eager tile-extent grid (XC, YC, Z, hFacC, metrics, CS/SN).
 
     Returns
     -------
-    xr.DataArray
-        ``Theta`` (deg C) -- the same array, returned for uniform handling
-        by :func:`compute_tile_property`.
+    (ds_merge, grid) : (xr.Dataset, xgcm.Grid)
+        Merged tile dataset and the local (no-connections) grid.
+
+    Generated by LH and Claude
     """
-    return ds_tracers_tile["Theta"]
+    ds_merge = xr.merge([ds_tracers_tile, ds_grid_tile])
 
+    # Grid-only input -- see the docstring: merging first would strip the
+    # comodo attrs xgcm needs to find its axes.
+    drop = [v for v in _VERTICAL_VARS if v in ds_grid_tile]
+    ds_for_xgcm = ds_grid_tile.drop_vars(drop) if drop else ds_grid_tile
+    grid = set_xgcm_grid(ds_for_xgcm, use_connections=False)
 
-def _compute_salt(ds_tracers_tile: xr.Dataset) -> xr.DataArray:
-    """Salinity passthrough.
-
-    Parameters
-    ----------
-    ds_tracers_tile : xr.Dataset
-        Tile dataset with ``Salt``.
-
-    Returns
-    -------
-    xr.DataArray
-        ``Salt`` (PSU) -- the same array, returned for uniform handling
-        by :func:`compute_tile_property`.
-    """
-    return ds_tracers_tile["Salt"]
-
-
-# Registry: add new properties by appending an entry here.  No other code
-# changes are required for properties that fit the (face, k, j, i) shape.
-TILE_PROPERTIES: dict[str, TileProperty] = {
-    "density": TileProperty(
-        name="density",
-        vars_needed=("Theta", "Salt"),
-        out_name="sigma0",
-        units="kg m-3",
-        long_name="potential density anomaly referenced to surface (JMD95, p=0)",
-        filename_prefix="density",
-        # Single canonical σ₀ routine -- shared with the global depth pipeline.
-        compute=calculate_fields.potential_density_anomaly,
-    ),
-    "temperature": TileProperty(
-        name="temperature",
-        vars_needed=("Theta",),
-        out_name="Theta",
-        units="degC",
-        long_name="potential temperature",
-        filename_prefix="theta",
-        compute=_compute_theta,
-    ),
-    "salinity": TileProperty(
-        name="salinity",
-        vars_needed=("Salt",),
-        out_name="Salt",
-        units="psu",
-        long_name="salinity",
-        filename_prefix="salt",
-        compute=_compute_salt,
-    ),
-}
+    # Fail here, loudly, rather than minutes later inside a compute callback
+    # with an opaque ``KeyError: 'X'`` raised from deep inside xgcm.
+    missing = {"X", "Y"} - set(grid.axes)
+    if missing:
+        raise RuntimeError(
+            f"xgcm grid for the tile is missing axes {sorted(missing)}: the "
+            "comodo attrs on i/i_g/j/j_g are absent from the grid dataset "
+            f"handed to Grid() (dims: {sorted(ds_for_xgcm.dims)})."
+        )
+    return ds_merge, grid
 
 
 # ---------------------------------------------------------------------------
@@ -442,31 +508,46 @@ TILE_PROPERTIES: dict[str, TileProperty] = {
 # ---------------------------------------------------------------------------
 
 def compute_tile_property(
-    ds_tracers_tile: xr.Dataset,
+    ds_merge: xr.Dataset,
+    grid,
     prop: TileProperty,
+    mask_land: bool = True,
 ) -> xr.DataArray:
     """Run a property's compute callback, materialise the tile, and finalise dtype/attrs.
 
-    No land masking is applied: the returned array carries whatever the
-    compute callback produced over land cells (typically a numerical value
-    derived from whatever Theta/Salt the model stored there).
+    Post-processing applied here (in order): squeeze the size-1
+    ``face`` dim, cast float32, NaN the ``prop.edge_margin`` boundary
+    cells in j/i (horizontal stencils are invalid there on a
+    single-face tile), and NaN land cells via ``hFacC == 0`` when
+    ``mask_land`` is True (ported from the ``tiles_field`` branch — a
+    cheap safety: derivative-based fields produce pathological values
+    over and next to land).  With ``mask_land=False`` land cells carry
+    whatever the compute callback produced from the model's stored
+    values there.
 
     Parameters
     ----------
-    ds_tracers_tile : xr.Dataset
-        Lazy tracer Dataset sliced to the tile, dims ``(face=1, k=51, j=720, i=720)``.
+    ds_merge : xr.Dataset
+        Merged tile dataset (tracers + grid) from
+        :func:`_build_tile_context`, dims ``(face=1, k=51, j=720, i=720)``.
+    grid : xgcm.Grid
+        Local (no-connections) grid from :func:`_build_tile_context`.
     prop : TileProperty
-        The property spec; its ``compute`` callback is invoked.
+        The property spec; its ``compute(ds_merge, grid)`` callback is
+        invoked.
+    mask_land : bool, optional
+        Apply the ``hFacC`` land mask (default True).
 
     Returns
     -------
     xr.DataArray
-        The materialised property field, float32, dims ``(k, j, i)`` -- the
-        size-1 ``face`` dim is squeezed.  ``name``, ``units`` and ``long_name``
-        attrs are set from ``prop``.
+        The materialised property field, float32, dims ``(k, j, i)`` for
+        3D fields or ``(j, i)`` for inherently-2D fields -- the size-1
+        ``face`` dim is squeezed.  ``name``, ``units``, ``long_name`` and
+        ``edge_margin`` attrs are set from ``prop``.
     """
     # Build the lazy graph via the property's compute callback.
-    field = prop.compute(ds_tracers_tile)
+    field = prop.compute(ds_merge, grid)
 
     # Single .compute() materialises the entire lazy graph (matches the
     # one-compute pattern used by generate_global_depth_dask.py).
@@ -483,9 +564,33 @@ def compute_tile_property(
     # Float32 keeps the saved file compact; precision loss is well below the
     # natural variability of the fields we care about.
     field = field.astype(np.float32)
+
+    # NaN the invalid boundary rim of horizontal-stencil fields (plan
+    # decision: keep the 720x720 shape, make bad cells unusable).
+    m = prop.edge_margin
+    if m > 0:
+        rim = xr.zeros_like(field, dtype=bool)
+        for dim in ("j", "i"):
+            if dim in field.dims:
+                n = field.sizes[dim]
+                idx = xr.DataArray(np.arange(n), dims=dim)
+                rim = rim | (idx < m) | (idx >= n - m)
+        field = field.where(~rim)
+
+    # Land mask (safety).  hFacC is surface-collapsed (face, j, i) in
+    # the depth grid store, but handle a residual k dim defensively.
+    if mask_land and "hFacC" in ds_merge:
+        hfac = ds_merge["hFacC"]
+        if "face" in hfac.dims:
+            hfac = hfac.isel(face=0)
+        if "k" in hfac.dims:
+            hfac = hfac.isel(k=0)
+        field = field.where(hfac > 0)
+
     field.name = prop.out_name
     field.attrs["units"] = prop.units
     field.attrs["long_name"] = prop.long_name
+    field.attrs["edge_margin"] = m
     return field
 
 
@@ -530,22 +635,23 @@ def _build_output_dataset(
     """
     # Drop the size-1 face dim from the grid so its coords align with field.
     grid = ds_grid_tile.isel(face=0)
-    XC = grid["XC"].astype(np.float64)
-    YC = grid["YC"].astype(np.float64)
-    Z  = grid["Z"].astype(np.float64)
+    coords = {
+        "XC": grid["XC"].astype(np.float64),   # 2D lon
+        "YC": grid["YC"].astype(np.float64),   # 2D lat
+        # Scalar provenance coords.
+        "tile_index":   tile.tile_idx,
+        "face_index":   tile.face_idx,
+        "rect_i_start": tile.rect_i_slice.start,
+        "rect_j_start": tile.rect_j_slice.start,
+    }
+    # 1D depth coord only for 3D (k, j, i) fields; inherently-2D
+    # fields (MLD, Eta-based, wind/ice) have no vertical dimension.
+    if "k" in field.dims:
+        coords["Z"] = grid["Z"].astype(np.float64)
 
     ds_out = xr.Dataset(
         data_vars={prop.out_name: field},
-        coords={
-            "XC": XC,   # 2D lon
-            "YC": YC,   # 2D lat
-            "Z":  Z,    # 1D depth
-            # Scalar provenance coords.
-            "tile_index":   tile.tile_idx,
-            "face_index":   tile.face_idx,
-            "rect_i_start": tile.rect_i_slice.start,
-            "rect_j_start": tile.rect_j_slice.start,
-        },
+        coords=coords,
         attrs={
             "timestamp":     date_str,
             "iteration":     iteration,
@@ -556,6 +662,7 @@ def _build_output_dataset(
             "rect_i_user":   rect_i_user,
             "rect_j_user":   rect_j_user,
             "property":      prop.name,
+            "edge_margin":   prop.edge_margin,
             "source_script": "src/dbof/cli/generate_tile.py",
             "git_commit":    _git_commit_hash(),
         },
@@ -584,7 +691,9 @@ def _qa_plot(
         Where to write the PNG (typically ``out_path.with_suffix('.png')``).
     """
     fig, ax = plt.subplots(figsize=(8, 7))
-    surf = ds_out[prop.out_name].isel(k=0)
+    da = ds_out[prop.out_name]
+    # 3D fields: plot the surface level; 2D fields: plot as-is.
+    surf = da.isel(k=0) if "k" in da.dims else da
     pcm = ax.pcolormesh(
         ds_out["XC"].values,
         ds_out["YC"].values,
@@ -593,8 +702,9 @@ def _qa_plot(
     )
     ax.set_xlabel("longitude")
     ax.set_ylabel("latitude")
+    level = "(k=0)" if "k" in da.dims else "(2D)"
     ax.set_title(
-        f"{prop.out_name} (k=0)  tile={int(ds_out['tile_index'])}  "
+        f"{prop.out_name} {level}  tile={int(ds_out['tile_index'])}  "
         f"{ds_out.attrs['timestamp']}"
     )
     fig.colorbar(pcm, ax=ax, label=f"{prop.out_name} [{prop.units}]")
@@ -618,6 +728,9 @@ def run(
     gen_qa_plot: bool = False,
     lon: float | None = None,
     lat: float | None = None,
+    mask_land: bool = True,
+    netcdf_base: str | None = None,
+    run_id: str | None = None,
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
@@ -634,7 +747,10 @@ def run(
     timestamp : str
         Snapshot timestamp in ``DATE_FMT``.
     property : str, default ``'density'``
-        Key into :data:`TILE_PROPERTIES`; selects which field to extract.
+        Channel name from :mod:`dbof.tiles.field_registry` (e.g.
+        ``'N2'``, ``'relative_vorticity'``) or a legacy alias
+        (``'temperature'``, ``'salinity'``); selects which field to
+        extract.
     output : str or None
         Output path -- see :func:`_build_output_path`.
     config_path : Path or None
@@ -649,6 +765,18 @@ def run(
         Geographic longitude/latitude of the desired tile.  Mutually exclusive
         with (``i_rect``, ``j_rect``); resolved to the nearest rect pixel via
         :func:`latlon_to_rect_ij`.
+    mask_land : bool, default True
+        NaN land cells via ``hFacC == 0`` (see
+        :func:`compute_tile_property`).
+    netcdf_base : str or None
+        Root of the standard output tree (e.g.
+        ``/mnt/tank/Oceanography/data/OGCM/LLC/Fronts``).  With
+        ``run_id``, the file lands in
+        ``{netcdf_base}/{run_id}/{date_prefix}/tiles/``.  Ignored when
+        ``output`` is given.
+    run_id : str or None
+        Dataset version directory under ``netcdf_base`` (e.g. ``'V4'``).
+        Must be supplied together with ``netcdf_base``.
 
     Returns
     -------
@@ -665,12 +793,8 @@ def run(
         If neither or both of the (i_rect, j_rect) / (lon, lat) pairs are given,
         or if ``timestamp`` is missing.
     """
-    if property not in TILE_PROPERTIES:
-        raise KeyError(
-            f"Unknown property '{property}'.  "
-            f"Available: {sorted(TILE_PROPERTIES)}"
-        )
-    prop = TILE_PROPERTIES[property]
+    # Channel-name lookup with legacy aliases (temperature, salinity).
+    prop = resolve_property(property)
 
     if timestamp is None:
         raise ValueError("timestamp is required")
@@ -707,21 +831,29 @@ def run(
     # Create out_path
     out_path = _build_output_path(
         output, tile.tile_idx, timestamp, filename_prefix=prop.filename_prefix,
+        netcdf_base=netcdf_base, run_id=run_id,
     )
     if out_path.exists() and not clobber:
         logging.info(f"Output file {out_path} already exists. Skipping.")
         return out_path
 
-    # 3: load grid for the tile (used purely for output coords now -- no mask).
+    # 3: load grid for the tile (output coords, metrics, hFacC mask).
     ds_grid_tile = _load_grid_for_tile(s3_cfg, tile)
 
-    # 4-5: lazy-open tracers (only the vars this property needs) and slice.
+    # 4-5: lazy-open tracers (only the vars this property needs) and
+    # slice.  Properties with no tracer inputs (e.g. coriolis_f) still
+    # get a valid (empty) dataset merged with the grid below.
     ds_tracers_tile = _load_tracers_for_tile(
         s3_cfg, timestamp, tile, vars_needed=list(prop.vars_needed),
-    )
+    ) if prop.vars_needed else xr.Dataset()
 
-    # 6: compute property (no masking).
-    field = compute_tile_property(ds_tracers_tile, prop)
+    # 5b: merged tile dataset + LOCAL xgcm grid (no face connections).
+    ds_merge, xgrid = _build_tile_context(ds_tracers_tile, ds_grid_tile)
+
+    # 6: compute property (edge rim NaN per registry; hFacC land mask
+    # unless mask_land=False).
+    field = compute_tile_property(ds_merge, xgrid, prop,
+                                  mask_land=mask_land)
 
     # 7: assemble output dataset with coords + provenance.
     ds_out = _build_output_dataset(

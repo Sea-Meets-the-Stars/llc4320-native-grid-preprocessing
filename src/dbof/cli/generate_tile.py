@@ -22,12 +22,27 @@ CLI usage
         --timestamp '2012-11-09 12:00:00' --property temperature \\
         [--output ./out_dir] [--clobber] [--qa-plot] [--s3-config over.yaml]
 
+    # into the standard output tree
+    generate-tile --lon -122.0 --lat 36.7 \\
+        --timestamp '2012-11-09 12:00:00' --property Ri \\
+        --netcdf-base /mnt/tank/Oceanography/data/OGCM/LLC/Fronts --run-id V4
+
 ``--property`` accepts any key registered in
-:data:`dbof.tiles.tile_utils.TILE_PROPERTIES` (currently ``density``,
-``temperature``, ``salinity``).  If ``--output`` is omitted, the NetCDF is
-written to ``./{prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc`` where
+:data:`dbof.tiles.tile_utils.TILE_PROPERTIES` (``Ri``, ``N2``,
+``relative_vorticity``, ``density``, ...), plus the legacy aliases
+``temperature`` and ``salinity``.
+
+Output location, in precedence order:
+
+1. ``--output`` -- honoured verbatim (a directory gets the default filename).
+2. ``--netcdf-base`` + ``--run-id`` (both required together) --
+   ``{netcdf-base}/{run-id}/{YYYYMMDD_HHMMSS}/tiles/{default_name}``, the
+   same tree ``run-all-subsets`` writes into, plus a ``tiles`` leaf.
+3. neither -- ``./{default_name}`` in the current directory.
+
+``{default_name}`` is ``{prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc`` where
 ``{prefix}`` is the property's ``filename_prefix``
-(``density``, ``theta``, ``salt``, ...).
+(``ri``, ``density``, ``theta``, ``salt``, ...).
 
 Adding a new property does **not** require any change in this file -- just add
 an entry to ``TILE_PROPERTIES`` in ``dbof/tiles/tile_utils.py``.
@@ -109,8 +124,25 @@ def _parse_args(argv=None) -> argparse.Namespace:
     p.add_argument(
         "--output", type=str, default=None,
         help=(
-            "Output path; if omitted, writes "
-            "./{prefix}_tile{tile_idx:03d}_{YYYYMMDDTHH}.nc"
+            "Explicit output path (file, or an existing directory to drop "
+            "the default filename into).  Overrides --netcdf-base/--run-id."
+        ),
+    )
+    p.add_argument(
+        "--netcdf-base", dest="netcdf_base", type=str, default=None,
+        help=(
+            "Root of the standard output tree, e.g. "
+            "/mnt/tank/Oceanography/data/OGCM/LLC/Fronts.  With --run-id the "
+            "file lands in {netcdf-base}/{run-id}/{YYYYMMDD_HHMMSS}/tiles/ "
+            "(same convention as run-all-subsets, plus a tiles leaf).  "
+            "Must be given together with --run-id."
+        ),
+    )
+    p.add_argument(
+        "--run-id", dest="run_id", type=str, default=None,
+        help=(
+            "Dataset version directory under --netcdf-base (e.g. V4).  "
+            "Must be given together with --netcdf-base."
         ),
     )
     p.add_argument(
@@ -128,6 +160,13 @@ def _parse_args(argv=None) -> argparse.Namespace:
         "--qa-plot", dest="qa_plot", action="store_true",
         help="Also write a surface QA plot (PNG) next to the NetCDF.",
     )
+    p.add_argument(
+        "--no-mask-land", dest="mask_land", action="store_false",
+        help=(
+            "Skip the hFacC==0 land mask (applied by default; see "
+            "compute_tile_property)."
+        ),
+    )
     args = p.parse_args(argv)
 
     # Enforce exactly one location convention here so the CLI gives a clean
@@ -139,6 +178,11 @@ def _parse_args(argv=None) -> argparse.Namespace:
             "supply exactly one location: either --i and --j, or --lon and "
             "--lat"
         )
+
+    # The structured layout needs both halves; half of it is always a mistake,
+    # and silently writing to CWD instead would scatter output unexpectedly.
+    if (args.netcdf_base is None) != (args.run_id is None):
+        p.error("--netcdf-base and --run-id must be supplied together")
     return args
 
 
@@ -172,6 +216,9 @@ def main(argv=None) -> None:
         config_path=args.s3_config,
         clobber=args.clobber,
         gen_qa_plot=args.qa_plot,
+        mask_land=args.mask_land,
+        netcdf_base=args.netcdf_base,
+        run_id=args.run_id,
     )
 
 

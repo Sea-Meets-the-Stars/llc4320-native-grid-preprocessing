@@ -433,3 +433,20 @@ def test_balanced_richardson_against_real_tile(tmp_path):
         assert ds_re["R_ib"].sizes == {"j": 720, "i": 720}
     finally:
         ds_re.close()
+
+
+# ---------------------------------------------------------------------------
+# kinetic_energy -- canonical implementation (promoted from
+# depth_subsets.compute_energetics; shared with the tile registry)
+# ---------------------------------------------------------------------------
+
+def test_kinetic_energy_mld_injection(ds3d, grid3d):
+    """KE with an injected (pre-computed) MLD equals the self-computed
+    path -- the passthrough ``depth_subsets.compute_energetics`` uses to
+    share its lazy MLD.  KE = 0.5 (MLD |grad b| / f)^2 is non-negative
+    by construction."""
+    mld = cfad.mixed_layer_depth(ds3d)
+    ke_self = cfad.kinetic_energy(ds3d, grid3d).compute()
+    ke_inj = cfad.kinetic_energy(ds3d, grid3d, mld=mld).compute()
+    xr.testing.assert_allclose(ke_self, ke_inj)
+    assert (ke_inj.fillna(0.0) >= 0.0).all()

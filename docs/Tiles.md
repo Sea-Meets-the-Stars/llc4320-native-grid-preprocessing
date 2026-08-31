@@ -19,7 +19,8 @@ Code lives in `src/dbof/tiles/`:
 | Module | Responsibility |
 |--------|----------------|
 | `dbof/tiles/tile_mapping.py` | Resolve a rectangular-grid `(i, j)` pixel → its enclosing LLC tile (face + face-local slices). |
-| `dbof/tiles/tile_utils.py` | Data loading, geographic `(lon, lat)`→`(i, j)` resolution, the property registry, compute scaffolding, output assembly, and the `run()` orchestrator. |
+| `dbof/tiles/field_registry.py` | The property registry: one `TileProperty` per subset channel, each pointing at the canonical compute function. |
+| `dbof/tiles/tile_utils.py` | Data loading, geographic `(lon, lat)`→`(i, j)` resolution, tile-context assembly (local xgcm grid), compute scaffolding, output assembly, and the `run()` orchestrator. |
 | `dbof/cli/generate_tile.py` | Thin CLI wrapper around `tile_utils.run()`; installed as the `generate-tile` console script. |
 
 ---
@@ -73,41 +74,127 @@ rotations. The lookup arrays are deterministic and cached at module level
 
 ## Properties
 
-Properties are registered in `tile_utils.TILE_PROPERTIES`. Each entry declares
-the tracer variables it needs, a compute callback returning a lazy
-`(face, k, j, i)` `DataArray`, and output metadata.
+Properties are registered in `dbof/tiles/field_registry.py`
+(`TILE_PROPERTIES`, re-exported by `tile_utils` for backward
+compatibility). There is one entry per **subset channel** — every field
+of every SURF and DEPTH subset in
+`global_dataset_creation.subset_definitions` can be extracted as a tile
+under its exact channel name (`density`, `N2`, `relative_vorticity`,
+`frontogenesis_tendency`, `oceTAUX`, ...). The legacy names
+`temperature` → `Theta` and `salinity` → `Salt` still work as aliases.
 
-| `--property` | Output var | Units | Inputs | Computation |
-|--------------|-----------|-------|--------|-------------|
-| `density` | `sigma0` | `kg m-3` | `Theta`, `Salt` | JMD95 potential density anomaly (`p=0`) − 1000 |
-| `temperature` | `Theta` | `degC` | `Theta` | passthrough |
-| `salinity` | `Salt` | `psu` | `Salt` | passthrough |
+`tests/test_tile_field_registry.py` asserts that every subset channel
+has a registry entry, so the registry cannot silently fall behind.
+Per-channel definitions, equations and units are catalogued in
+[Fields.md](Fields.md) — note that tiles use the base channel name
+(`N2`, not `N2_sfx`), since a tile is a single extraction rather than a
+depth-suffix sweep.
 
-`density`'s `compute` callback **is** the canonical
-`preprocessing.calculate_fields.potential_density_anomaly` — the
-one σ₀ routine shared with the global depth pipeline (JMD95 with `p = 0` at
-every level, i.e. **potential density referenced to the surface**, minus
-`physical_constants.RHO0_REFERENCE` = 1000 kg m⁻³). No property
-*calculation* lives in `tile_utils` — the registry points `compute` at the
-single canonical function for each field; only trivial native-variable
-selection (temperature/salinity) stays in `tile_utils`. See the
-[Known issues](#known-issues--notes) note on the broader compute-unification
-work.
+### How the registry works
+
+Each entry is a `TileProperty`, a frozen dataclass holding everything
+needed to fetch, compute and label one field. `resolve_property()`
+looks entries up by channel name or legacy alias; the `TileProperty`
+docstring documents each attribute.
+
+The registry is a lookup table, not a second implementation of the
+physics. Every `compute` callback points at the canonical function in
+`preprocessing.calculate_fields` (CF) or `calculate_fields_at_depth`
+(CFAD) — only passthroughs and component extraction are local. The one
+exception is `frontogenesis_ageo`: the residual F(u,v) − F(ug,vg) has no
+canonical function, so the registry mirrors the inline definition in
+`surface_subsets.compute_frontogenesis`.
+
+Callbacks all share one signature, `compute(ds_merge, grid) ->
+xr.DataArray`, and must stay lazy. `ds_merge` is the merged tile
+(tracers + grid), `grid` the local xgcm grid; materialisation happens
+once, downstream.
+
+A *passthrough* returns a stored variable unchanged, which only works
+for scalars already on tracer points — `Theta`, `Eta`, `oceQnet`.
+Velocity and wind stress are neither: `U`, `V`, `oceTAUX` and `oceTAUY`
+sit on staggered C-grid faces and follow the model's x/y axes, which on
+the rotated LLC faces point roughly north rather than east. Those
+entries go through the CS/SN rotation instead (see
+[Vector rotation](#vector-rotation)). Never add a raw-vector
+passthrough — it would emit wrong-point, wrong-direction data under a
+correct-looking `long_name`.
+
+Canonical functions don't all take the same arguments, so entries wrap
+them in small adapters — plumbing only, no physics:
+
+| Adapter | Use |
+|---|---|
+| `_passthrough(var)` | Return a stored tracer-point scalar as-is |
+| `_no_grid(fn)` | Canonical function whose signature is `fn(ds_merge)` |
+| `_pick(fn, index)` | Take one component from a multi-output function, by position or key |
+
+### Tile context: a local xgcm grid
+
+Fields with horizontal stencils (gradients, vorticity, frontogenesis,
+...) need an xgcm grid, and two loading details make that work:
+
+1. **Staggered dims.** `U` lives on `(k, face, j, i_g)`, `V` on
+   `(k, face, j_g, i)`, and grid metrics use both (`dxC` on
+   `(j, i_g)`, `rAz` on `(j_g, i_g)`, ...). One shared indexer
+   (`tile_utils._tile_indexer`, ported from the `tiles_field` branch)
+   slices `i_g`/`j_g` alongside `i`/`j` in **both** the tracer and
+   grid loaders — chunk-aligned tiles take the *same* slice, so
+   staggered variables come down at tile size rather than full-face.
+2. **A local grid.** The tile is a **single face**, so
+   `tile_utils._build_tile_context` merges the tile tracers + grid and
+   builds a **local** grid with `use_connections=False` — no face
+   connections exist for one tile. Vertical coordinate vars
+   (`Z`/`Zl`/`Zu`/`Zp1`/`drF`) are dropped from what xgcm sees, same
+   as `grid_setup.set_up_grid_depth` in the DEPTH pipeline; the merged
+   dataset handed to compute callbacks keeps them.
+
+### Edge margin
+
+Because a tile carries no face connections, horizontal stencils are
+invalid in a rim of cells at the tile boundary. Each registry entry
+declares that rim as `edge_margin` (0 = rim-free passthroughs /
+verticals, 1 = staggered-point interpolation only, 3 = horizontal
+derivative / Jacobian chains); `compute_tile_property` sets the rim to
+NaN — the output keeps its full 720×720 shape, and the value is
+recorded as an `edge_margin` attribute on the output variable.
+
+### Vector rotation
+
+Native `U`/`V`/`oceTAUX`/`oceTAUY` are staggered and aligned with the
+**model** x/y axes, which on the rotated LLC faces point ~north, not
+east. Vector entries are therefore **never passthroughs**: the `U`/`V`
+and `oceTAUX`/`oceTAUY` entries interpolate to tracer points and rotate
+to true east/north via the grid's `CS`/`SN` coefficients (the canonical
+`geographic_velocity` / `geographic_wind_stress` functions). The
+rotation is pointwise, so it works identically on a single tile as in
+the global pipeline (acceptance-tested with a synthetic CS=0/SN=1
+face in `tests/test_tile_field_registry.py`).
+
+### 2D fields
+
+Inherently-2D channels (`Eta`, `mixed_layer_depth`, `ml_heat_content`,
+`KE`, the wind/ice channels, ...) produce `(j, i)` outputs with no `k`
+dimension or `Z` coordinate — the output writer handles both cases.
+Surface-subset channels are computed **at every depth level** where the
+formula is depth-valid (e.g. `density`, `relative_vorticity`); wind/ice
+channels are 2D by nature.
 
 ### Adding a new property
 
-Append one entry to `TILE_PROPERTIES` — no other code changes are needed for any
-field that fits the `(face, k, j, i)` shape:
+Append one entry to `TILE_PROPERTIES` in `field_registry.py` — no other
+code changes are needed:
 
 ```python
 TILE_PROPERTIES["my_field"] = TileProperty(
     name="my_field",
-    vars_needed=("Theta", "Salt"),          # tracers to fetch from S3
-    out_name="my_field",                     # variable name in the NetCDF
+    vars_needed=("Theta", "Salt"),   # S3 variables to fetch
+    out_name="my_field",             # variable name in the NetCDF
     units="...",
     long_name="...",
-    filename_prefix="myfield",               # default-filename prefix
-    compute=lambda ds: ...,                  # ds -> lazy DataArray (face,k,j,i)
+    filename_prefix="myfield",       # default-filename prefix
+    compute=CF.my_field,             # (ds_merge, grid) -> lazy DataArray
+    edge_margin=3,                   # invalid boundary rim (cells)
 )
 ```
 
@@ -127,11 +214,17 @@ generate-tile \
     --timestamp '2012-11-09 12:00:00' \
     --property density \
     [--output ./density_tile301_20121109T12.nc] \
-    [--clobber] [--qa-plot] [--s3-config some_override.yaml]
+    [--clobber] [--qa-plot] [--no-mask-land] [--s3-config some_override.yaml]
 
 # by geographic location (resolved to i, j via grid.zarr)
 generate-tile --lon -45.0 --lat 33.0 \
     --timestamp '2012-11-09 12:00:00' --property temperature
+
+# any subset channel works, e.g. stratification / kinematics:
+generate-tile --lon 145.0 --lat 35.0 \
+    --timestamp '2012-11-09 12:00:00' --property N2
+generate-tile --lon 145.0 --lat 35.0 \
+    --timestamp '2012-11-09 12:00:00' --property relative_vorticity
 ```
 
 | Flag | Required | Meaning |
@@ -139,10 +232,11 @@ generate-tile --lon -45.0 --lat 33.0 \
 | `--i` / `--j` | one pair | rect-grid coords, `i∈0..17279`, `j∈0..12959` (any pixel inside the tile) |
 | `--lon` / `--lat` | one pair | geographic degrees E / N; resolved to the nearest rect pixel via `grid.zarr` |
 | `--timestamp` | yes | snapshot time, `'YYYY-MM-DD HH:MM:SS'` (UTC) |
-| `--property` | no | `density` (default), `temperature`, or `salinity` |
+| `--property` | no | any subset channel name (default `density`); legacy `temperature`/`salinity` aliases accepted |
 | `--output` | no | output path; see below |
 | `--clobber` | no | overwrite an existing output file instead of skipping |
 | `--qa-plot` | no | also write a surface QA plot (PNG) next to the NetCDF |
+| `--no-mask-land` | no | skip the default `hFacC == 0` land mask |
 | `--s3-config` | no | optional legacy YAML override (see [Data source](#data-source)) |
 
 Exactly one of the `--i`/`--j` or `--lon`/`--lat` pairs must be supplied;
@@ -171,6 +265,7 @@ out_path = tile_utils.run(
     config_path=None,         # None → canonical LLC_DEPTH source
     clobber=False,            # skip if the output file already exists
     gen_qa_plot=False,        # also write a surface PNG next to the NetCDF
+    mask_land=True,           # NaN land cells via hFacC==0
 )
 
 # ...or select the tile by geographic location:
@@ -200,19 +295,28 @@ print(tile.tile_idx, tile.face_idx, tile.j_face_slice, tile.i_face_slice)
 
 A single-variable NetCDF (`h5netcdf`, zlib level 4, float32):
 
-- **Data variable** — named after the property (`sigma0` / `Theta` / `Salt`),
-  dims `(k, j, i)` of size `(51, 720, 720)`. `j`, `i` are **face-local**
-  indices.
+- **Data variable** — named after the property's `out_name` (`sigma0`,
+  `Theta`, `N2`, ...), dims `(k, j, i)` of size `(51, 720, 720)` for 3D
+  fields or `(j, i)` of size `(720, 720)` for inherently-2D fields.
+  `j`, `i` are **face-local** indices.
 - **Coordinates**
   - `XC(j, i)`, `YC(j, i)` — 2D longitude / latitude (native grid).
-  - `Z(k)` — 1D depth.
+  - `Z(k)` — 1D depth (3D fields only).
   - scalar provenance coords: `tile_index`, `face_index`, `rect_i_start`,
     `rect_j_start`.
 - **Attributes** — `timestamp`, `iteration`, `tile_index`, `tile_j_rect`,
   `tile_i_rect`, `face_index`, `rect_i_user`, `rect_j_user`, `property`,
-  `source_script`, `git_commit`.
+  `edge_margin`, `source_script`, `git_commit`.
 
-No land masking is applied; cells over land carry whatever the model stored.
+**Masking.** Land cells are NaN'd via `hFacC == 0` by default
+(`run(..., mask_land=False)` / `--no-mask-land` to disable) — a cheap
+safety, since derivative-based fields are pathological over and next to
+land. Fields with `edge_margin > 0` additionally have that many
+boundary cells set to NaN in `j`/`i` (horizontal stencils are invalid
+there on a single-face tile — see
+[Tile context](#tile-context-a-local-xgcm-grid)). Values are otherwise
+**raw** physical units — no log scaling, clipping, or sign
+normalisation.
 
 If `gen_qa_plot=True`, a surface (`k=0`) `pcolormesh` is written as a `.png`
 next to the NetCDF, using `XC`/`YC` as the axes.
@@ -264,18 +368,24 @@ re-implementing it:
 
 ## Testing
 
-Tests live in `tests/test_generate_tile.py`. Offline tests stub all S3 access
-with monkeypatched in-memory datasets and run in seconds; one network test opens
-the real `grid.zarr` to validate the `(i, j)` → tile mapping against true
+Tests live in `tests/test_generate_tile.py` (mapping + `run()`
+round-trips with all S3 access monkeypatched) and
+`tests/test_tile_field_registry.py` (every registry entry executed
+end-to-end on a synthetic single-face tile: dims, dtype, NaN edge rim,
+subset-channel coverage, aliases, and the CS/SN rotation acceptance
+test). Offline tests run in seconds; one network test opens the real
+`grid.zarr` to validate the `(i, j)` → tile mapping against true
 coordinates.
 
 ```bash
 # Full suite (needs network for the grid.zarr integration test):
-conda run -n ocean14 python -m pytest tests/test_generate_tile.py -v
+conda run -n ocean14 python -m pytest \
+    tests/test_generate_tile.py tests/test_tile_field_registry.py -v
 
 # Offline only:
-conda run -n ocean14 python -m pytest tests/test_generate_tile.py \
-    --deselect tests/test_generate_tile.py::test_rect_ij_to_tile_against_grid_zarr
+conda run -n ocean14 python -m pytest \
+    tests/test_generate_tile.py tests/test_tile_field_registry.py \
+    -k "not grid_zarr"
 ```
 
 ---
@@ -288,14 +398,14 @@ conda run -n ocean14 python -m pytest tests/test_generate_tile.py \
 - Materialisation happens in a single `.compute()` (wrapped in a `ProgressBar`),
   matching the one-compute pattern used by the global depth pipeline.
 - **Compute unification.** Every property calculation has exactly one
-  implementation, in `preprocessing.calculate_fields`; the tile
-  registry's `compute` callbacks point straight at those canonical functions
-  (density → `potential_density_anomaly_3d`), and `tile_utils` holds no field
-  math of its own. `mixed_layer_depth` was refactored to call the same
-  `potential_density_anomaly_3d`, so the `ρ − 1000` offset is defined once
-  (`physical_constants.RHO0_REFERENCE`). The remaining generalization
-  — organizing all calculated fields (tracers *and* vectors) behind a per-field
-  class and driving both pipelines through one dispatch — is the follow-up
-  `tile_fields` work.
+  implementation, in `preprocessing.calculate_fields` /
+  `calculate_fields_at_depth`; the registry's `compute` callbacks point
+  straight at those canonical functions, and neither `tile_utils` nor
+  `field_registry` holds field math of its own — the sole exception is
+  the `frontogenesis_ageo` residual (see
+  [How the registry works](#how-the-registry-works)). The generalization to
+  every subset channel (the former `tile_fields` follow-up) is done —
+  see `prompts/tiles_fields.md` for the design decisions (tile context,
+  edge rim, staggered-dim slicing, 2D outputs, vector rotation).
 
 *Generated by JXP and Claude.*

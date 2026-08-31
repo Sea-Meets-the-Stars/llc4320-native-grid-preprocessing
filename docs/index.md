@@ -23,6 +23,9 @@ Global_Maps.md
 Preprocess_LLC_Data
 Global_Maps
 Tiles
+Grid
+Gradients
+Fields
 mermaid_diagrams
 Weighted_Sampling
 Sampling_With_GradB2
