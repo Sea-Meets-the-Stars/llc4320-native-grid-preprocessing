@@ -27,6 +27,24 @@ CLI usage
         --timestamp '2012-11-09 12:00:00' --property Ri \\
         --netcdf-base /mnt/tank/Oceanography/data/OGCM/LLC/Fronts --run-id V4
 
+    # a whole hourly series on one tile, surface-only, from the OSN store
+    generate-tile --lon -121.9 --lat 36.8 --property gradb2 \\
+        --pipeline OSN --continue-on-error \\
+        --dates-config configs/tiles/tile330_gradb2_osn.yaml \\
+        --output ./gradb2_tile330
+
+``--dates-config`` switches this CLI from one snapshot to a series: it reads
+``data.date_iterations`` from a run YAML (the same key the global configs use)
+and dispatches to :func:`dbof.tiles.tile_utils.run_series`, which resolves the
+tile and loads the grid once for the whole run.  ``--timestamp`` is then
+ignored.
+
+``--pipeline OSN`` reads Theta/Salt from the public hourly kerchunk surface
+store instead of the S3 depth store -- the only source with consecutive hourly
+snapshots, and the one the SURF global pipeline already uses.  The result is a
+2D ``(j, i)`` field; the field functions are dimension-agnostic, so the numbers
+match the ``k=0`` level of the 3D computation.
+
 ``--property`` accepts any key registered in
 :data:`dbof.tiles.tile_utils.TILE_PROPERTIES` (``Ri``, ``N2``,
 ``relative_vorticity``, ``density``, ...), plus the legacy aliases
@@ -57,7 +75,39 @@ import logging
 import sys
 from pathlib import Path
 
+import yaml
+
 from dbof.tiles import tile_utils
+
+
+def _read_dates_config(path: Path) -> list[str]:
+    """Pull ``data.date_iterations`` out of a run YAML.
+
+    Deliberately the SAME key the global/transfer configs use, so one config
+    file can drive both a tile series and whatever else consumes those dates.
+
+    Parameters
+    ----------
+    path : Path
+        YAML file with a ``data.date_iterations`` list of
+        ``'YYYY-MM-DD HH:MM:SS'`` strings.
+
+    Returns
+    -------
+    list of str
+        The timestamps, in file order.
+
+    Raises
+    ------
+    ValueError
+        If the key is missing or empty.
+    """
+    with open(path, "r") as fh:
+        raw = yaml.safe_load(fh) or {}
+    dates = (raw.get("data") or {}).get("date_iterations") or []
+    if not dates:
+        raise ValueError(f"'data.date_iterations' must be set in {path}")
+    return [str(d) for d in dates]
 
 
 def _parse_args(argv=None) -> argparse.Namespace:
@@ -110,8 +160,36 @@ def _parse_args(argv=None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--timestamp", type=str, required=True,
-        help="timestamp 'YYYY-MM-DD HH:MM:SS'",
+        "--timestamp", type=str, default=None,
+        help=(
+            "timestamp 'YYYY-MM-DD HH:MM:SS' for a single snapshot.  "
+            "Required unless --dates-config is given."
+        ),
+    )
+    p.add_argument(
+        "--dates-config", dest="dates_config", type=Path, default=None,
+        help=(
+            "Run YAML holding data.date_iterations.  Switches this CLI to a "
+            "series run (tile_utils.run_series): the tile and its grid are "
+            "resolved once and reused for every timestamp."
+        ),
+    )
+    p.add_argument(
+        "--pipeline", type=str, default="DEPTH",
+        choices=("DEPTH", "SURF", "OSN"),
+        help=(
+            "Which data source to read.  DEPTH (default) = the S3 full-depth "
+            "timestep stores.  OSN = the public hourly kerchunk SURFACE store "
+            "(surface-only, the only source with consecutive hourly dates).  "
+            "Ignored when --s3-config is given."
+        ),
+    )
+    p.add_argument(
+        "--continue-on-error", dest="continue_on_error", action="store_true",
+        help=(
+            "Series runs only: log and skip a timestamp that fails instead of "
+            "aborting the whole run."
+        ),
     )
     p.add_argument(
         "--property", dest="property", type=str, default="density",
@@ -169,6 +247,9 @@ def _parse_args(argv=None) -> argparse.Namespace:
     )
     args = p.parse_args(argv)
 
+    if args.timestamp is None and args.dates_config is None:
+        p.error("supply --timestamp (one snapshot) or --dates-config (series)")
+
     # Enforce exactly one location convention here so the CLI gives a clean
     # argparse-style error rather than surfacing a ValueError from ``run``.
     have_ij = args.i is not None and args.j is not None
@@ -205,6 +286,30 @@ def main(argv=None) -> None:
         stream=sys.stdout,
     )
     args = _parse_args(argv)
+    if args.dates_config is not None:
+        timestamps = _read_dates_config(args.dates_config)
+        logging.info(
+            f"Series run: {len(timestamps)} timestamps from {args.dates_config}"
+        )
+        tile_utils.run_series(
+            timestamps,
+            i_rect=args.i,
+            j_rect=args.j,
+            lon=args.lon,
+            lat=args.lat,
+            property=args.property,
+            pipeline=args.pipeline,
+            config_path=args.s3_config,
+            output_dir=args.output,
+            clobber=args.clobber,
+            gen_qa_plot=args.qa_plot,
+            mask_land=args.mask_land,
+            netcdf_base=args.netcdf_base,
+            run_id=args.run_id,
+            continue_on_error=args.continue_on_error,
+        )
+        return
+
     tile_utils.run(
         i_rect=args.i,
         j_rect=args.j,
@@ -219,6 +324,7 @@ def main(argv=None) -> None:
         mask_land=args.mask_land,
         netcdf_base=args.netcdf_base,
         run_id=args.run_id,
+        pipeline=args.pipeline,
     )
 
 
