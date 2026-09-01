@@ -622,7 +622,6 @@ def kinetic_energy(ds_merge, grid, mld=None):
     b = buoyancy_of_field(ds_merge)
     f = coriolis_parameter(ds_merge, grid)
 
-    b_x, b_y = ng.calculate_native_gradient_tracer(b, ds_merge, grid=grid)
-    grad_b_mag = np.sqrt(ng.grad_squared(b_x, b_y))
+    grad_b_mag = np.sqrt(ng.calculate_grad_squared_tracer(b, ds_merge, grid))
 
     return 0.5 * (mld * grad_b_mag / f) ** 2
