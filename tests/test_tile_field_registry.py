@@ -43,6 +43,12 @@ from dbof.tiles.tile_utils import (
 )
 
 
+# ``_build_tile_context`` builds xgcm from its SECOND argument alone (only the
+# grid coords carry the comodo ``axis`` attrs), so the synthetic tile dataset
+# is passed as both tracers and grid: it holds the metrics (dxC/dyC/CS/SN) AND
+# the annotated i/i_g/j/j_g coords.  Passing ``xr.Dataset()`` there -- as this
+# module did before ``_build_tile_context`` was rewritten -- leaves xgcm with
+# no axes and every stencil field raises.
 def _tile_ds(cs=1.0, sn=0.0):
     """Single-face, depth-style synthetic tile dataset.
 
@@ -62,7 +68,7 @@ def _tile_ds(cs=1.0, sn=0.0):
 @pytest.fixture(scope="module")
 def tile_ctx():
     """(ds_merge, grid) tile context on the standard CS=1/SN=0 face."""
-    return _build_tile_context(_tile_ds(), xr.Dataset())
+    return _build_tile_context(_tile_ds(), _tile_ds())
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +179,7 @@ def test_rotation_pacific_like_face():
     speed = 0.3
     ds["U"] = xr.full_like(ds["U"], speed)   # model-x flow
     ds["V"] = xr.zeros_like(ds["V"])         # no model-y flow
-    ds_merge, grid = _build_tile_context(ds, xr.Dataset())
+    ds_merge, grid = _build_tile_context(ds, ds)
 
     u = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["U"])
     v = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["V"])
@@ -194,7 +200,7 @@ def test_rotation_identity_face():
     speed = 0.3
     ds["U"] = xr.full_like(ds["U"], speed)
     ds["V"] = xr.zeros_like(ds["V"])
-    ds_merge, grid = _build_tile_context(ds, xr.Dataset())
+    ds_merge, grid = _build_tile_context(ds, ds)
 
     u = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["U"])
     v = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["V"])

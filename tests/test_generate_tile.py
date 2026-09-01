@@ -157,7 +157,8 @@ def test_run_round_trip(monkeypatch, tmp_path, prop_name):
         "s3_endpoint": "stub", "bucket": "stub",
         "folder": "stub",      "grid_folder": "stub",
     }
-    monkeypatch.setattr(tu, "_resolve_s3_source", lambda _: fake_s3_cfg)
+    monkeypatch.setattr(tu, "_resolve_s3_source",
+                        lambda _, pipeline=None: fake_s3_cfg)
 
     # --- Stub git-commit lookup (reused from global_dataset_creation.logging,
     # --- imported into tile_utils as ``_git_commit_hash``). ---
@@ -448,6 +449,11 @@ def _make_synthetic_grid_face(n_k: int) -> xr.Dataset:
         coords={
             "face": np.array([0]),
             "k":    np.arange(n_k),
+            # Comodo annotations: _build_tile_context builds xgcm from the
+            # grid dataset alone and raises if X/Y are undetectable.  The
+            # real grid readers stamp these; the synthetic one must too.
+            "j": ("j", np.arange(n_j), {"axis": "Y"}),
+            "i": ("i", np.arange(n_i), {"axis": "X"}),
         },
     )
     return ds

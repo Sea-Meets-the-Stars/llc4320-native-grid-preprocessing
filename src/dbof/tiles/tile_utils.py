@@ -47,14 +47,16 @@ import dbof.llc4320_ingestion.get_raw_data as get_raw_data
 import dbof.preprocessing.preproc_llc_core_data as preproc_llc_core_data
 import dbof.preprocessing.calculate_fields as calculate_fields
 import dbof.utils.faces_to_latlon as faces_to_latlon
-from dbof.global_dataset_creation.data_sources import get_data_source
+from dbof.global_dataset_creation.data_sources import (
+    get_data_source, OSN_ENDPOINT,
+)
 # Reuse the canonical date<->iteration converter + format and the git-commit
 # provenance helper instead of re-implementing them here (they were identical).
 # NOTE (PR #10): in a future PR ``iterations`` moves to
 # ``llc4320_ingestion.date_iterations`` (a backwards-compatible shim is kept at
 # the old location), so this import will keep working after the rebase.
 from dbof.global_dataset_creation.iterations import (
-    mit_date_to_iteration, date_to_run_id, DATE_FMT,
+    mit_date_to_iteration, osn_date_to_iteration, date_to_run_id, DATE_FMT,
 )
 # ``_git_commit_hash`` moved from ``global_dataset_creation.logging`` to
 # ``global_dataset_creation.metadata`` on main.  Prefer the new location and
@@ -114,31 +116,43 @@ def _load_s3_config(config_path: Path) -> dict:
     return s3
 
 
-def _resolve_s3_source(config_path: Path | None) -> dict:
-    """Resolve the S3 source dict for the tile pipeline.
+def _resolve_s3_source(config_path: Path | None,
+                       pipeline: str = "DEPTH") -> dict:
+    """Resolve the data source dict for the tile pipeline.
 
     Parameters
     ----------
     config_path : Path or None
-        Optional legacy override.  When ``None`` (the default), the canonical
-        LLC_DEPTH source is taken from ``data_sources.get_data_source("DEPTH")``
-        -- full-depth timestep stores and ``grid.zarr`` in
-        ``LLC4320_RAW/DEPTH``.  When supplied, the YAML's ``s3_source`` block is loaded
-        instead (see :func:`_load_s3_config`).
+        Optional legacy override.  When ``None`` (the default), the source is
+        taken from ``data_sources`` according to *pipeline*.  When supplied,
+        the YAML's ``s3_source`` block is loaded instead (see
+        :func:`_load_s3_config`) and *pipeline* is ignored.
+    pipeline : str, default ``'DEPTH'``
+        ``'DEPTH'`` (or ``'SURF'``) -- S3 timestep stores + ``grid.zarr``.
+        ``'OSN'`` -- the public kerchunk surface store: per-face JSON
+        references, hourly, ``k=0`` already squeezed out.  This is the only
+        source that carries 504 consecutive hourly Theta/Salt snapshots (the
+        DEPTH store holds one date; ``LLC4320_RAW/CHUNKS/*`` holds a handful),
+        so it is what a multi-week tile series reads.
 
     Returns
     -------
     dict
-        Source dict with ``s3_endpoint``, ``bucket``, ``folder``, and
-        ``grid_folder`` (the latter defaulting to ``folder`` if absent).
+        Source dict.  Always carries ``kind`` (``'S3'`` or ``'OSN'``) and
+        ``s3_endpoint``; the S3 kinds additionally carry ``bucket``,
+        ``folder`` and ``grid_folder`` (the last defaulting to ``folder``).
     """
     if config_path is not None:
         s3 = _load_s3_config(Path(config_path))
+    elif pipeline == "OSN":
+        # Pure kerchunk -- no bucket/folder applies, so return early rather
+        # than pretending this dict has the S3 store keys.
+        return {"kind": "OSN", "s3_endpoint": OSN_ENDPOINT}
     else:
-        # Canonical depth source -- a fresh copy so callers can't mutate the
-        # module-level constant.
-        s3 = dict(get_data_source("DEPTH"))
+        # A fresh copy so callers can't mutate the module-level constant.
+        s3 = dict(get_data_source(pipeline))
     s3.setdefault("grid_folder", s3["folder"])
+    s3.setdefault("kind", "S3")
     return s3
 
 
@@ -239,6 +253,32 @@ def _build_output_path(
 # Geographic coordinate resolution
 # ---------------------------------------------------------------------------
 
+def _open_full_grid(s3_cfg: dict) -> xr.Dataset:
+    """Lazily open the all-faces grid for whichever source *s3_cfg* names.
+
+    Parameters
+    ----------
+    s3_cfg : dict
+        Source dict from :func:`_resolve_s3_source`.
+
+    Returns
+    -------
+    xr.Dataset
+        Dask-backed grid on all 13 faces.  The OSN (kerchunk) source has no
+        vertical coordinates, so it goes through the 2D processor; the S3
+        stores keep ``Z``/``drF`` via the 3D one.
+    """
+    if s3_cfg.get("kind") == "OSN":
+        co = get_raw_data.get_remote_gridfile(s3_cfg["s3_endpoint"])
+        return preproc_llc_core_data.process_llc4320_grid(co)
+    co = get_raw_data.get_llc_depth_gridfile(
+        s3_cfg["s3_endpoint"],
+        s3_cfg["bucket"],
+        s3_cfg["grid_folder"],
+    )
+    return preproc_llc_core_data.process_llc4320_3d_grid(co)
+
+
 def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
     """Resolve a geographic (lon, lat) to the nearest rect-grid pixel (i, j).
 
@@ -265,12 +305,7 @@ def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
         suitable to hand to :func:`dbof.tiles.tile_mapping.rect_ij_to_tile`.
     """
     logging.info(f"Resolving (lon={lon}, lat={lat}) to a rect-grid pixel")
-    co = get_raw_data.get_llc_depth_gridfile(
-        s3_cfg["s3_endpoint"],
-        s3_cfg["bucket"],
-        s3_cfg["grid_folder"],
-    )
-    ds_grid = preproc_llc_core_data.process_llc4320_3d_grid(co)
+    ds_grid = _open_full_grid(s3_cfg)
     # Only XC/YC are needed to locate the pixel; compute just those to stay cheap.
     coords_2d = ds_grid[["XC", "YC"]].compute()
     rect = faces_to_latlon.faces_dataset_to_latlon(coords_2d, metric_vector_pairs=[])
@@ -295,6 +330,52 @@ def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
+
+#: Comodo annotations xgcm needs to find its X/Y axes.  Same values
+#: ``get_llc_depth_gridfile`` stamps on the DEPTH grid store; repeated here so
+#: the OSN grid (which comes through ``process_llc4320_grid``, not that reader)
+#: can be given them too.
+_COMODO_COORD_META = {
+    "j":   {"axis": "Y"},
+    "j_g": {"axis": "Y", "c_grid_axis_shift": 0.5},
+    "i":   {"axis": "X"},
+    "i_g": {"axis": "X", "c_grid_axis_shift": 0.5},
+}
+
+
+def _ensure_comodo_attrs(ds: xr.Dataset) -> xr.Dataset:
+    """Stamp the comodo ``axis`` attrs on any horizontal dim that lacks them.
+
+    ``_build_tile_context`` builds xgcm from the grid dataset alone and raises
+    if X/Y are undetectable.  The DEPTH reader annotates the store on the way
+    out; ``process_llc4320_grid`` (the OSN path) does not guarantee it, and
+    ``reset_coords()`` can drop the annotation along the way.  This is a
+    no-op when the attrs are already present -- existing annotations are left
+    exactly as they are, so a store that declares its own
+    ``c_grid_axis_shift`` keeps its own convention.
+
+    Parameters
+    ----------
+    ds : xr.Dataset
+        Grid dataset (tile-extent or full).
+
+    Returns
+    -------
+    xr.Dataset
+        The same dataset with ``axis`` (and, for staggered dims,
+        ``c_grid_axis_shift``) present on ``i``/``i_g``/``j``/``j_g``.
+    """
+    updates = {}
+    for dim, attrs in _COMODO_COORD_META.items():
+        if dim not in ds.dims:
+            continue
+        existing = (ds.coords[dim] if dim in ds.coords
+                    else xr.DataArray(range(ds.sizes[dim]), dims=dim))
+        if "axis" in existing.attrs:
+            continue
+        updates[dim] = existing.assign_attrs(attrs)
+    return ds.assign_coords(updates) if updates else ds
+
 
 def _tile_indexer(ds: xr.Dataset, tile: TileInfo) -> dict:
     """Build an ``isel`` indexer covering tracer AND staggered horizontal dims.
@@ -358,20 +439,19 @@ def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
         staggered dims, when present, also 720-wide).
     """
     logging.info(
-        f"Loading grid (face={tile.face_idx}, "
+        f"Loading grid (kind={s3_cfg.get('kind', 'S3')}, face={tile.face_idx}, "
         f"j={tile.j_face_slice}, i={tile.i_face_slice})"
     )
-    co = get_raw_data.get_llc_depth_gridfile(
-        s3_cfg["s3_endpoint"],
-        s3_cfg["bucket"],
-        s3_cfg["grid_folder"],
-    )
-    ds_grid = preproc_llc_core_data.process_llc4320_3d_grid(co)
+    # All faces, but lazy -- the face/j/i selection below is what decides
+    # the bytes actually read.
+    ds_grid = _open_full_grid(s3_cfg)
     ds_grid_tile = ds_grid.isel(
         face=[tile.face_idx],
         **_tile_indexer(ds_grid, tile),
     ).compute()
-    return ds_grid_tile
+    # Only the DEPTH reader stamps the comodo attrs; do it here for the
+    # others so _build_tile_context can always find X/Y.
+    return _ensure_comodo_attrs(ds_grid_tile)
 
 
 def _load_tracers_for_tile(
@@ -402,23 +482,43 @@ def _load_tracers_for_tile(
         ``.compute()``.
     """
     logging.info(
-        f"Opening timestep store for {date_str} (face={tile.face_idx}, "
+        f"Opening timestep store for {date_str} "
+        f"(kind={s3_cfg.get('kind', 'S3')}, face={tile.face_idx}, "
         f"vars={vars_needed})"
     )
-    ds = get_raw_data.get_llc_timestep_data(
-        s3_cfg["s3_endpoint"],
-        s3_cfg["bucket"],
-        s3_cfg["folder"],
-        date_str,
-        face_range=[tile.face_idx],
-        vars_requested=vars_needed,
-        # Depth pipeline: full water column per S3 GET + cache-disabled options
-        # so dask retries always re-fetch (matches generate_global's DEPTH path).
-        chunks=get_raw_data.llc_depth_timestep_chunks,
-        storage_options=get_raw_data._llc_depth_storage_options(
-            s3_cfg["s3_endpoint"]
-        ),
-    )
+    if s3_cfg.get("kind") == "OSN":
+        # One kerchunk JSON per face, so asking for a single face opens ONE
+        # reference file rather than 13.  The reader already does
+        # isel(time=0, k=0, k_l=0): what comes back is surface-only, with no
+        # vertical dim for the rest of the pipeline to carry.
+        it = osn_date_to_iteration(date_str)
+        ds = get_raw_data.get_remote_llc_data(
+            s3_cfg["s3_endpoint"], it, [tile.face_idx],
+        )
+        available = [v for v in vars_needed if v in ds]
+        missing = [v for v in vars_needed if v not in ds]
+        if missing:
+            raise KeyError(
+                f"OSN surface store has no {missing} for {date_str}; "
+                f"available: {sorted(ds.data_vars)}"
+            )
+        ds = ds[available]
+    else:
+        ds = get_raw_data.get_llc_timestep_data(
+            s3_cfg["s3_endpoint"],
+            s3_cfg["bucket"],
+            s3_cfg["folder"],
+            date_str,
+            face_range=[tile.face_idx],
+            vars_requested=vars_needed,
+            # Depth pipeline: full water column per S3 GET + cache-disabled
+            # options so dask retries always re-fetch (matches
+            # generate_global's DEPTH path).
+            chunks=get_raw_data.llc_depth_timestep_chunks,
+            storage_options=get_raw_data._llc_depth_storage_options(
+                s3_cfg["s3_endpoint"]
+            ),
+        )
     # One shared indexer slices tracer AND staggered horizontal dims
     # (identical ranges -- tiles are chunk-aligned); k/k_l stay full.
     ds_tile = ds.isel(**_tile_indexer(ds, tile))
@@ -445,6 +545,7 @@ from dbof.global_dataset_creation.grid_setup import _VERTICAL_VARS
 def _build_tile_context(
     ds_tracers_tile: xr.Dataset,
     ds_grid_tile: xr.Dataset,
+    grid=None,
 ):
     """Merge tile tracers + grid and build a LOCAL xgcm grid.
 
@@ -475,6 +576,12 @@ def _build_tile_context(
         Lazy tracer dataset sliced to the tile (face=1).
     ds_grid_tile : xr.Dataset
         Eager tile-extent grid (XC, YC, Z, hFacC, metrics, CS/SN).
+    grid : xgcm.Grid, optional
+        A grid already built from THIS tile's ``ds_grid_tile``.  The tile
+        geometry does not change from one timestamp to the next, so a series
+        run (:func:`run_series`) builds it once and passes it back in on every
+        step; only the merge is repeated.  When ``None`` (the default) the
+        grid is built here, which is what single-snapshot :func:`run` does.
 
     Returns
     -------
@@ -484,6 +591,9 @@ def _build_tile_context(
     Generated by LH and Claude
     """
     ds_merge = xr.merge([ds_tracers_tile, ds_grid_tile])
+
+    if grid is not None:
+        return ds_merge, grid
 
     # Grid-only input -- see the docstring: merging first would strip the
     # comodo attrs xgcm needs to find its axes.
@@ -731,6 +841,7 @@ def run(
     mask_land: bool = True,
     netcdf_base: str | None = None,
     run_id: str | None = None,
+    pipeline: str = "DEPTH",
 ) -> Path:
     """End-to-end pipeline: resolve tile -> load -> compute -> save NetCDF + PNG.
 
@@ -777,6 +888,11 @@ def run(
     run_id : str or None
         Dataset version directory under ``netcdf_base`` (e.g. ``'V4'``).
         Must be supplied together with ``netcdf_base``.
+    pipeline : str, default ``'DEPTH'``
+        Which data source to read (see :func:`_resolve_s3_source`).  ``'OSN'``
+        selects the public hourly surface kerchunk store, which produces a
+        2D ``(j, i)`` field instead of ``(k, j, i)``.  Ignored when
+        ``config_path`` is given.
 
     Returns
     -------
@@ -811,7 +927,7 @@ def run(
     # Resolve the S3 source up front (needed now for a geographic lookup, and
     # reused for the grid/tracer loads below).  Canonical DEPTH source unless a
     # legacy YAML override is passed.
-    s3_cfg = _resolve_s3_source(config_path)
+    s3_cfg = _resolve_s3_source(config_path, pipeline=pipeline)
 
     # A geographic request is turned into a rect pixel via the grid file.
     if have_lonlat:
@@ -886,3 +1002,196 @@ def run(
         _qa_plot(ds_out, prop, png_path)
 
     return out_path
+
+
+def run_series(
+    timestamps: list[str],
+    i_rect: int | None = None,
+    j_rect: int | None = None,
+    lon: float | None = None,
+    lat: float | None = None,
+    property: str = "gradb2",
+    pipeline: str = "OSN",
+    config_path: Path | None = DEFAULT_CONFIG,
+    output_dir: str | None = None,
+    output_paths: list | None = None,
+    netcdf_base: str | None = None,
+    run_id: str | None = None,
+    clobber: bool = False,
+    gen_qa_plot: bool = False,
+    mask_land: bool = True,
+    continue_on_error: bool = False,
+) -> list[Path]:
+    """Compute ONE property on ONE tile across MANY timestamps.
+
+    :func:`run` is a single snapshot: every call re-resolves the tile (which
+    rebuilds the 13x4320x4320 rect lookup, deliberately uncached -- see
+    ``tile_mapping``), re-downloads the tile grid, and rebuilds the xgcm grid.
+    None of that changes from one timestamp to the next, so a 504-step series
+    run through :func:`run` would pay all three 504 times.  This function
+    hoists them out of the loop; per timestamp only the tracer read, the
+    merge, the compute and the write remain.
+
+    One NetCDF is written per timestamp -- the same file-per-snapshot shape the
+    downstream front-finding expects -- rather than one file with a ``time``
+    dimension.
+
+    Parameters
+    ----------
+    timestamps : list of str
+        Snapshot timestamps in ``DATE_FMT`` (``'YYYY-MM-DD HH:MM:SS'``).
+    i_rect, j_rect : int, optional
+        Rect-grid pixel inside the desired tile.  Mutually exclusive with
+        (``lon``, ``lat``); exactly one pair is required.
+    lon, lat : float, optional
+        Geographic location of the desired tile.
+    property : str, default ``'gradb2'``
+        Channel name from :mod:`dbof.tiles.field_registry`.
+    pipeline : str, default ``'OSN'``
+        Data source -- see :func:`_resolve_s3_source`.  ``'OSN'`` is the only
+        source with consecutive hourly Theta/Salt.
+    config_path : Path or None
+        Optional legacy ``s3_source`` YAML override; wins over *pipeline*.
+    output_dir : str or None
+        Directory to drop the default per-timestamp filenames into.  Created
+        if absent.  Mutually exclusive with *output_paths*.
+    output_paths : list of str or Path, optional
+        Explicit output path per timestamp, same length and order as
+        *timestamps*.  Use this when a consumer dictates the filenames (the
+        fronts build driver does).
+    netcdf_base, run_id : str or None
+        The repo's structured output tree; see :func:`_build_output_path`.
+    clobber : bool, default False
+        Recompute timestamps whose output already exists.
+    gen_qa_plot : bool, default False
+        Write a QA PNG next to each NetCDF.
+    mask_land : bool, default True
+        NaN land cells via ``hFacC == 0``.
+    continue_on_error : bool, default False
+        Log and skip a timestamp that raises instead of aborting the series.
+        A long run over a public store is worth finishing; the failures are
+        listed in the log and the returned list simply omits them.
+
+    Returns
+    -------
+    list of Path
+        The NetCDF paths that exist on disk when the run finishes, in
+        timestamp order (skipped-because-present files included; failed
+        timestamps omitted).
+
+    Raises
+    ------
+    ValueError
+        If neither or both location conventions are given, if *timestamps* is
+        empty, or if *output_paths* does not match *timestamps* in length.
+    """
+    if not timestamps:
+        raise ValueError("timestamps is empty -- nothing to do")
+
+    prop = resolve_property(property)
+
+    have_ij = i_rect is not None and j_rect is not None
+    have_lonlat = lon is not None and lat is not None
+    if have_ij == have_lonlat:
+        raise ValueError(
+            "Supply exactly one of (i_rect, j_rect) or (lon, lat) -- "
+            f"got i_rect={i_rect}, j_rect={j_rect}, lon={lon}, lat={lat}."
+        )
+    if output_paths is not None:
+        if output_dir is not None:
+            raise ValueError("Supply output_dir or output_paths, not both")
+        if len(output_paths) != len(timestamps):
+            raise ValueError(
+                f"output_paths has {len(output_paths)} entries for "
+                f"{len(timestamps)} timestamps"
+            )
+    if output_dir is not None:
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    s3_cfg = _resolve_s3_source(config_path, pipeline=pipeline)
+
+    if have_lonlat:
+        i_rect, j_rect = latlon_to_rect_ij(lon, lat, s3_cfg)
+
+    # --- Everything below is timestamp-independent: resolved ONCE. --------
+    tile = rect_ij_to_tile(i_rect, j_rect)
+    logging.info(
+        f"Resolved tile: idx={tile.tile_idx} face={tile.face_idx} "
+        f"face j={tile.j_face_slice}, i={tile.i_face_slice}  "
+        f"property={prop.name}  steps={len(timestamps)}"
+    )
+    ds_grid_tile = _load_grid_for_tile(s3_cfg, tile)
+    # Build the xgcm grid once from the tile grid and reuse it every step.
+    _, xgrid = _build_tile_context(xr.Dataset(), ds_grid_tile)
+
+    # Record the iteration of the store the data actually came from: the OSN
+    # references are numbered with the FIRST_WIND_RECORD_OFFSET shift, the S3
+    # stores with raw MIT iterations.  ``generate_global`` logs the same way.
+    to_iteration = (osn_date_to_iteration if s3_cfg.get("kind") == "OSN"
+                    else mit_date_to_iteration)
+
+    written: list[Path] = []
+    failures: list[tuple[str, str]] = []
+
+    for n, timestamp in enumerate(timestamps, start=1):
+        if output_paths is not None:
+            out_path = Path(output_paths[n - 1]).resolve()
+        else:
+            out_path = _build_output_path(
+                output_dir, tile.tile_idx, timestamp,
+                filename_prefix=prop.filename_prefix,
+                netcdf_base=netcdf_base, run_id=run_id,
+            )
+        if out_path.exists() and not clobber:
+            logging.info(f"[{n}/{len(timestamps)}] {timestamp}: exists, skipping")
+            written.append(out_path)
+            continue
+
+        logging.info(f"[{n}/{len(timestamps)}] {timestamp} -> {out_path}")
+        try:
+            ds_tracers_tile = _load_tracers_for_tile(
+                s3_cfg, timestamp, tile, vars_needed=list(prop.vars_needed),
+            ) if prop.vars_needed else xr.Dataset()
+
+            ds_merge, _ = _build_tile_context(
+                ds_tracers_tile, ds_grid_tile, grid=xgrid,
+            )
+            field = compute_tile_property(ds_merge, xgrid, prop,
+                                          mask_land=mask_land)
+            ds_out = _build_output_dataset(
+                field=field,
+                ds_grid_tile=ds_grid_tile,
+                tile=tile,
+                prop=prop,
+                date_str=timestamp,
+                iteration=to_iteration(timestamp),
+                rect_i_user=i_rect,
+                rect_j_user=j_rect,
+            )
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            ds_out.to_netcdf(
+                out_path,
+                engine="h5netcdf",
+                encoding={
+                    prop.out_name: {"zlib": True, "complevel": 4,
+                                    "dtype": "float32"},
+                },
+            )
+            if gen_qa_plot:
+                _qa_plot(ds_out, prop, out_path.with_suffix(".png"))
+        except Exception as exc:  # noqa: BLE001 - reported, then re-raised
+            if not continue_on_error:
+                raise
+            logging.error(f"{timestamp}: FAILED ({type(exc).__name__}: {exc})")
+            failures.append((timestamp, f"{type(exc).__name__}: {exc}"))
+            continue
+
+        written.append(out_path)
+
+    logging.info(
+        f"run_series finished: {len(written)}/{len(timestamps)} written, "
+        f"{len(failures)} failed"
+    )
+    for ts, msg in failures:
+        logging.error(f"  failed: {ts}  {msg}")
+    return written
