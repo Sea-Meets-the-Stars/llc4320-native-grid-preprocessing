@@ -331,18 +331,6 @@ def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
 # Data loading
 # ---------------------------------------------------------------------------
 
-#: Comodo annotations xgcm needs to find its X/Y axes.  Same values
-#: ``get_llc_depth_gridfile`` stamps on the DEPTH grid store; repeated here so
-#: the OSN grid (which comes through ``process_llc4320_grid``, not that reader)
-#: can be given them too.
-_COMODO_COORD_META = {
-    "j":   {"axis": "Y"},
-    "j_g": {"axis": "Y", "c_grid_axis_shift": 0.5},
-    "i":   {"axis": "X"},
-    "i_g": {"axis": "X", "c_grid_axis_shift": 0.5},
-}
-
-
 def _ensure_comodo_attrs(ds: xr.Dataset) -> xr.Dataset:
     """Stamp the comodo ``axis`` attrs on any horizontal dim that lacks them.
 
@@ -353,6 +341,10 @@ def _ensure_comodo_attrs(ds: xr.Dataset) -> xr.Dataset:
     no-op when the attrs are already present -- existing annotations are left
     exactly as they are, so a store that declares its own
     ``c_grid_axis_shift`` keeps its own convention.
+
+    Values come from ``llc4320_ingestion.grid.COMODO_COORD_META``, the one
+    definition in the repo: ``c_grid_axis_shift`` is a signed direction and
+    must be -0.5 for ``i_g``/``j_g`` (see docs/Grid.md). 
 
     Parameters
     ----------
@@ -366,7 +358,7 @@ def _ensure_comodo_attrs(ds: xr.Dataset) -> xr.Dataset:
         ``c_grid_axis_shift``) present on ``i``/``i_g``/``j``/``j_g``.
     """
     updates = {}
-    for dim, attrs in _COMODO_COORD_META.items():
+    for dim, attrs in COMODO_COORD_META.items():
         if dim not in ds.dims:
             continue
         existing = (ds.coords[dim] if dim in ds.coords
@@ -538,7 +530,8 @@ from dbof.tiles.field_registry import (  # noqa: F401
     TileProperty,
     resolve_property,
 )
-from dbof.llc4320_ingestion.grid import set_xgcm_grid
+from dbof.llc4320_ingestion.grid import (COMODO_COORD_META,
+                                         set_xgcm_grid)
 from dbof.global_dataset_creation.grid_setup import _VERTICAL_VARS
 
 
