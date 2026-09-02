@@ -24,6 +24,7 @@ import xarray as xr
 
 import dbof.tiles.tile_mapping as tm
 import dbof.tiles.tile_utils as tu
+from dbof.llc4320_ingestion.grid import COMODO_COORD_META
 
 TIMESTAMPS = [
     "2012-06-29 00:00:00",
@@ -63,12 +64,12 @@ def _surface_grid_face() -> xr.Dataset:
         },
         coords={
             "face": np.array([0]),
-            "j":   ("j",   np.arange(n), {"axis": "Y"}),
-            "i":   ("i",   np.arange(n), {"axis": "X"}),
-            "j_g": ("j_g", np.arange(n), {"axis": "Y",
-                                          "c_grid_axis_shift": 0.5}),
-            "i_g": ("i_g", np.arange(n), {"axis": "X",
-                                          "c_grid_axis_shift": 0.5}),
+            # Registration comes from the one definition in the repo,
+            # so this fixture cannot drift from the real grid.
+            "j":   ("j",   np.arange(n), COMODO_COORD_META["j"]),
+            "i":   ("i",   np.arange(n), COMODO_COORD_META["i"]),
+            "j_g": ("j_g", np.arange(n), COMODO_COORD_META["j_g"]),
+            "i_g": ("i_g", np.arange(n), COMODO_COORD_META["i_g"]),
         },
     )
 

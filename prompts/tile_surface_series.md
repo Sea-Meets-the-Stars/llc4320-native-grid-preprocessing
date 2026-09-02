@@ -143,11 +143,13 @@ python build_v5.py 3 <path>/configs/tiles/tile330_gradb2_osn.yaml
    grid from the same `process_llc4320_grid` output, so they should be there;
    `_ensure_comodo_attrs` is the safety net.  Worth one interactive check that
    the net is not doing the work.
-3. **`c_grid_axis_shift` sign.**  This repo uses `+0.5`; `fronts/llc/tiles.py`
-   uses `-0.5` and argues at length (`fronts/prompts/fronts_build.md` 372-423)
-   that `-0.5` is right.  For a tracer gradient the difference is
-   `median |rel| ~ 2e-4`, so it does not matter for `gradb2` -- but it is
-   unresolved, and it WILL matter for anything velocity-derived.
+3. **`c_grid_axis_shift` sign.**  RESOLVED 2026-09-01: `-0.5` is right, as
+   `fronts/llc/tiles.py` had it.  It is a signed direction (xgcm maps -0.5 ->
+   'left'), MITgcm puts U on the west face, and xmitgcm and the OSN grid both
+   stamp -0.5; measured directly from the corner geometry too.  The value now
+   lives once, in `llc4320_ingestion.grid.COMODO_COORD_META` -- import it
+   rather than writing it out.  See docs/Grid.md and
+   `dev/verify_grid_stores.py`.
 4. **One hour first.**  Run a single timestamp end to end, look at the QA plot
    (`--qa-plot`), confirm the 3-cell NaN rim and that land is masked, then let
    the 504 go.
