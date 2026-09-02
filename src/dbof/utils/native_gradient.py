@@ -10,6 +10,11 @@ Geometry, basis/rotation rules, and usage limits live in
 docs/Gradients.md.
 """
 
+from dbof.llc4320_ingestion.grid import (diff_pair_along_own_axis,
+                                         face_seam_mask,
+                                         has_face_connections,
+                                         interp_pair_to_center)
+
 def rotate_vector_to_geographic(u_x, v_y, ds_merge, grid, *, interpolate=True):
     """Rotate a model-grid vector into geographic (east/north)
     components: interp to tracer points, then u_east = u·CS − v·SN,
@@ -42,8 +47,7 @@ def rotate_vector_to_geographic(u_x, v_y, ds_merge, grid, *, interpolate=True):
         Northward (meridional) component on tracer points.
     """
     if interpolate:
-        u_x = grid.interp(u_x, 'X', boundary='fill')
-        v_y = grid.interp(v_y, 'Y', boundary='fill')
+        u_x, v_y = interp_pair_to_center(u_x, v_y, grid)
 
     u_east = u_x * ds_merge['CS'] - v_y * ds_merge['SN']
     v_north = u_x * ds_merge['SN'] + v_y * ds_merge['CS']
@@ -94,8 +98,8 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
     du_lambda_dy = grid.diff(u_lambda, 'Y') / ds_merge.dyC
 
     # interpolate the gradients from cell boundaries to the cell centers
-    grad_u_lambda_to_ij_X = grid.interp(du_lambda_dx, 'X', boundary='fill')
-    grad_u_lambda_to_ij_Y = grid.interp(du_lambda_dy, 'Y', boundary='fill')
+    grad_u_lambda_to_ij_X, grad_u_lambda_to_ij_Y = interp_pair_to_center(
+        du_lambda_dx, du_lambda_dy, grid)
 
     # rotate to zonal and meridional directions
     # Add the zonal components of the 'X' and 'Y' vector components
@@ -111,8 +115,8 @@ def calculate_jacobian(u_x, v_y, ds_merge, grid):
     dv_phi_dy = grid.diff(v_phi, 'Y') / ds_merge.dyC
 
     # interpolate the gradients from cell boundaries to the cell centers
-    grad_v_phi_to_ij_X = grid.interp(dv_phi_dx, 'X', boundary='fill')
-    grad_v_phi_to_ij_Y = grid.interp(dv_phi_dy, 'Y', boundary='fill')
+    grad_v_phi_to_ij_X, grad_v_phi_to_ij_Y = interp_pair_to_center(
+        dv_phi_dx, dv_phi_dy, grid)
 
     # rotate to zonal and meridional directions
     # Add the zonal components of the 'X' and 'Y' vector components
@@ -193,8 +197,8 @@ def calculate_native_gradient_tracer(ds_value, ds_grid, grid):
 
 
     # Interpolate the gradients to the cell centers
-    grad_s_at_cell_center_X = grid.interp(ds_dx_hatx_M, 'X', boundary='fill')
-    grad_s_at_cell_center_Y = grid.interp(ds_dy_haty_M, 'Y', boundary='fill')
+    grad_s_at_cell_center_X, grad_s_at_cell_center_Y = interp_pair_to_center(
+        ds_dx_hatx_M, ds_dy_haty_M, grid)
 
     # The zonal component of the gradient vector:
     # ... the gradient with respect to x in the G basis.
@@ -298,7 +302,8 @@ def calculate_grad_dot_tracer(da_a, da_b, ds_grid, grid):
             + grid.interp(ay * by, 'Y', boundary='fill'))
 
 
-def calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid):
+def calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid,
+                                      mask_seams=None):
     """Velocity-gradient combinations, each at its natural C-grid
     point in model-basis — no interpolation or rotation anywhere.
     See docs/Gradients.md.
@@ -318,6 +323,9 @@ def calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid):
         ``rAz``.
     grid : xgcm.Grid
         Grid object used for the difference stencils.
+    mask_seams : bool, optional
+        NaN the face-seam rim of the corner pair.  Default: only when
+        *grid* has face connections (a tile grid has no seams).
 
     Returns
     -------
@@ -333,18 +341,24 @@ def calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid):
 
     # Cell centres: differencing each velocity along ITS OWN axis
     # lands here — zero interpolation (flux form over rA).
-    strain_normal_center = (grid.diff(u_x * dyG, 'X')
-                            - grid.diff(v_y * dxG, 'Y')) / rA
-    divergence_center = (grid.diff(u_x * dyG, 'X')
-                         + grid.diff(v_y * dxG, 'Y')) / rA
+    flux_x, flux_y = diff_pair_along_own_axis(u_x * dyG, v_y * dxG, grid)
+    strain_normal_center = (flux_x - flux_y) / rA
+    divergence_center = (flux_x + flux_y) / rA
 
     # Cell corners: differencing each velocity across the OTHER
     # axis lands here — zero interpolation (circulation form over
-    # rAz; the vorticity is MITgcm's momVort3).
-    vorticity_corner = (grid.diff(v_y * dyC, 'X')
-                        - grid.diff(u_x * dxC, 'Y')) / rAz
-    strain_shear_corner = (grid.diff(v_y * dyC, 'X')
-                           + grid.diff(u_x * dxC, 'Y')) / rAz
+    # rAz; the vorticity is MITgcm's momVort3).  These stencils cross
+    # face seams tangentially, which xgcm cannot exchange, so the seam
+    # rim is NaN-ed; the NaN carries into okubo_weiss and strain_mag.
+    cross_v = grid.diff(v_y * dyC, 'X')
+    cross_u = grid.diff(u_x * dxC, 'Y')
+    vorticity_corner = (cross_v - cross_u) / rAz
+    strain_shear_corner = (cross_v + cross_u) / rAz
+    if mask_seams is None:
+        mask_seams = has_face_connections(grid)
+    if mask_seams:
+        vorticity_corner = face_seam_mask(vorticity_corner)
+        strain_shear_corner = face_seam_mask(strain_shear_corner)
 
     return {"strain_normal_center": strain_normal_center,
             "divergence_center": divergence_center,
