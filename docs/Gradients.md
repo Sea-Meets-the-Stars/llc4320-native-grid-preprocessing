@@ -103,6 +103,35 @@ the centred `relative_vorticity` channel — different stencils by
 design.
 
 
+## Crossing a face boundary
+
+Some `face_connections` reach the neighbour along the *other* axis, so
+this face's model-x continues as the neighbour's model-y.  A staggered
+component's halo then has to come from its partner, and three cases
+follow:
+
+- **Cell-centred fields** (tracers, and the geographic `u_east`/`v_north`)
+  have no component to confuse.  `grid.diff` / `grid.interp` are correct.
+- **A staggered pair** (U/V, a velocity Jacobian, a tracer gradient) must
+  be moved with `llc4320_ingestion.grid.interp_pair_to_center` or
+  `diff_pair_along_own_axis`, never one component at a time.  Getting
+  this wrong put a one-cell stripe in `U` and `vg` at ~142.5 E.
+- **The corner stencils** (`vorticity_corner`, `strain_shear_corner`)
+  difference each velocity across the *other* axis, which xgcm cannot
+  exchange at all.  Their seam rim is NaN-ed by `face_seam_mask`, and
+  the NaN carries into `okubo_weiss` and `strain_mag` (~0.07% of ocean
+  cells).
+
+Whether the error is visible depends on what happens next.  Rotating the
+pair with CS/SN passes it straight through; summing squares
+(`calculate_grad_squared_tracer`, so `gradb2`) is rotation-invariant and
+absorbs it, which is why those channels are left alone.  The rotation
+also decides *which* channel shows a given seam: on an unrotated face an
+X-seam reaches the zonal component only, so `U` and `vg` show the
+142.5 E line while `V` and `ug` look clean.
+
+Tests: `tests/test_face_seams.py`.
+
 ## Note on wind stress (`oceTAUX`/`oceTAUY`)
 
 From the model metadata: in the Arakawa C-grid, wind stress acts on
