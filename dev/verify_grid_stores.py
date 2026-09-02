@@ -5,8 +5,10 @@ Motivation
 The two pipelines load the SAME physical LLC4320 grid from different
 stores, and they disagree about one thing: the comodo
 ``c_grid_axis_shift`` on ``i_g`` / ``j_g``.  ``get_remote_gridfile``
-(OSN) passes through whatever the store carries; ``get_llc_depth_gridfile``
-OVERWRITES it with ``+0.5``.
+(OSN) passes through whatever the store carries; the LLC_DEPTH store
+carries no comodo attributes at all, so ``get_llc_depth_gridfile``
+supplies them -- which makes that literal the only record of where U and
+V sit in that pipeline.
 
 That attribute is not cosmetic.  xgcm reads it as a SIGNED direction
 (``xgcm/comodo.py``): ``-0.5`` -> the staggered coordinate is at the

@@ -1,5 +1,7 @@
 import s3fs
 import xarray as xr
+
+from dbof.llc4320_ingestion.grid import COMODO_COORD_META
 import ujson
 import dask
 from functools import partial
@@ -607,19 +609,16 @@ def get_llc_depth_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_stor
     if 'hFacC' in grid and 'k' in grid['hFacC'].dims:
         grid = grid.assign(hFacC=grid['hFacC'].isel(k=0, drop=True))
 
-    # Add the COMODO coordinate attributes.  
-    coord_meta = {
-        'j':   {'axis': 'Y'},
-        'j_g': {'axis': 'Y', 'c_grid_axis_shift': -0.5},
-        'i':   {'axis': 'X'},
-        'i_g': {'axis': 'X', 'c_grid_axis_shift': -0.5},
-    }
+    # Add the COMODO coordinate attributes. Fill ONLY where the store is silent.
     coords_update = {}
-    for dim, attrs in coord_meta.items():
-        if dim in grid.dims:
-            existing = (grid.coords[dim] if dim in grid.coords
-                        else xr.DataArray(range(grid.sizes[dim]), dims=dim))
-            coords_update[dim] = existing.assign_attrs(attrs)
+    for dim, attrs in COMODO_COORD_META.items():
+        if dim not in grid.dims:
+            continue
+        existing = (grid.coords[dim] if dim in grid.coords
+                    else xr.DataArray(range(grid.sizes[dim]), dims=dim))
+        if 'axis' in existing.attrs:
+            continue
+        coords_update[dim] = existing.assign_attrs(attrs)
     if coords_update:
         grid = grid.assign_coords(coords_update)
 
