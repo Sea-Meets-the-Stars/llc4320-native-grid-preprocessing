@@ -105,9 +105,9 @@ def make_synthetic_grid(n=16, d=2500.0, cs=1.0, sn=0.0):
     coords = {
         "face": ("face", np.arange(N_FACES)),
         "i": ("i", idx, {"axis": "X"}),
-        "i_g": ("i_g", idx, {"axis": "X", "c_grid_axis_shift": 0.5}),
+        "i_g": ("i_g", idx, {"axis": "X", "c_grid_axis_shift": -0.5}),
         "j": ("j", idx, {"axis": "Y"}),
-        "j_g": ("j_g", idx, {"axis": "Y", "c_grid_axis_shift": 0.5}),
+        "j_g": ("j_g", idx, {"axis": "Y", "c_grid_axis_shift": -0.5}),
     }
 
     # Rotation coefficients live on tracer points (face, j, i).

@@ -70,9 +70,9 @@ def _base_coords(n=N):
     return {
         "face": ("face", np.arange(N_FACES)),
         "i": ("i", idx, {"axis": "X"}),
-        "i_g": ("i_g", idx, {"axis": "X", "c_grid_axis_shift": 0.5}),
+        "i_g": ("i_g", idx, {"axis": "X", "c_grid_axis_shift": -0.5}),
         "j": ("j", idx, {"axis": "Y"}),
-        "j_g": ("j_g", idx, {"axis": "Y", "c_grid_axis_shift": 0.5}),
+        "j_g": ("j_g", idx, {"axis": "Y", "c_grid_axis_shift": -0.5}),
     }
 
 

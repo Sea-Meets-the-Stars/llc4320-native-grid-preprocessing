@@ -607,12 +607,12 @@ def get_llc_depth_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_stor
     if 'hFacC' in grid and 'k' in grid['hFacC'].dims:
         grid = grid.assign(hFacC=grid['hFacC'].isel(k=0, drop=True))
 
-    # Add xgcm comodo coordinate attributes for grid operations.
+    # Add the COMODO coordinate attributes.  
     coord_meta = {
         'j':   {'axis': 'Y'},
-        'j_g': {'axis': 'Y', 'c_grid_axis_shift': 0.5},
+        'j_g': {'axis': 'Y', 'c_grid_axis_shift': -0.5},
         'i':   {'axis': 'X'},
-        'i_g': {'axis': 'X', 'c_grid_axis_shift': 0.5},
+        'i_g': {'axis': 'X', 'c_grid_axis_shift': -0.5},
     }
     coords_update = {}
     for dim, attrs in coord_meta.items():
