@@ -69,10 +69,52 @@ The native gradients are computed using the native_gradient.py module.  We wish 
 - Generate a Jupyter Notebook for this Case that shows figures related to the tests in test_native_gradient.py.  Call it notebooks_tests/jacobian_tests_G.ipynb.  Use the code you generate in test_jacobian.py to make the figures.
 - Log your work below including the plan
 
+### Gradient tracer
 
-## Docs
+We wish to generate unit tests for the calculate_native_gradient_tracer() function.
 
-## Modifications
+1. Please do the following:
+  - Examine the method calculate_native_gradient_tracer() in src/dbof/utils/native_gradient.py
+  - Examine the tests we have generated for the calculate_jacobian() function in 
+    tests/test_jacobian.py
+  - Generate a set of tests for the calculate_native_gradient_tracer() function.
+  - The tests should confirm:
+    - derivative values are correct
+    - sign conventions are correct
+  - Place these in a new module named tests/test_native_gradient_tracer.py
+  - These should be a mix of offline (artificial) and online (real grid) tests
+  - It is best to use a cached version of the grid, when you can
+  - Generate a Jupyter Notebook named notebooks_tests/native_gradient_tracer_tests.ipynb that demonstrates the tests.
+    - It should use the code you create in tests/test_native_gradient_tracer.py 
+  - Log your work
+
+### Vertical Helpers
+
+We wish to generate unit tests for the vertical_helpers.py module.
+
+1. Please do the following:
+  - Examine the methods in src/dbof/preprocessing/vertical_helpers.py
+  - Examine the tests we have generated in tests/test_jacobian.py and
+    tests/test_native_gradient_tracer.py.  
+  - Generate a set of tests for the vertical_helpers.py module.
+  - The tests should confirm:
+    - detection of vertical dimension
+    - sign conversion errors with MITgcm depth orientation  
+    - vertical spacing usage
+    - anything else you consider important
+  - These should be a mix of offline (artificial) and online (real grid) tests
+  - It is best to use a cached version of the grid, when you can
+  - Generate a Jupyter Notebook named notebooks_tests/vertical_helpers_tests.ipynb that demonstrates the tests.
+    - It should use the code you create in tests/test_vertical_helpers.py 
+    - It should include figures
+    - Mimic it after the other Notebooks in notebooks_tests/
+  - Log your work
+
+## PR
+
+1. Please see the comments on the PR for more unit tests on GitHub: https://github.com/Sea-Meets-the-Stars/llc4320-native-grid-preprocessing/pull/26.  Read the review comments and develop a plan to address them.  Ask me questions before proceeding; put them in the Q&A section and I will answer them.  Use Fable if you can.  Log your work.
+
+2. I have answered your questions below.  Please read my responses and then proceed to address the PR with code changes.  Use Fable if you can.  Log your work.
 
 ## Prompts
 
@@ -82,14 +124,80 @@ The native gradients are computed using the native_gradient.py module.  We wish 
 4. Re-read this document.  Implement the 4th item under Native gradients/Jacobian
 5. Re-read this document.  Implement the 5th item under Native gradients/Jacobian
 6. Re-read this document.  Implement the 6th item under Native gradients/Jacobian
+7. Re-read this document.  Implement the 1st item under Native gradients/Gradient tracer
+8. Re-read this document.  Implement the 1st item under Native gradients/Vertical Helpers
+9. Re-read this document.  Implement the 1st task under PR
+10. Re-read this document.  Implement the 2nd task under PR
+
+## Q&A
+
+Questions on the PR #26 review plan (see the 2026-07-28 log entry for the
+full plan). Please answer inline; I will not modify anything until then.
+
+1. **PR title.** Proposed rename: "Unit tests + validation notebooks for
+   native gradients (Jacobian, tracer) and vertical helpers". OK, or do
+   you prefer different wording?
+>A. Yes, this is ok.
+
+2. **λ/φ naming.** The code (from the ECCO tutorial) uses the standard
+   geographic convention λ=longitude (zonal), φ=latitude (meridional) —
+   the reviewer's (θ, φ) suggestion is the physics spherical-coordinates
+   convention and conflicts with ECCO. I propose to KEEP λ/φ but define
+   both symbols explicitly in every notebook and axis label (e.g.
+   "zonal (λ, longitude)"), and note the ECCO provenance. Renaming the
+   production outputs (du_lambda_dlambda, ...) would be a breaking
+   change. Agree with keep-and-define?
+>A. Yes, keep and define.
+
+3. **Depth sign convention.** `_get_depth_coord` returns positive-down
+   depth; the reviewer prefers native negative-up. Changing it now would
+   ripple through MLD/vertical code. I propose to KEEP positive-down but
+   (a) add the CF `positive: "down"` attribute + units to the returned
+   coordinate, (b) print/warn loudly in helpers and notebooks that the
+   native MITgcm Z has been flipped. OK, or do you want the convention
+   itself revisited?
+>A. Yes, keep and print/warn.  Do not add the attribute.
+
+4. **Production-code changes allowed?** The reviewer asks that grid
+   location (all outputs at tracer centres) be "output and warnings" —
+   that means touching `src/dbof/utils/native_gradient.py` (attach
+   xarray attrs like `grid_location="tracer/C-point"` to outputs, extend
+   docstrings), not just tests/notebooks. OK to modify production code
+   in this PR?
+>A. Do not make these changes.  It is out of scope for this PR.
+
+5. **51-level / 968 m vertical grid.** The cached S3 grid
+   (`dbof/LLC4320/grid.zarr`) holds only 51 levels down to ~968 m (the
+   DBOF training subset) — that is why the reviewer saw "800 m" instead
+   of full ocean depth. Is upper-968 m the intended DBOF domain (I then
+   state this prominently in the notebooks), or should the vertical
+   tests pull the full 90-level LLC4320 grid from another source?
+>A. The upper 968m is the intended DBOF domain.
+
+6. **Face-consistency test (reviewer's "are the faces doing what they
+   should").** I propose a new online test: an analytic tracer built
+   from XC/YC (e.g. s = sin(lat)) whose geographic gradient is known in
+   closed form; assert the computed (zonal, meridional) gradient matches
+   on EVERY face. This requires adding XC/YC to the cached grid fields
+   (~2 more 2-D fields, cache grows ~2 GB, one-time re-download). OK?
+>A. Yes, this is good. Please do it
+
+7. **Anisotropy.** Add synthetic-grid variants with dxC != dyC (uniform
+   but unequal — still analytic) to the Jacobian and tracer tests. Is
+   uniform anisotropy sufficient, or do you also want spatially varying
+   metrics (no closed-form answer; would need a convergence-style test)?
+>A. Uniform anisotropy is sufficient.
+
+8. **Regional cutouts.** For the real-SST figures, replace the single
+   downsampled face with full-resolution cutouts of the issue #24
+   regions (W. North Atlantic 0-60N, Atlantic sector of the Southern
+   Ocean, +/-5 deg Eastern Pacific)? This also fixes "face mainly looks
+   at the continent" and "downsampled" comments.
+>A. Sure, give this a try
 
 ## Logging
 
 The "Logs" section will record Claude's work.  Please use the following format:
-
-### <Date> (Short summary of the work)
-
-<Detailed description of the work and what you learned>
 
 ### <Date> (Short summary of the work)
 
@@ -485,3 +593,353 @@ off-plot zero fraction).
 
 All synthetic (A–E) and real-grid (F, G) Jacobian test cases from the plan
 are now implemented.
+
+### 2026-06-13 (Implemented Gradient tracer tests — `calculate_native_gradient_tracer`)
+
+Implemented the 1st item under Native gradients/Gradient tracer: a new
+module `tests/test_native_gradient_tracer.py` (9 offline + 2 online tests)
+and `notebooks/notebooks_tests/native_gradient_tracer_tests.ipynb`. The
+module **reuses the Jacobian fixtures** via
+`from test_jacobian import make_synthetic_grid, interior, load_real_llc_grid,
+N_FACES, EDGE_MARGIN, RUN_NETWORK, REAL_UV_DATE` so the two modules stay
+consistent.
+
+**What the function does.** `calculate_native_gradient_tracer(s, ds, grid)`
+differences a centre tracer in model x/y (`grid.diff/dxC`, `/dyC`),
+interpolates to centres, then rotates the gradient *vector* by
+`R=[[CS,-SN],[SN,CS]]`: `grad_lambda = gx·CS−gy·SN`, `grad_phi = gx·SN+gy·CS`.
+For linear `s=p·x+q·y` the model gradient is exactly `(p,q)`, so the target
+is `R·(p,q)`. Verified algebra numerically before writing asserts.
+
+**Key structural difference from the Jacobian** (drives the online tests):
+the rotation acts on the *already-differenced* gradient, so —
+- a **constant tracer → exactly zero gradient even on the real grid**
+  (no `grad(CS)` term can appear, unlike the velocity Jacobian's Case F);
+- the **gradient magnitude is exactly rotation-invariant**
+  (`|R·g|=|g|` since `CS²+SN²=1`).
+
+**Offline tests (always run; `pytest` → 9 passed):** no-rotation recovers
+`(p,q)`; 90° → `(−q,p)` (signs); constant→0; parametrized angle sweep
+`{0,30,45,90,137}°` vs analytic; coordinate contract. Linear-field interior
+errors ~1e-19 (machine precision).
+
+**Online tests (slow/network, skipped by default; same
+`RUN_LLC_NETWORK_TESTS` gate; → 2 passed in ~91 s):**
+- constant tracer on the real grid → max |grad| = **0.0** over the ocean
+  interior (asserted < 1e-12);
+- magnitude invariance with real surface **Theta** (SST), comparing the
+  geographic-frame `|grad|` to the model-frame `|grad|` (identity-rotation
+  via new helper `model_frame_gradient`): over 139.8M finite ocean points,
+  signalRMS=6.1e-5, **median diff 0.0**, max=4.7e-10, **rel RMS=2.9e-8**
+  (float32 machine precision). Asserts signalRMS>1e-6, median<1e-12,
+  relRMS<1e-5, 99th pct<1e-9.
+
+**Caching (per the prompt's "use cached data when you can").** Grid reuses
+the existing `load_real_llc_grid` cache. Real tracer added a small loader
+`load_real_llc_surface_tracer` reading surface Theta from the LLC_SURF OSN
+kerchunk (true surface-only, ~1 GB, ~45 s), cached to NetCDF
+(`LLC_TEST_TRACER_CACHE`).
+
+**Notebook** (executed via `nbconvert`: 0 errors, 4 figures, ends "offline
+tests passed." / "online tests passed."): (1) linear-tracer component maps
+vs analytic at 45°; (2) component-vs-angle sweep (computed markers on
+analytic curves); (3) real SST gradient-magnitude map on a face (the ocean
+fronts); (4) `y=x` magnitude scatter + machine-precision residual
+histogram. Same float32 `log10(0)` gotcha handled as in Case G (histogram
+the `d>0` tail, report the exact-zero fraction).
+
+Full default suite (`pytest tests/`): the two Jacobian + tracer modules run
+**18 passed, 4 skipped** (4 network tests skipped without the opt-in).
+
+### 2026-06-13 (Implemented Vertical Helpers tests — `vertical_helpers.py`)
+
+Implemented the 1st item under Native gradients/Vertical Helpers: a new
+module `tests/test_vertical_helpers.py` (15 offline + 3 online tests) and
+`notebooks/notebooks_tests/vertical_helpers_tests.ipynb`. Reuses the
+network gate + real-grid S3 config from `test_jacobian`
+(`from test_jacobian import REAL_GRID_S3, RUN_NETWORK`).
+
+**Functions covered** (`dbof.preprocessing.vertical_helpers`):
+`_get_vertical_dim`, `_get_depth_coord`, `_get_vertical_spacing`,
+`_nearest_k_to_depth`, `_vertical_derivative`, `_select_at_depth`,
+`_extract_at_mld`, `_interp_w_to_tracer_levels`, `_masked_ml_mean`. (These
+are underscore-prefixed by the module's own convention; accessing them from
+the tests is intentional — the linter "protected member" hints are noise.)
+
+**The two error-prone behaviours the prompt called out, tested directly:**
+- **MITgcm sign conversion:** `_get_depth_coord` flips native
+  negative-upward `Z` to positive-downward depth. Offline: synthetic
+  negative `Z` → all ≥0, strictly increasing, equals `-Z`; plus a
+  positive-`Z`-unchanged case (no double flip) and a `Z`-on-dim-`'Z'`
+  rename-to-`'k'` case. Online: the real `Z` (mean<0) converts to a
+  monotonic 0.5→945.6 m depth.
+- **Vertical spacing usage:** `k`→`drF` returned unchanged; missing
+  spacing var → `np.gradient(depth)` fallback. Online: real `drF` is
+  positive, refines toward the surface, and `sum(drF)=968.62 m` equals the
+  `Zp1` interface span exactly.
+
+**Other tests:** vertical-dim detection across all known axis names +
+`ValueError` on none; `_nearest_k_to_depth` (incl. tie→lower index);
+`_vertical_derivative` exact for a linear profile (offline uniform **and**
+online real non-uniform `Z` — centered/forward/backward all reproduce the
+slope since the spacing cancels) and correct negative sign for a
+depth-decreasing profile; `_select_at_depth` nearest level;
+`_extract_at_mld` per-column nearest-k; `_interp_w_to_tracer_levels` =
+`0.5*(W[k]+W[k+1])`; `_masked_ml_mean` constant→constant and
+thickness-weighted average matching an explicit hand computation.
+
+**Caching (per prompt).** Online tests use only the real **1-D vertical
+coordinates** (`Z, Zl, Zu, Zp1, drF`, ~51 values, ~16 KB), fetched once via
+`get_llc_depth_gridfile` and cached (`LLC_TEST_VERTICAL_CACHE`). This
+exercises the genuine LLC4320 non-uniform depth structure (where sign/
+spacing bugs bite) without any heavy 3-D download — the online tests run in
+seconds. Field values for the online derivative test are analytic on the
+real `Z`, so the answer stays exact.
+
+**Gotcha fixed:** two offline tests initially mutated a fixture dataset
+(`ds["Z"]`/`ds["W"]` with a different dim length than an existing dim) →
+xarray alignment error; rebuilt those as minimal standalone datasets.
+
+**Verification:** offline `pytest tests/test_vertical_helpers.py` →
+**15 passed, 3 skipped**; `RUN_LLC_NETWORK_TESTS=1 -k real` →
+**3 passed**. Notebook executed via `nbconvert`: 0 errors, 5 figures
+(sign-conversion profiles, derivative+sign, ML-mean band, real vertical
+structure, real-grid derivative), ends "offline/online tests passed."
+
+**All three test modules together** (`pytest tests/test_jacobian.py
+tests/test_native_gradient_tracer.py tests/test_vertical_helpers.py`):
+**33 passed, 7 skipped** by default (7 network tests gated by
+`RUN_LLC_NETWORK_TESTS`).
+
+### 2026-07-28 (Plan to address PR #26 review comments — plan only)
+
+Implemented the 1st task under PR (running as Claude Fable 5, per the
+prompt's "Use Fable if you can"). This is a **plan only**: questions are
+in the Q&A section above and nothing will be modified until they are
+answered.
+
+#### What the review says
+
+PR #26 has no inline review comments and no formal review — the feedback
+is a single long conversation comment from **CompClimate**
+(2026-07-28, issue-comment 5107540234) covering
+`native_gradient_tracer_tests.ipynb` and `vertical_helpers_tests.ipynb`,
+plus general points (PR title; make grid-cell locations of every
+operation explicit; follow ECCO naming conventions). It also references
+"an issue" with suggested regions — that is **issue #24** (W. North
+Atlantic 0-60N, Atlantic sector of the Southern Ocean, +/-5 deg Eastern
+Pacific).
+
+#### Facts I verified before planning
+
+- **λ/φ:** the code uses λ=longitude, φ=latitude (ECCO tutorial
+  convention). The reviewer suspected λ was latitude — the code is
+  right, but the notebooks never define the symbols. Doc problem, not a
+  code bug.
+- **"Fig 4 shows 800 m":** the cached S3 grid store carries only 51
+  vertical levels spanning 0.5-945.6 m (the DBOF training subset), not
+  the full-depth LLC4320. The figure is faithful to the data; the
+  notebook never states the domain is upper-ocean only. (Q&A #5.)
+- **Anisotropy:** the synthetic 13-face grid uses uniform `dxC=dyC` —
+  the reviewer's concern is correct; isotropy can hide dx/dy swaps.
+- **"geographic vs analytic" stats:** the notebook's section-4 stats
+  actually compare geographic-frame vs **model-frame** magnitudes
+  (rotation invariance); "analytic" never appears in that comparison —
+  labeling/text error in the markdown.
+- **Theta:** the OSN kerchunk variable is MITgcm `Theta` (potential
+  temperature); its surface level is what we called "SST". Metadata
+  should be surfaced in the notebook to confirm units/meaning.
+
+#### Plan, mapped to each review point
+
+**General / PR-wide**
+1. Rename the PR to something informative (Q&A #1).
+2. Add a **staggered C-grid schematic figure** (shared helper, reused by
+   the notebooks): tracer centre `(j,i)`, U point `(j,i_g)` west face,
+   V point `(j_g,i)` south face, with arrows showing each operation's
+   diff -> interp path and where results land. Addresses "where on a
+   gridcell the operations are actually going" for the uninitiated.
+3. Use **ECCO naming conventions** for grid locations everywhere in
+   notebook text (c/U/V points, i_g/j_g half-cell shifts) and state the
+   destination (tracer centres) of every output explicitly.
+4. Attach `grid_location` (and units) attrs to the outputs of
+   `calculate_native_gradient_tracer` / `calculate_jacobian` so the
+   location is machine-visible, per "having this as output and
+   warnings" (needs Q&A #4 approval to touch production code).
+
+**`native_gradient_tracer_tests.ipynb`**
+5. State up front that the function returns BOTH components (zonal
+   d/dλ, meridional d/dφ); plot the two components separately, not just
+   the magnitude, so equatorial (a)symmetry is visible.
+6. Define every symbol at first use: `p`,`q` are prescribed linear
+   slopes of the synthetic tracer (NOT pressure — will rename to
+   `slope_x`,`slope_y`); "geographic axes" = local east/north (λ/φ per
+   Q&A #2).
+7. Clarify "constant tracer" = the entire ocean filled with a single
+   number (yes, that was the reviewer's reading).
+8. Explain the synthetic 13-face grid in one paragraph (LLC face
+   topology, uniform metrics, constant rotation, why interiors are
+   analytic) and add **anisotropic variants** dxC != dyC (Q&A #7).
+9. Explain the face edges in figures: the halo ring is contaminated by
+   neighbour-face axes by construction, is excluded from every assert
+   (EDGE_MARGIN), and will be visually masked/annotated in figures.
+10. Replace the downsampled, continent-dominated face-10 map with
+    **full-resolution regional cutouts** from issue #24 (Q&A #8), plus a
+    computed-minus-reference difference map so accuracy is assessable.
+11. Wording: "SST gradients" instead of "fronts"; state that the field
+    is MITgcm `Theta` (potential temperature) surface level and show the
+    store metadata (units, long_name) in the notebook.
+12. Fix the section-4 text/labels: the comparison is geographic-frame vs
+    model-frame |grad| (rotation invariance), not "analytic".
+13. New **face-consistency test** (reviewer: "are the faces doing what
+    they should"): analytic tracer from XC/YC, e.g. s = sin(lat), whose
+    zonal gradient is 0 and meridional gradient is cos(lat)/R exactly;
+    assert per-face agreement so a staggering/rotation error on any
+    single face fails loudly (Q&A #6 — needs XC/YC in the grid cache).
+
+**`vertical_helpers_tests.ipynb`**
+14. Depth sign: keep positive-down (pending Q&A #3) but add CF
+    `positive: "down"` + `units: "m"` attrs to `_get_depth_coord`
+    output, and a prominent notebook banner + printed warning that
+    native MITgcm Z (negative-up) has been flipped — the "big flag" for
+    users of other ECCO packages.
+15. Rewrite the top-of-notebook description for clarity; define `drF`
+    (tracer-cell layer thickness, metres, defined between interfaces
+    Zp1[k] and Zp1[k+1]) and give units on every quantity.
+16. Define "linear profile" = tracer varying linearly with depth
+    (straight line in the tracer-vs-depth plane; yes, "straight down").
+17. Rewrite section 3's markdown: it demonstrates the thickness-weighted
+    mixed-layer mean (`_masked_ml_mean`) — show the hand computation it
+    is checked against.
+18. Section 4 / depth range: keep depth on the y-axis (it already is)
+    but state clearly the store is the 51-level, 0-968 m DBOF subset
+    (Q&A #5); reorder the notebook so the **real depth structure figure
+    comes first**, and audit every profile figure for depth-on-y,
+    increasing downward ("many figures have this error").
+19. New **cell-centre targeting test + figure**: prescribe a target
+    depth, show layer interfaces (Zp1) and centres (Z), and verify
+    `_nearest_k_to_depth` / `_select_at_depth` / `_extract_at_mld` land
+    on the intended cell CENTRE, not an interface — the reviewer's
+    "if you're trying to get to the middle of the cell you actually end
+    up there".
+
+#### Sequencing (after Q&A answers)
+
+(1) production-code attrs/docstrings (if approved) + rerun the affected
+unit tests; (2) new tests (face-consistency, anisotropy, cell-centre
+targeting) in the existing test modules; (3) notebook rewrites +
+re-execution via nbconvert; (4) PR rename + a reply comment on PR #26
+mapping each review bullet to the commit that addresses it.
+
+No files other than this prompt document were modified.
+
+### 2026-07-28 (Implemented the PR #26 review plan — code + notebooks)
+
+Implemented the 2nd task under PR (as Claude Fable 5), following the
+Q&A answers above. Everything below is done and verified; nothing is
+committed/pushed yet (that is left to you, as usual).
+
+#### Environment note (important)
+
+The `ocean14` env no longer has `xgcm` or the `dbof` package — all runs
+now use the **`dbof` conda env** (`conda run -n dbof`), which imports
+`dbof` from this repo's `src/`. `nbformat`/`nbclient`/`ipykernel` were
+pip-installed into it to execute notebooks. The `/tmp` test caches had
+been wiped; all four were re-downloaded (grid now 6.4 GB **including
+XC/YC**, per Q&A #6).
+
+#### New/changed tests (all in `tests/`)
+
+- **Anisotropy (Q&A #7).** `make_synthetic_grid`/`add_linear_velocity`/
+  `add_linear_tracer` gained a `dy` parameter;
+  `test_jacobian_anisotropic_grid_metrics` and
+  `test_tracer_anisotropic_grid_metrics` (each parametrized over 0° and
+  30°) use `dyC = 2.4 dxC`, so a dxC/dyC swap would be 2.4x off.
+- **Face consistency (Q&A #6).**
+  `test_tracer_real_grid_face_consistency_analytic_field`, parametrized
+  over two analytic tracers built from XC/YC: `s = sin(phi)` (zonal
+  grad 0, meridional `cos(phi)/R`) and `s = sin(lambda)cos(phi)`
+  (smooth across dateline/poles; both components non-zero). Asserted
+  **per face** with errors normalised by `1/R`.
+  - *Debug finding:* the first version failed because it included land,
+    where the grid stores fill `CS = SN = 0` (80% of land points), so
+    the rotated gradient is identically zero there. With the ocean mask
+    (`hFacC > 0`) every face has median error ~1e-4 (the float32 XC/YC
+    quantisation floor) and p95 ~5e-4. Thresholds: median < 1e-3,
+    p95 < 5e-3 (10x margin, but far below any O(1) staggering error).
+  - `load_real_llc_grid` now fetches/caches XC, YC too and
+    auto-refreshes a stale (pre-XC/YC) cache.
+- **Tracer slope rename.** `p, q` -> `slope_x, slope_y` everywhere in
+  `test_native_gradient_tracer.py` (reviewer: "is p pressure?").
+- **Depth-flip warning (Q&A #3).** `_get_depth_coord` in
+  `src/dbof/preprocessing/vertical_helpers.py` now emits a loud
+  `UserWarning` whenever it flips native negative-up `Z` to
+  positive-down depth (docstring warning added; **no CF attribute**,
+  per your answer). New `test_depth_coord_flip_emits_warning` asserts
+  the warning fires on a flip and does NOT fire on already-positive
+  input. This is the only production-code change (Q&A #4 kept
+  `native_gradient.py` untouched).
+- **Cell-centre targeting.** `test_select_at_depth_targets_cell_centres`
+  uses non-uniform cells (2/4/8/16/32 m): dead-centre targets return
+  their own cell for every cell; documents the nearest-CENTRE caveat
+  (a target at 15 m, inside the 14-30 m cell, resolves to the 10 m
+  centre of the thin cell above).
+
+#### New shared helper
+
+`tests/cgrid_schematic.py::draw_cgrid_schematic` — annotated Arakawa
+C-grid schematic with ECCO naming (tracer `(j,i)`, U `(j,i_g)` west
+face + `dxC`, V `(j_g,i)` south face + `dyC`, corner `(j_g,i_g)`) and
+the diff -> /metric -> interp -> rotate path. Used by the tracer
+notebook; addresses the "where on a gridcell do operations go" review
+point.
+
+#### Notebook rewrites (both executed end-to-end, 0 errors)
+
+`notebooks/notebooks_tests/native_gradient_tracer_tests.ipynb`
+(10 figures): conventions header defining λ=longitude/φ=latitude
+(keep-and-define per Q&A #2), both-components-returned, outputs at
+tracer centres, constant tracer = one number everywhere,
+slope_x/slope_y definitions; C-grid schematic; synthetic-grid + edge
+explanation (halo seams wrong by construction -> EDGE_MARGIN box);
+45° linear-tracer component+error maps; angle sweep; anisotropy demo
+(with markers showing what swapped metrics would give); Theta metadata
+printed from the store (`long_name: Potential Temperature`,
+`units: degC` — "SST gradients" wording, no "fronts"); **full native
+1/48° resolution regional figures** for the three issue #24 regions
+(zonal + meridional signed components + log magnitude; the ±5°
+Eastern Pacific panel shows the equatorial symmetry of ∂SST/∂y);
+per-face error bars for both analytic tracers + computed-vs-analytic
+maps on the Arctic cap face; magnitude-invariance section relabelled
+**geographic vs MODEL frame** (the old "analytic" label was wrong);
+ends by running all offline + online tests ("passed").
+
+`notebooks/notebooks_tests/vertical_helpers_tests.ipynb` (6 figures):
+top-of-notebook ⚠️ banner on the positive-down flip + UserWarning
+(printed live in Section 2); prominent statement that the DBOF store
+is the **upper-ocean 51-level / 968.6 m domain** (Q&A #5 — the "800 m"
+comment was the real domain, now labelled); definitions table for
+Z/Zl/Zp1/drF with units and "linear profile" defined; real vertical
+structure moved to Section 1 (depth profile first, per review); every
+profile figure has depth on the y-axis increasing downward; ML-mean
+section now prints the full hand computation; new cell-centre
+targeting figure (real 51 levels + the non-uniform caveat panel);
+ends by running 17 offline + 3 online tests ("passed").
+
+#### PR actions
+
+- PR #26 renamed to "Unit tests + validation notebooks for native
+  gradients (Jacobian, tracer) and vertical helpers" (Q&A #1; done via
+  REST API — `gh pr edit` hits a Projects-classic GraphQL bug).
+- A point-by-point reply to the reviewer is drafted in
+  `prompts/pr26_reply_draft.md` — **not posted yet**, since the
+  changes are not pushed; post it (or ask me to) after pushing.
+
+#### Verification
+
+- Offline: `pytest tests/test_jacobian.py tests/test_native_gradient_tracer.py
+  tests/test_vertical_helpers.py` -> **39 passed, 9 skipped**.
+- Full: `RUN_LLC_NETWORK_TESTS=1 pytest <same>` -> **48 passed**
+  (7 min; caches warm).
+- Both notebooks executed via nbclient with 0 errors and their final
+  cells running the actual test functions.

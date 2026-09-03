@@ -51,7 +51,7 @@ aws s3api  get-bucket-acl --bucket dbof --endpoint https://s3-west.nrp-nautilus.
 
 ### This is the command.  You append new users with id=USER_ID to the list
 
-aws s3api put-bucket-acl --profile default --bucket dbof --grant-full-control id=profx,id=http://cilogon.org/serverE/users/388729,id=http://cilogon.org/serverE/users/448223,id=http://cilogon.org/serverE/users/340867 --endpoint https://s3-west.nrp-nautilus.io
+aws s3api put-bucket-acl --profile default --bucket dbof --grant-full-control id=profx,id=petercornillon,id=http://cilogon.org/serverE/users/388729,id=http://cilogon.org/serverE/users/448223,id=aHR0cDovL2NpbG9nb24ub3JnL3NlcnZlckUvdXNlcnMvNTU5NDU0 --endpoint https://s3-west.nrp-nautilus.io
 
 ## Check access
 

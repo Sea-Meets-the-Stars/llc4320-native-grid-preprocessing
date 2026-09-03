@@ -9,6 +9,8 @@ on ``Z`` / ``k`` vertically, but are horizontally staggered — the caller
 is responsible for interpolating to tracer points when needed.
 """
 
+import warnings
+
 import numpy as np
 import xarray as xr
 
@@ -53,6 +55,14 @@ def _get_depth_coord(ds_merge, zdim=None):
     downward (0 at the surface, increasing with depth) by taking
     the absolute value.
 
+    .. warning::
+       This **inverts the native MITgcm/ECCO sign convention**: every
+       depth used downstream of this helper (MLD comparisons,
+       nearest-level selection, vertical derivatives) is positive-
+       downward, opposite to the ``Z`` coordinate that other ECCO
+       tooling exposes.  A ``UserWarning`` is emitted when the flip
+       is applied so the conversion never happens silently.
+
     For tracer-level fields (zdim='k') this returns ``|Z|``.
     For W-level fields (zdim='k_l') this returns ``|Zl|``.
 
@@ -83,7 +93,15 @@ def _get_depth_coord(ds_merge, zdim=None):
         z = z.rename({z.dims[0]: zdim})
 
     # MITgcm stores depth as negative-upward; convert to positive-downward.
+    # Warn loudly: this inverts the native sign convention, which matters
+    # to anyone comparing against other ECCO/MITgcm tooling.
     if np.nanmean(z.values) < 0:
+        warnings.warn(
+            f"Flipping vertical coordinate '{coord_name}' from the native "
+            "MITgcm negative-upward convention to POSITIVE-DOWNWARD depth "
+            "(0 at the surface, increasing with depth). All depths "
+            "downstream of dbof vertical helpers use this convention.",
+            UserWarning, stacklevel=2)
         z = -z
 
     return z
