@@ -60,12 +60,18 @@ follow:
 - **A staggered pair** (U/V, a velocity Jacobian, a tracer gradient) must
   be moved with `utils.native_gradient.interp_pair_to_center` or
   `diff_pair_along_own_axis`, never one component at a time.  Getting
-  this wrong put a one-cell stripe in `U` and `vg` at ~142.5 E.
+  this wrong put a one-cell stripe in `U` and `vg` at the rotated face
+  edges (most visibly ~142.5 E).
 - **The corner stencils** (`vorticity_corner`, `strain_shear_corner`)
-  difference each velocity across the *other* axis, which xgcm cannot
-  exchange at all.  Their seam rim is NaN-ed by `face_seam_mask`, and
-  the NaN carries into `okubo_weiss` and `strain_mag` (~0.07% of ocean
-  cells).
+  move each velocity across the *other* axis, so they need the same
+  pairing.  What is left is the four **open domain edges**, which have
+  no neighbour at all: `face_seam_mask` NaNs those, and the NaN carries
+  into `okubo_weiss` and `strain_mag`.
+
+`dev/verify_corner_seam_exchange.py` measures the corner case against
+solid-body rotation, whose vorticity is known exactly: pairing takes the
+seam error from 6.5e6x the interior error down to 13x, at the floor of
+what that test can resolve.
 
 Whether the error is visible depends on what happens next.  Rotating the
 pair with CS/SN passes it straight through; summing squares

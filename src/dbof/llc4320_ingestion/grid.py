@@ -67,11 +67,17 @@ def set_xgcm_grid(ds_grid, use_connections:bool=True):
 # Face seams
 # ---------------------------------------------------------------------------
 
-def invalid_seam_edges():
-    """Face edges whose halo cannot be copied from the neighbour.
+def invalid_seam_edges(kind='all'):
+    """Face edges whose halo cannot simply be copied from the neighbour.
 
-    Rotated connections (neighbour reached along the other axis) and open
-    domain edges (``None``).
+    Two kinds: ``rotated`` (neighbour reached along the other axis, so a
+    staggered component's halo has to come from its partner) and ``open``
+    (``None`` -- no neighbour at all).  Rotated edges are handled by
+    passing both components to xgcm; open edges cannot be.
+
+    Parameters
+    ----------
+    kind : {'all', 'rotated', 'open'}, default 'all'
 
     Returns
     -------
@@ -84,13 +90,19 @@ def invalid_seam_edges():
     for face, axes in face_connections['face'].items():
         for axis, (lower, upper) in axes.items():
             for side, link in (('lower', lower), ('upper', upper)):
-                if link is None or link[1] != axis:
-                    edges.add((face, axis, side))
+                is_open = link is None
+                if is_open or link[1] != axis:
+                    if kind == 'all' or (kind == 'open') == is_open:
+                        edges.add((face, axis, side))
     return edges
 
 
-def face_seam_mask(da, grid, width=1):
-    """NaN the *width* cells adjacent to each invalid seam edge.
+def face_seam_mask(da, grid, width=1, kind='open'):
+    """NaN the *width* cells adjacent to each OPEN domain edge.
+
+    Rotated edges are not masked: passing both components to xgcm gets
+    their halo from the partner face.  Open edges have no neighbour, so
+    nothing can be fetched and those cells stay NaN.
 
     A no-op on a grid without face connections (a tile has no seams).
 
@@ -101,6 +113,9 @@ def face_seam_mask(da, grid, width=1):
     grid : xgcm.Grid
     width : int, default 1
         Cells to invalidate at each edge.
+    kind : {'open', 'rotated', 'all'}, default 'open'
+        Which edges to mask; see :func:`invalid_seam_edges`.  ``'all'``
+        is the pre-exchange behaviour, kept for before/after comparison.
 
     Returns
     -------
@@ -118,7 +133,7 @@ def face_seam_mask(da, grid, width=1):
     shape = (da.sizes['face'], da.sizes[ydim], da.sizes[xdim])
     bad = np.zeros(shape, dtype=bool)
     pos = {'Y': 1, 'X': 2}
-    for face, axis, side in invalid_seam_edges():
+    for face, axis, side in invalid_seam_edges(kind):
         sl = [slice(None)] * 3
         sl[0] = face
         sl[pos[axis]] = (slice(0, width) if side == 'lower'
