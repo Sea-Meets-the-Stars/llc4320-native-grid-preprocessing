@@ -15,14 +15,13 @@ import xarray as xr
 
 import dbof.utils.native_gradient as ng
 from dbof.llc4320_ingestion.grid import (
-    diff_pair_along_own_axis,
     face_connections,
     face_seam_mask,
-    has_face_connections,
-    interp_pair_to_center,
     invalid_seam_edges,
     set_xgcm_grid,
 )
+from dbof.utils.native_gradient import (diff_pair_along_own_axis,
+                                        interp_pair_to_center)
 
 #: Faces whose X-upper connection is rotated (left-staggered U reads the
 #: upper halo), e.g. face 5 -> face 7 via 'Y'.
@@ -41,8 +40,8 @@ def test_invalid_seam_edges_lists_rotated_and_open_edges():
         assert link is None or link[1] != axis
 
 
-def test_face_seam_mask_touches_only_the_rim(ds2d):
-    masked = face_seam_mask(xr.ones_like(ds2d['CS']))
+def test_face_seam_mask_touches_only_the_rim(ds2d, grid2d):
+    masked = face_seam_mask(xr.ones_like(ds2d['CS']), grid2d)
     assert bool(np.isnan(masked).any())
     assert not bool(np.isnan(
         masked.isel(i=slice(2, -2), j=slice(2, -2))).any())
@@ -51,7 +50,7 @@ def test_face_seam_mask_touches_only_the_rim(ds2d):
 def test_paired_interp_differs_from_scalar_only_at_rotated_seams(ds2d, grid2d):
     """The exchange changes the old scalar answer, and only at the seams."""
     paired, _ = interp_pair_to_center(ds2d.U, ds2d.V, grid2d)
-    scalar = grid2d.interp(ds2d.U, 'X', boundary='fill')
+    scalar = grid2d.interp(ds2d.U, 'X', padding='fill')
     differs = (np.abs(paired - scalar) > 0).compute()
 
     n = ds2d.sizes['i']
@@ -115,9 +114,9 @@ def test_grad_squared_is_unchanged(ds2d, grid2d):
     """The rotation-free path is left alone; gradb2 must not move."""
     got = ng.calculate_grad_squared_tracer(ds2d.Theta, ds2d, grid2d)
     expected = (grid2d.interp((grid2d.diff(ds2d.Theta, 'X')
-                               / ds2d.dxC) ** 2, 'X', boundary='fill')
+                               / ds2d.dxC) ** 2, 'X', padding='fill')
                 + grid2d.interp((grid2d.diff(ds2d.Theta, 'Y')
-                                 / ds2d.dyC) ** 2, 'Y', boundary='fill'))
+                                 / ds2d.dyC) ** 2, 'Y', padding='fill'))
     xr.testing.assert_allclose(got, expected)
 
 
@@ -125,10 +124,11 @@ def test_tile_grid_is_untouched(ds2d):
     """A single-face tile grid has no seams: plain stencils, no mask."""
     tile = ds2d.isel(face=slice(5, 6))
     tile_grid = set_xgcm_grid(tile, use_connections=False)
-    assert not has_face_connections(tile_grid)
+    xr.testing.assert_identical(
+        face_seam_mask(tile.CS, tile_grid), tile.CS)
 
     out = ng.calculate_native_strain_vorticity(tile.U, tile.V, tile, tile_grid)
     assert not bool(np.isnan(out['vorticity_corner']).any())
     u_c, _ = interp_pair_to_center(tile.U, tile.V, tile_grid)
     xr.testing.assert_allclose(
-        u_c, tile_grid.interp(tile.U, 'X', boundary='fill'))
+        u_c, tile_grid.interp(tile.U, 'X', padding='fill'))
