@@ -50,13 +50,9 @@ dependencies = [
     "ujson",
     "zarr",
     "gsw",
-    # Pinned below 0.10: that release removed `periodic` from xgcm.Grid and
-    # renamed the `boundary` argument of diff/interp to `padding`, which
-    # breaks dbof.llc4320_ingestion.grid and ~17 call sites in
-    # utils/native_gradient.py.  Held here rather than migrating the code so
-    # existing environments keep working; 0.9.0 is the last compatible release.
-    # >=0.9: xgcm.padding.pad raises on dask input in 0.8.x.
-    "xgcm>=0.9,<0.10",
+    # >=0.10: earlier releases cannot exchange a staggered vector pair
+    # across a rotated face connection on dask-backed input.
+    "xgcm>=0.10",
     "seawater",
     "ecco_v4_py",
     "scikit-fmm",
