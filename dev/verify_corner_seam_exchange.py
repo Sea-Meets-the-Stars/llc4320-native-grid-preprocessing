@@ -345,7 +345,7 @@ def summarize(err, mask, label):
     return float(sel.max())
 
 
-def edge_vs_inward(err, edges, k=8, ratio=10.0, show=6):
+def edge_vs_inward(err, edges, ref, k=8, ratio=10.0, show=6):
     """Compare each rim cell with its own inward neighbours.
 
     The global interior floor is not a fair yardstick: the half-cell
@@ -367,6 +367,12 @@ def edge_vs_inward(err, edges, k=8, ratio=10.0, show=6):
         Absolute error, dims ``(face, j_g, i_g)``.
     edges : iterable
         ``(face, axis, side)`` tuples.
+    ref : float
+        Interior median error.  Floors the denominator: on an analytic
+        field the inward cells are sometimes right to machine precision,
+        and dividing by ~1e-16 turns a physically perfect rim cell into a
+        ratio of 1e16.  A rim cell at the interior-typical level can
+        never fail.
     k : int, default 8
         Inward cells used as the local reference.
     ratio : float, default 10.0
@@ -388,10 +394,10 @@ def edge_vs_inward(err, edges, k=8, ratio=10.0, show=6):
         e = np.moveaxis(plane, 0 if axis == 'Y' else 1, 0)
         rim, inward = ((e[0], e[1:1 + k]) if side == 'lower'
                        else (e[-1], e[-1 - k:-1]))
-        base = np.nanmedian(inward, axis=0)
-        good = np.isfinite(rim) & np.isfinite(base) & (base > 0)
+        base = np.maximum(np.nanmedian(inward, axis=0), ref)
+        good = np.isfinite(rim) & np.isfinite(base)
         good[:k] = good[-k:] = False          # face corners
-        r = np.where(good, rim / np.where(base > 0, base, 1), np.nan)
+        r = np.where(good, rim / base, np.nan)
         bad = good & (r > ratio)
         n_bad += int(bad.sum())
         n_tested += int(good.sum())
@@ -453,9 +459,12 @@ def run(tol_factor=10.0, width=1):
         all_seams = np.asarray(edge_cell_mask(zeta, rotated | open_, width))
         interior = np.isfinite(err) & ~all_seams
         floor = float(np.nanpercentile(err[interior], 99.9))
+        ref = float(np.median(err[interior]))
 
         print(f"  {label}")
-        print(f"    {'interior 99.9th pct (the floor)':34s} {floor:.3e}")
+        print(f"    {'interior median (the reference)':34s} {ref:.3e}")
+        print(f"    {'interior 99.9th pct':34s} {floor:.3e}")
+        print(f"    (signal scale: 2*OMEGA = {2 * OMEGA:.3e} s^-1)")
         summarize(err, np.asarray(edge_cell_mask(zeta, rot_lower, width)),
                   "rotated seams, lower edge")
         summarize(err, np.asarray(edge_cell_mask(zeta, rot_upper, width)),
@@ -465,9 +474,10 @@ def run(tol_factor=10.0, width=1):
         print("    local check (rim cell vs its own inward neighbours,")
         print("    face corners excluded):")
         print("      lower edges -- pairing can fix these")
-        n_bad, n_tested = edge_vs_inward(err, rot_lower, ratio=tol_factor)
+        n_bad, n_tested = edge_vs_inward(err, rot_lower, ref,
+                                         ratio=tol_factor)
         print("      upper edges -- these stencils never reach that halo")
-        edge_vs_inward(err, rot_upper, ratio=tol_factor)
+        edge_vs_inward(err, rot_upper, ref, ratio=tol_factor)
         results[label] = (n_bad, n_tested)
         print()
 
