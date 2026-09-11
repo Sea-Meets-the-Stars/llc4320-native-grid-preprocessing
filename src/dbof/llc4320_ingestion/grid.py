@@ -68,10 +68,11 @@ def set_xgcm_grid(ds_grid, use_connections:bool=True):
 # ---------------------------------------------------------------------------
 
 def invalid_seam_edges(kind='all'):
-    """Face edges whose halo cannot simply be copied from the neighbour.
+    """Face edges whose values cannot simply be copied from the neighbour.
 
     Two kinds: ``rotated`` (neighbour reached along the other axis, so a
-    staggered component's halo has to come from its partner) and ``open``
+    staggered component's value from across the boundary has to come
+    from its partner) and ``open``
     (``None`` -- no neighbour at all).  Rotated edges are handled by
     passing both components to xgcm; open edges cannot be.
 
@@ -100,9 +101,10 @@ def invalid_seam_edges(kind='all'):
 def face_seam_mask(da, grid, width=1, kind='open'):
     """NaN the *width* cells adjacent to each OPEN domain edge.
 
-    Rotated edges are not masked: passing both components to xgcm gets
-    their halo from the partner face.  Open edges have no neighbour, so
-    nothing can be fetched and those cells stay NaN.
+    Rotated edges are not masked: passing both components to xgcm takes
+    their values from across the boundary from the partner face.  Open
+    edges have no neighbour, so there is nothing to take and those cells
+    stay NaN.
 
     A no-op on a grid without face connections (a tile has no seams).
 
