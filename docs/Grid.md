@@ -52,8 +52,8 @@ out from the geometry (`XC` sits half a cell east of `XG[i]`).
 
 Some `face_connections` reach the neighbour along the *other* axis, so
 this face's model-x continues as the neighbour's model-y.  A staggered
-component's halo then has to come from its partner, and three cases
-follow:
+component's value from across the boundary then has to come from its
+partner, and three cases follow:
 
 - **Cell-centred fields** (tracers, and the geographic `u_east`/`v_north`)
   have no component to confuse.  `grid.diff` / `grid.interp` are correct.

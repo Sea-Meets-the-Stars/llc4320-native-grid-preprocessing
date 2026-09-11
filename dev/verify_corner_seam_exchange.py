@@ -1,4 +1,4 @@
-"""Can xgcm exchange the corner-stencil halo across a rotated face seam?
+"""Can xgcm carry the corner stencils across a rotated face seam?
 
 The question
 ------------
@@ -6,7 +6,7 @@ The question
 across the OTHER axis (``d v/dx``, ``d u/dy``).  Those stencils are
 currently computed with a bare ``grid.diff``, which pads each component
 on its own; at a rotated connection the value that continues ``V`` is the
-neighbour's ``U``, so the halo column is wrong and the rim is NaN-ed by
+neighbour's ``U``, so that column is wrong and the rim is NaN-ed by
 ``face_seam_mask`` instead.
 
 xgcm 0.10 rewrote face-connection padding and its vector path now covers
@@ -39,15 +39,15 @@ the poles than at mid latitudes, so a single global tolerance would fail
 polar seam cells that are in fact perfectly healthy.
 
 So each rim cell is compared with the *k* cells directly inward from it
-on the same line: a correct halo leaves the rim comparable to its own
+on the same line: a correct boundary value leaves the rim comparable to its own
 neighbours, a wrong one leaves it orders of magnitude above them.  The
 test counts how many rim cells exceed TOL_FACTOR times their local
 neighbours -- counting, not maximum, because one bad cell and ten
 thousand bad cells are different answers and a maximum cannot tell them
 apart.
 
-This script's own floor at a seam is NOT the interior floor.  The halo
-value is built from the neighbour face's CS/SN, which point 90 degrees
+This script's own floor at a seam is NOT the interior floor.  The value
+taken from across the boundary is built from the neighbour face's CS/SN, which point 90 degrees
 away from ours, so the two half-cell errors are independent there where
 in the interior they partly cancel.  Measured on the OSN grid, a healthy
 seam sits around 10x the interior median.  A threshold near 10 therefore
@@ -58,11 +58,11 @@ from a streamfunction at the cell corners where XG/YG are exact.
 Two exclusions, both principled:
 
 - The first and last *k* cells of every edge, i.e. the FACE CORNERS.
-  A halo cell diagonally off a face would have to come from a face
+  A cell diagonally off a face would have to be read from a face
   ``face_connections`` never names, so no exchange scheme reaches them.
 - UPPER edges are reported but do not decide the test.  With
   left-staggered ``i_g``/``j_g`` these stencils reach only the LOWER
-  halo, so pairing cannot change an upper edge -- and if the upper
+  side, so pairing cannot change an upper edge -- and if the upper
   numbers are identical between the two variants, that is confirmation,
   and it means ``face_seam_mask`` is masking twice the cells it needs.
 
@@ -78,7 +78,7 @@ What it reports
    variants are expected to fail there and those cells keep their NaN
    whatever the outcome above.
 4. Lower vs upper edges.  With left-staggered ``i_g``/``j_g`` these
-   stencils reach only the LOWER halo, so upper-edge cells may already
+   stencils read only from the LOWER side, so upper-edge cells may already
    be clean under ``scalar`` -- in which case ``face_seam_mask`` is
    masking twice as many cells as it needs to.
 
@@ -207,7 +207,7 @@ def analytic_vorticity(lat_corner):
 # ---------------------------------------------------------------------------
 
 def corner_vorticity(u_x, v_y, ds_grid, grid, vector_aware):
-    """Corner vorticity, with the halo taken one way or the other.
+    """Corner vorticity, with the boundary value taken one way or the other.
 
     Parameters
     ----------
@@ -218,7 +218,7 @@ def corner_vorticity(u_x, v_y, ds_grid, grid, vector_aware):
     grid : xgcm.Grid
     vector_aware : bool
         ``True`` hands xgcm both components so a rotated connection can
-        take the halo from the partner; ``False`` is the bare scalar
+        take that value from the partner; ``False`` is the bare scalar
         diff used today.
 
     Returns
@@ -296,7 +296,7 @@ def edge_cell_mask(da, edges, width=1):
 def face_corner_mask(da, width=1):
     """Cells within *width* of BOTH an X and a Y face boundary.
 
-    A halo cell diagonally off a face comes from a face that
+    A cell diagonally off a face comes from a face that
     ``face_connections`` does not name -- the table lists edge
     neighbours, not corner ones -- so no exchange scheme can fill these,
     and on a cubed sphere three faces meet there anyway.  They are
@@ -362,12 +362,13 @@ def edge_vs_inward(err, edges, ref, k=8, ratio=100.0, show=6):
     latitudes, so a polar seam cell can exceed a global budget while
     being no worse than the cells beside it.  This compares each rim
     cell only with the *k* cells directly inward from it on the same
-    line, which removes that confound entirely -- a correct halo leaves
+    line, which removes that confound entirely -- a correct boundary
+    value leaves
     the rim cell comparable to its neighbours, a wrong one leaves it
     orders of magnitude above them.
 
     The first and last *k* positions along each edge are skipped: those
-    are the face corners, whose halo would have to come diagonally off
+    are the face corners, whose values would have to come diagonally off
     the face, from a neighbour ``face_connections`` never names.
 
     Parameters
@@ -487,7 +488,7 @@ def run(tol_factor=100.0, width=1):
         print("      lower edges -- pairing can fix these")
         n_bad, n_tested = edge_vs_inward(err, rot_lower, ref,
                                          ratio=tol_factor)
-        print("      upper edges -- these stencils never reach that halo")
+        print("      upper edges -- these stencils never read from that side")
         edge_vs_inward(err, rot_upper, ref, ratio=tol_factor)
         seam_med = float(np.median(
             err[np.asarray(edge_cell_mask(zeta, rot_lower, width))
@@ -504,7 +505,7 @@ def run(tol_factor=100.0, width=1):
 
     ok = True
     for label, (n_bad, n_tested, _) in results.items():
-        # a correct halo leaves a handful of cells at most; allow 0.1%
+        # a correct exchange leaves a handful of cells at most; allow 0.1%
         # (n_tested == 0 means the faces are smaller than the corner
         # exclusion -- nothing was checked, so nothing passed)
         passed = n_tested > 0 and n_bad <= max(1, 0.001 * n_tested)
@@ -521,7 +522,7 @@ def run(tol_factor=100.0, width=1):
 
     print()
     if ok:
-        print("  => xgcm exchanges the corner halo correctly along rotated "
+        print("  => xgcm carries the corner stencils correctly along rotated "
               "connections.\n     face_seam_mask can be reduced to the open "
               "domain edges plus the\n     face corners, where no neighbour "
               "is defined.")

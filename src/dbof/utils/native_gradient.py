@@ -16,7 +16,8 @@ def interp_pair_to_center(x_component, y_component, grid):
     """Interpolate an (X, Y) staggered pair to cell centres.
 
     The two parts must cross a face seam together: where a connection
-    rotates the neighbour, one part's halo comes from the other.
+    rotates the neighbour, one part's value from across the boundary
+    comes from the other.
 
     Parameters
     ----------
@@ -63,8 +64,9 @@ def diff_pair_along_own_axis(x_component, y_component, grid):
 def diff_pair_across_other_axis(x_component, y_component, grid):
     """Difference each component across the OTHER axis (to cell corners).
 
-    A component moved across the other axis takes its halo from the
-    partner at a rotated connection, so both go in together.
+    At a rotated connection a component moved across the other axis
+    takes its value from across the boundary from the partner, so both
+    go in together.
 
     Parameters
     ----------
@@ -414,8 +416,9 @@ def calculate_native_strain_vorticity(u_x, v_y, ds_grid, grid):
     # Cell corners: differencing each velocity across the OTHER
     # axis lands here — zero interpolation (circulation form over
     # rAz; the vorticity is MITgcm's momVort3).  Each component is
-    # moved across the other axis, so at a rotated connection its halo
-    # is the partner's: pass both (dev/verify_corner_seam_exchange.py).
+    # moved across the other axis, so at a rotated connection the value
+    # it needs from across the boundary is the partner's: pass both
+    # (dev/verify_corner_seam_exchange.py).
     cross_u, cross_v = diff_pair_across_other_axis(u_x * dxC, v_y * dyC,
                                                   grid)
     vorticity_corner = (cross_v - cross_u) / rAz

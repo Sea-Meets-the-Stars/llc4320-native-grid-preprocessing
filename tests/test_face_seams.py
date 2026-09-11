@@ -1,7 +1,8 @@
 """Staggered vector pairs crossing an LLC face connection.
 
 Some face connections reach the neighbour along the other axis, so a
-staggered component's halo has to come from its partner.  Pairs that are
+staggered component's value from across the boundary has to come from
+its partner.  Pairs that are
 rotated afterwards (U/V, the Jacobian, tracer-gradient components) carry
 the error into the output.  The corner stencils move each component
 across the other axis, which needs the same pairing; only OPEN domain
@@ -26,7 +27,7 @@ from dbof.utils.native_gradient import (diff_pair_along_own_axis,
                                         interp_pair_to_center)
 
 #: Faces whose X-upper connection is rotated (left-staggered U reads the
-#: upper halo), e.g. face 5 -> face 7 via 'Y'.
+#: value from the upper side), e.g. face 5 -> face 7 via 'Y'.
 ROTATED_X_UPPER = {3, 4, 5}
 
 
@@ -132,7 +133,7 @@ def test_corner_pair_uses_the_paired_exchange(ds2d, grid2d):
     got = out['vorticity_corner'].compute()
 
     # face 0's X-lower connection is rotated (-> face 12 via 'Y'), and a
-    # left-staggered diff reads the LOWER halo, so that column must move
+    # left-staggered diff reads from the LOWER side, so that column moves
     assert bool((np.abs(got - scalar) > 0).isel(face=0, i_g=0).any())
     # face 5's X-lower is same-axis (-> face 2 via 'X'): nothing to fix
     assert not bool((np.abs(got - scalar) > 0).isel(face=5, i_g=0).any())
