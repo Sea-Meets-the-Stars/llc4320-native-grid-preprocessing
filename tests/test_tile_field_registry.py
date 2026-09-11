@@ -43,6 +43,19 @@ from dbof.tiles.tile_utils import (
 )
 
 
+#: What ``_load_grid_for_tile`` returns: grid geometry, no tracers.  The
+#: comodo attrs on i/i_g/j/j_g ride along on its coords, which is where
+#: xgcm finds the X/Y axes -- handing ``_build_tile_context`` an empty
+#: grid instead leaves it with nothing to build a grid from.
+_GRID_VARS = ("XC", "YC", "CS", "SN", "dxC", "dyC", "dxG", "dyG",
+              "rA", "rAz", "hFacC", "Z", "drF")
+
+
+def _tile_grid(ds):
+    """The grid half of a tile context, as the real loader supplies it."""
+    return ds[[v for v in _GRID_VARS if v in ds]]
+
+
 def _tile_ds(cs=1.0, sn=0.0):
     """Single-face, depth-style synthetic tile dataset.
 
@@ -62,7 +75,7 @@ def _tile_ds(cs=1.0, sn=0.0):
 @pytest.fixture(scope="module")
 def tile_ctx():
     """(ds_merge, grid) tile context on the standard CS=1/SN=0 face."""
-    return _build_tile_context(_tile_ds(), xr.Dataset())
+    return _build_tile_context(_tile_ds(), _tile_grid(_tile_ds()))
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +186,7 @@ def test_rotation_pacific_like_face():
     speed = 0.3
     ds["U"] = xr.full_like(ds["U"], speed)   # model-x flow
     ds["V"] = xr.zeros_like(ds["V"])         # no model-y flow
-    ds_merge, grid = _build_tile_context(ds, xr.Dataset())
+    ds_merge, grid = _build_tile_context(ds, _tile_grid(ds))
 
     u = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["U"])
     v = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["V"])
@@ -194,7 +207,7 @@ def test_rotation_identity_face():
     speed = 0.3
     ds["U"] = xr.full_like(ds["U"], speed)
     ds["V"] = xr.zeros_like(ds["V"])
-    ds_merge, grid = _build_tile_context(ds, xr.Dataset())
+    ds_merge, grid = _build_tile_context(ds, _tile_grid(ds))
 
     u = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["U"])
     v = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["V"])

@@ -32,6 +32,7 @@ import xarray as xr
 # code under test
 import dbof.tiles.tile_mapping as tm
 import dbof.tiles.tile_utils as tu
+from dbof.llc4320_ingestion.grid import COMODO_COORD_META
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +449,12 @@ def _make_synthetic_grid_face(n_k: int) -> xr.Dataset:
         coords={
             "face": np.array([0]),
             "k":    np.arange(n_k),
+            # The real store carries these (stamped by
+            # get_llc_depth_gridfile); xgcm finds X/Y through them.
+            **{name: xr.DataArray(
+                   np.arange(n_i if name.startswith("i") else n_j),
+                   dims=name, attrs=meta)
+               for name, meta in COMODO_COORD_META.items()},
         },
     )
     return ds
