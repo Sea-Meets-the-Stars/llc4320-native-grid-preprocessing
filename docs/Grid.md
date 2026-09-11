@@ -33,6 +33,44 @@ gradient routines interpolate at all — and why the ORDER of squaring
 and interpolating matters.  See
 [Gradients.md](Gradients.md#gradient--interpolation-artifacts).
 
+### COMODO: where U and V sit
+
+The coordinate attributes come from the [COMODO conventions]
+(http://pycomodo.forge.imag.fr/norm.html), a CF extension
+for staggered ocean grids. The attribute value is a signed direction — 
+`-0.5` means the west/south cell face,`+0.5` the east/north one.  
+MITgcm puts `U` on the west face and `V` on the south face, 
+so **`i_g` and `j_g` are both `-0.5`**. If these attributes are not
+carried by the source data, they must be declared. That is done here 
+using a coordinate attribute called `c_grid_axis_shift`. 
+
+To check a store: `python dev/verify_grid_stores.py --stages attrs truth`
+reads what each one declares and, independently, works the registration
+out from the geometry (`XC` sits half a cell east of `XG[i]`).
+
+## Crossing a face boundary
+
+Some `face_connections` reach the neighbour along the *other* axis, so
+this face's model-x continues as the neighbour's model-y.  A staggered
+component's value from across the boundary then has to come from its
+partner, and three cases follow:
+
+- **Cell-centred fields** (tracers, and the geographic `u_east`/`v_north`)
+  have no component to confuse.  `grid.diff` / `grid.interp` are correct.
+- **A staggered pair** (U/V, a velocity Jacobian, a tracer gradient) must
+  be moved with `utils.native_gradient.interp_pair_to_center` or
+  `diff_pair_along_own_axis`, never one component at a time.  Getting
+  this wrong put a one-cell stripe in `U` and `vg` at the rotated face
+  edges (most visibly ~142.5 E).
+- **The corner stencils** (`vorticity_corner`, `strain_shear_corner`)
+  move each velocity across the *other* axis, so they need the same
+  pairing.  What is left is the four **open domain edges**, which have
+  no neighbour at all: `face_seam_mask` NaNs those, and the NaN carries
+  into `okubo_weiss` and `strain_mag`.
+
+Tests: `tests/test_face_seams.py`.
+Notebooks: `notebooks/notebooks_field_validation/face_connections.ipynb`.
+
 ## The vertical grid
 
 Cell centres `Z` (dimension `k`) carry `Theta`, `Salt`, and `U`/`V` at

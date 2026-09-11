@@ -45,7 +45,6 @@ import dbof.utils.native_gradient as ng
 from dbof.llc4320_ingestion.grid import set_xgcm_grid
 from dbof.utils.faces_to_latlon import (
     faces_dataset_to_latlon,
-    interp_staggered_to_tracer,
     set_vector_pair_attrs,
 )
 
@@ -159,10 +158,16 @@ def _path_a(u, v, ds, grid, interpolate=True):
 
 
 def _path_b(u, v, grid, interpolate=True):
-    """B: (interp ->) mate pairs -> vector stitch.  Returns (east, north)."""
+    """B: (interp ->) mate pairs -> vector stitch.  Returns (east, north).
+
+    The interp step is SHARED with A (same paired exchange), so what is
+    left between them is the stitch, which is what these tests are about.
+    Interpolating the pair one component at a time here instead would add
+    a second, unrelated difference at every rotated face seam.
+    """
     fields = {"U": u, "V": v}
     if interpolate:
-        interp_staggered_to_tracer(fields, grid)
+        fields["U"], fields["V"] = ng.interp_pair_to_center(u, v, grid)
     dsb = xr.Dataset(fields)
     set_vector_pair_attrs(dsb)
     out = _stitch(dsb.chunk({"face": 1}))
