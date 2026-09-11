@@ -613,9 +613,10 @@ def get_llc_depth_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_stor
     coords_update = {}
     for dim, attrs in COMODO_COORD_META.items():
         if dim not in grid.dims:
-            continue
-        existing = (grid.coords[dim] if dim in grid.coords
-                    else xr.DataArray(range(grid.sizes[dim]), dims=dim))
+            raise ValueError(
+                f"grid store {s3_url} is missing dimension {dim!r}; "
+                f"found {sorted(grid.dims)}")
+        existing = grid[dim]
         if 'axis' in existing.attrs:
             continue
         coords_update[dim] = existing.assign_attrs(attrs)
