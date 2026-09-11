@@ -68,19 +68,6 @@ partner, and three cases follow:
   no neighbour at all: `face_seam_mask` NaNs those, and the NaN carries
   into `okubo_weiss` and `strain_mag`.
 
-`dev/verify_corner_seam_exchange.py` measures the corner case against
-solid-body rotation, whose vorticity is known exactly: pairing takes the
-seam error from 6.5e6x the interior error down to 13x, at the floor of
-what that test can resolve.
-
-Whether the error is visible depends on what happens next.  Rotating the
-pair with CS/SN passes it straight through; summing squares
-(`calculate_grad_squared_tracer`, so `gradb2`) is rotation-invariant and
-absorbs it, which is why those channels are left alone.  The rotation
-also decides *which* channel shows a given seam: on an unrotated face an
-X-seam reaches the zonal component only, so `U` and `vg` show the
-142.5 E line while `V` and `ug` look clean.
-
 Tests: `tests/test_face_seams.py`.
 Notebooks: `notebooks/notebooks_field_validation/face_connections.ipynb`.
 
