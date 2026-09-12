@@ -62,7 +62,10 @@ def _tile_ds(cs=1.0, sn=0.0):
 @pytest.fixture(scope="module")
 def tile_ctx():
     """(ds_merge, grid) tile context on the standard CS=1/SN=0 face."""
-    return _build_tile_context(_tile_ds(), xr.Dataset())
+    ds = _tile_ds()
+    # The synthetic dataset carries the grid metrics and comodo coords,
+    # so it serves as both the tracer and the grid input.
+    return _build_tile_context(ds, ds)
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +176,7 @@ def test_rotation_pacific_like_face():
     speed = 0.3
     ds["U"] = xr.full_like(ds["U"], speed)   # model-x flow
     ds["V"] = xr.zeros_like(ds["V"])         # no model-y flow
-    ds_merge, grid = _build_tile_context(ds, xr.Dataset())
+    ds_merge, grid = _build_tile_context(ds, ds)
 
     u = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["U"])
     v = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["V"])
@@ -194,7 +197,7 @@ def test_rotation_identity_face():
     speed = 0.3
     ds["U"] = xr.full_like(ds["U"], speed)
     ds["V"] = xr.zeros_like(ds["V"])
-    ds_merge, grid = _build_tile_context(ds, xr.Dataset())
+    ds_merge, grid = _build_tile_context(ds, ds)
 
     u = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["U"])
     v = compute_tile_property(ds_merge, grid, TILE_PROPERTIES["V"])
