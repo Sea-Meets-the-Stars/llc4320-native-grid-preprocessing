@@ -33,6 +33,21 @@ gradient routines interpolate at all — and why the ORDER of squaring
 and interpolating matters.  See
 [Gradients.md](Gradients.md#gradient--interpolation-artifacts).
 
+### COMODO: where U and V sit
+
+The coordinate attributes come from the [COMODO conventions]
+(http://pycomodo.forge.imag.fr/norm.html), a CF extension
+for staggered ocean grids. The attribute value is a signed direction — 
+`-0.5` means the west/south cell face,`+0.5` the east/north one.  
+MITgcm puts `U` on the west face and `V` on the south face, 
+so **`i_g` and `j_g` are both `-0.5`**. If these attributes are not
+carried by the source data, they must be declared. That is done here 
+using a coordinate attribute called `c_grid_axis_shift`. 
+
+To check a store: `python dev/verify_grid_stores.py --stages attrs truth`
+reads what each one declares and, independently, works the registration
+out from the geometry (`XC` sits half a cell east of `XG[i]`).
+
 ## The vertical grid
 
 Cell centres `Z` (dimension `k`) carry `Theta`, `Salt`, and `U`/`V` at

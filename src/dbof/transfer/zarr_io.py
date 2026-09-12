@@ -28,6 +28,8 @@ convention lives in :mod:`dbof.transfer.pipeline`.
 
 # stdlib
 import logging
+
+from dbof.llc4320_ingestion.grid import COMODO_COORD_META
 import time as _time
 
 # numerical / compute
@@ -160,6 +162,12 @@ def ensure_coord_written(root, ds, coord_name, chunk_len=None):
         dimension_names=(coord_name,),
     )
     zc[:] = vals
+
+    attrs = dict(ds[coord_name].attrs) if coord_name in ds.coords else {}
+    if 'axis' not in attrs and coord_name in COMODO_COORD_META:
+        attrs.update(COMODO_COORD_META[coord_name])
+    if attrs:
+        safe_set_attrs(zc, attrs)
 
 
 # ---------------------------------------------------------------------------

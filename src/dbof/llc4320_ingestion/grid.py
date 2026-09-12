@@ -3,6 +3,16 @@
 
 import xgcm
 
+#: COMODO coordinate attributes for the LLC4320 horizontal dimensions.
+#: See docs/Grid.md.
+
+COMODO_COORD_META = {
+    'j':   {'axis': 'Y'},
+    'j_g': {'axis': 'Y', 'c_grid_axis_shift': -0.5},
+    'i':   {'axis': 'X'},
+    'i_g': {'axis': 'X', 'c_grid_axis_shift': -0.5},
+}
+
 face_connections = {'face':  {
         0: {'X': ((12, 'Y', False), (3, 'X', False)),
             'Y': (None, (1, 'Y', False))},
