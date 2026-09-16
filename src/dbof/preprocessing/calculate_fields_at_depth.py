@@ -393,8 +393,7 @@ def froude_number(ds_merge, grid, mld=None):
     n2 = buoyancy_frequency_squared(ds_merge)
     n_abs = np.sqrt(np.abs(n2))
 
-    U_c = grid.interp(ds_merge.U, 'X', boundary='fill')
-    V_c = grid.interp(ds_merge.V, 'Y', boundary='fill')
+    U_c, V_c = ng.interp_pair_to_center(ds_merge.U, ds_merge.V, grid)
     speed = np.sqrt(U_c**2 + V_c**2)
 
     denom = n_abs * mld

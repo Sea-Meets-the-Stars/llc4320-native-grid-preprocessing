@@ -103,6 +103,9 @@ the centred `relative_vorticity` channel — different stencils by
 design.
 
 
+See [Grid.md](Grid.md#crossing-a-face-boundary) for what happens
+to these stencils at a rotated face connection.
+
 ## Note on wind stress (`oceTAUX`/`oceTAUY`)
 
 From the model metadata: in the Arakawa C-grid, wind stress acts on

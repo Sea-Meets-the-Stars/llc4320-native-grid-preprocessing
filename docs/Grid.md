@@ -48,6 +48,29 @@ To check a store: `python dev/verify_grid_stores.py --stages attrs truth`
 reads what each one declares and, independently, works the registration
 out from the geometry (`XC` sits half a cell east of `XG[i]`).
 
+## Crossing a face boundary
+
+Some `face_connections` reach the neighbour along the *other* axis, so
+this face's model-x continues as the neighbour's model-y.  A staggered
+component's value from across the boundary then has to come from its
+partner, and three cases follow:
+
+- **Cell-centred fields** (tracers, and the geographic `u_east`/`v_north`)
+  have no component to confuse.  `grid.diff` / `grid.interp` are correct.
+- **A staggered pair** (U/V, a velocity Jacobian, a tracer gradient) must
+  be moved with `utils.native_gradient.interp_pair_to_center` or
+  `diff_pair_along_own_axis`, never one component at a time.  Getting
+  this wrong put a one-cell stripe in `U` and `vg` at the rotated face
+  edges (most visibly ~142.5 E).
+- **The corner stencils** (`vorticity_corner`, `strain_shear_corner`)
+  move each velocity across the *other* axis, so they need the same
+  pairing.  What is left is the four **open domain edges**, which have
+  no neighbour at all: `face_seam_mask` NaNs those, and the NaN carries
+  into `okubo_weiss` and `strain_mag`.
+
+Tests: `tests/test_face_seams.py`.
+Notebooks: `notebooks/notebooks_field_validation/face_connections.ipynb`.
+
 ## The vertical grid
 
 Cell centres `Z` (dimension `k`) carry `Theta`, `Salt`, and `U`/`V` at

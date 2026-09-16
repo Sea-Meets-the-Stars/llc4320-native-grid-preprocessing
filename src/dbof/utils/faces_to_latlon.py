@@ -187,7 +187,7 @@ def interp_staggered_to_tracer(fields, grid, stagger_map=None):
 
     for var, axis in stagger_map.items():
         if var in fields:
-            fields[var] = grid.interp(fields[var], axis, boundary='fill')
+            fields[var] = grid.interp(fields[var], axis, padding='fill')
 
 
 # ---------------------------------------------------------------------------
