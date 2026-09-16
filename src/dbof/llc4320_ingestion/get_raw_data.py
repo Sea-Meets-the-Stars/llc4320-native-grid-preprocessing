@@ -1,7 +1,7 @@
 import s3fs
 import xarray as xr
 
-from dbof.llc4320_ingestion.grid import COMODO_COORD_META
+from dbof.llc4320_ingestion.grid import ensure_comodo_attrs
 import ujson
 import dask
 from functools import partial
@@ -609,19 +609,10 @@ def get_llc_depth_gridfile(s3_endpoint: str, bucket: str, folder: str, grid_stor
     if 'hFacC' in grid and 'k' in grid['hFacC'].dims:
         grid = grid.assign(hFacC=grid['hFacC'].isel(k=0, drop=True))
 
-    # Add the COMODO coordinate attributes. Fill ONLY where the store is silent.
-    coords_update = {}
-    for dim, attrs in COMODO_COORD_META.items():
-        if dim not in grid.dims:
-            raise ValueError(
-                f"grid store {s3_url} is missing dimension {dim!r}; "
-                f"found {sorted(grid.dims)}")
-        existing = grid[dim]
-        if 'axis' in existing.attrs:
-            continue
-        coords_update[dim] = existing.assign_attrs(attrs)
-    if coords_update:
-        grid = grid.assign_coords(coords_update)
+    # Add the COMODO coordinate attributes. Fill ONLY where the store is
+    # silent; a full grid store missing a horizontal dim is broken, hence
+    # strict.
+    grid = ensure_comodo_attrs(grid, strict=True, source=s3_url)
 
     print(f"LLC_DEPTH grid file loaded from {s3_url}.")
     return grid

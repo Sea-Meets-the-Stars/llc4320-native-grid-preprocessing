@@ -331,44 +331,6 @@ def latlon_to_rect_ij(lon: float, lat: float, s3_cfg: dict) -> tuple[int, int]:
 # Data loading
 # ---------------------------------------------------------------------------
 
-def _ensure_comodo_attrs(ds: xr.Dataset) -> xr.Dataset:
-    """Stamp the comodo ``axis`` attrs on any horizontal dim that lacks them.
-
-    ``_build_tile_context`` builds xgcm from the grid dataset alone and raises
-    if X/Y are undetectable.  The DEPTH reader annotates the store on the way
-    out; ``process_llc4320_grid`` (the OSN path) does not guarantee it, and
-    ``reset_coords()`` can drop the annotation along the way.  This is a
-    no-op when the attrs are already present -- existing annotations are left
-    exactly as they are, so a store that declares its own
-    ``c_grid_axis_shift`` keeps its own convention.
-
-    Values come from ``llc4320_ingestion.grid.COMODO_COORD_META``, the one
-    definition in the repo: ``c_grid_axis_shift`` is a signed direction and
-    must be -0.5 for ``i_g``/``j_g`` (see docs/Grid.md). 
-
-    Parameters
-    ----------
-    ds : xr.Dataset
-        Grid dataset (tile-extent or full).
-
-    Returns
-    -------
-    xr.Dataset
-        The same dataset with ``axis`` (and, for staggered dims,
-        ``c_grid_axis_shift``) present on ``i``/``i_g``/``j``/``j_g``.
-    """
-    updates = {}
-    for dim, attrs in COMODO_COORD_META.items():
-        if dim not in ds.dims:
-            continue
-        existing = (ds.coords[dim] if dim in ds.coords
-                    else xr.DataArray(range(ds.sizes[dim]), dims=dim))
-        if "axis" in existing.attrs:
-            continue
-        updates[dim] = existing.assign_attrs(attrs)
-    return ds.assign_coords(updates) if updates else ds
-
-
 def _tile_indexer(ds: xr.Dataset, tile: TileInfo) -> dict:
     """Build an ``isel`` indexer covering tracer AND staggered horizontal dims.
 
@@ -441,9 +403,10 @@ def _load_grid_for_tile(s3_cfg: dict, tile: TileInfo) -> xr.Dataset:
         face=[tile.face_idx],
         **_tile_indexer(ds_grid, tile),
     ).compute()
-    # Only the DEPTH reader stamps the comodo attrs; do it here for the
-    # others so _build_tile_context can always find X/Y.
-    return _ensure_comodo_attrs(ds_grid_tile)
+    # The OSN grid comes through process_llc4320_grid, not the DEPTH
+    # reader, and .reset_coords() can drop the annotation on the way; a
+    # tile subset may carry only some horizontal dims, hence lenient.
+    return ensure_comodo_attrs(ds_grid_tile)
 
 
 def _load_tracers_for_tile(
@@ -530,7 +493,7 @@ from dbof.tiles.field_registry import (  # noqa: F401
     TileProperty,
     resolve_property,
 )
-from dbof.llc4320_ingestion.grid import (COMODO_COORD_META,
+from dbof.llc4320_ingestion.grid import (ensure_comodo_attrs,
                                          set_xgcm_grid)
 from dbof.global_dataset_creation.grid_setup import _VERTICAL_VARS
 
