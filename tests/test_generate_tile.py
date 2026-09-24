@@ -158,7 +158,8 @@ def test_run_round_trip(monkeypatch, tmp_path, prop_name):
         "s3_endpoint": "stub", "bucket": "stub",
         "folder": "stub",      "grid_folder": "stub",
     }
-    monkeypatch.setattr(tu, "_resolve_s3_source", lambda _: fake_s3_cfg)
+    monkeypatch.setattr(tu, "_resolve_s3_source",
+                        lambda _, pipeline=None: fake_s3_cfg)
 
     # --- Stub git-commit lookup (reused from global_dataset_creation.logging,
     # --- imported into tile_utils as ``_git_commit_hash``). ---

@@ -15,6 +15,80 @@ COMODO_COORD_META = {
     'i_g': {'axis': 'X', 'c_grid_axis_shift': -0.5},
 }
 
+
+def comodo_attrs(dim, existing_attrs=None):
+    """COMODO attrs to ADD for *dim*, empty when it needs none.
+
+    The repo's one policy for these annotations: fill only where the
+    store is silent, so a store that declares its own ``axis`` is
+    believed and a reader's literal never wins over the data.
+
+    Parameters
+    ----------
+    dim : str
+        Dimension name.  Names outside :data:`COMODO_COORD_META` get ``{}``.
+    existing_attrs : mapping, optional
+        Attrs already on the coordinate.
+
+    Returns
+    -------
+    dict
+        Attrs to merge in, or ``{}`` to leave *dim* alone.
+
+    """
+    if dim not in COMODO_COORD_META:
+        return {}
+    if existing_attrs and 'axis' in existing_attrs:
+        return {}
+    return dict(COMODO_COORD_META[dim])
+
+
+def ensure_comodo_attrs(ds, *, strict=False, source=None):
+    """Annotate a dataset's horizontal dims so xgcm can find X and Y.
+
+    The single application point for :func:`comodo_attrs`.  Callers differ
+    only in whether an absent dim is an error: a full grid store without
+    ``i_g`` is broken (*strict*), while a tile subset or an OSN kerchunk
+    grid legitimately carries only some of the four.
+
+    Parameters
+    ----------
+    ds : xarray.Dataset
+        Grid dataset, tile-extent or full.  Not modified in place.
+    strict : bool, default False
+        Raise when a dim of :data:`COMODO_COORD_META` is absent instead
+        of skipping it.
+    source : str, optional
+        Store path, quoted in the strict error.
+
+    Returns
+    -------
+    xarray.Dataset
+        ``ds`` with ``axis`` (and ``c_grid_axis_shift`` on the staggered
+        dims) present on whichever of ``i``/``i_g``/``j``/``j_g`` it has.
+
+    Raises
+    ------
+    ValueError
+        *strict* and a dim is missing.
+
+    """
+    updates = {}
+    for dim in COMODO_COORD_META:
+        if dim not in ds.dims:
+            if strict:
+                raise ValueError(
+                    f"grid store {source} is missing dimension {dim!r}; "
+                    f"found {sorted(ds.dims)}")
+            continue
+        existing = (ds.coords[dim] if dim in ds.coords
+                    else xr.DataArray(range(ds.sizes[dim]), dims=dim))
+        attrs = comodo_attrs(dim, existing.attrs)
+        if attrs:
+            updates[dim] = existing.assign_attrs(attrs)
+    return ds.assign_coords(updates) if updates else ds
+
+
 face_connections = {'face':  {
         0: {'X': ((12, 'Y', False), (3, 'X', False)),
             'Y': (None, (1, 'Y', False))},
