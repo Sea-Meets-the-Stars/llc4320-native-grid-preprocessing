@@ -17,7 +17,7 @@
 # ---------------------------------------------------------------------------
 
 run:
-  run_id: "transfer_chunks_monterey_bay"
+  run_id: "transfer_chunks_monterey_72h"
   log_dir: "./logs"
 
 data:
