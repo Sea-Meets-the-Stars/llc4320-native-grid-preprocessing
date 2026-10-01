@@ -139,7 +139,7 @@ transfer:
     - oceTAUY
     - SIarea
     - oceQnet
-    - oceFWflux
+    - oceFWflx
     - oceQsw
     - time
 
