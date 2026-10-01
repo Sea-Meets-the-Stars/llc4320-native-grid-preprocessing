@@ -139,6 +139,8 @@ transfer:
     - oceTAUY
     - SIarea
     - oceQnet
+    - oceFWflux
+    - oceQsw
     - time
 
   # Static grid variables — written once to {chunk_name}/grid.zarr, sliced to
