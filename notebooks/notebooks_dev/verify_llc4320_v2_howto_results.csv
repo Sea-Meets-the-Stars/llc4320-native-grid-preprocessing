@@ -1,0 +1,62 @@
+section,status,claim,documented,observed,note
+1,PASS,anonymous listing works,True,True,
+1,PASS,grid.zarr present,True,True,
+1,INFO,non-hourly objects in prefix,,['grid.zarr'],expect only grid.zarr
+1,PASS,bucket is read-only for anonymous clients,True,True,
+1,PASS,path-style addressing is required (virtual-hosted fails),True,True,INFO only if your DNS happens to resolve bucket.host
+2,FAIL,number of hourly stores,9692,9502,
+2,PASS,first snapshot (UTC),2023-01-01 01:00:00+00:00,2023-01-01 01:00:00+00:00,
+2,FAIL,last snapshot (UTC),2024-02-08 20:00:00+00:00,2024-01-31 23:00:00+00:00,
+2,FAIL,"hourly, no gaps",True,False,"1 missing, 0 duplicate"
+3,PASS,Theta dims,"('face', 'j', 'i')","('face', 'j', 'i')",
+3,PASS,Theta shape,"(13, 4320, 4320)","(13, 4320, 4320)",
+3,PASS,Theta dtype,float32,float32,
+3,PASS,"on-disk chunks (face, j, i)","(1, 720, 720)","(1, 720, 720)",
+3,PASS,no time dimension,True,True,
+3,PASS,face_layout attr,llc_faces,llc_faces,
+3,PASS,attribute 'selected_date_utc' present,,2023-03-01 06:00:00,
+3,PASS,attribute 'selected_iteration' present,,263400,
+3,PASS,attribute 'source_folder' present,,2023_02_28_150000_to_2023_03_03_170000,
+3,PASS,attribute 'source_file' present,,SST.0000263400.data,
+3,PASS,in-memory size per hour (MB),970,970,"13*4320*4320*4 B; HOWTO's 470 MB is on disk, measured next"
+3,PASS,on-disk size per hour (MB),470,463,
+3,PASS,store open time (s)  — consolidated metadata,,0.98,one or two HTTP requests expected
+3,PASS,store name == selected_date_utc,20230301T06,20230301T06,
+3,PASS,consolidated metadata present,True,True,
+4,PASS,number of grid variables (data_vars),23,23,
+4,PASS,all documented variables present,[],[],list = documented-but-missing
+4,PASS,undocumented extras,[],[],
+4,PASS,RC length (cell centres),173,173,
+4,PASS,DRF length,173,173,
+4,PASS,RF length (interfaces),174,174,
+4,PASS,DRC length,174,174,
+4,PASS,RC monotonic (positive-up MITgcm convention → decreasing),True,True,
+4,PASS,DRF == RF[k]-RF[k+1],True,True,
+5,PASS,faces where latitude runs along i (rotated),"[7, 8, 9, 10, 11, 12]","[7, 8, 9, 10, 11, 12]",face 6 is the Arctic cap; either answer is fine there
+5,PASS,v2 XC/YC identical to original LLC4320 grid,True,True,→ face_connections / COMODO metadata in dbof carry over unchanged
+5,FAIL,v2 CS/SN identical to original LLC4320 grid (float32 tolerance),,1.0,
+5,FAIL,v2 Depth identical to original,,3082.41357421875,bathymetry is what differs if the v2 run used a different topography
+5,INFO,cells where |Depth_v2 - Depth_v1| > 1 m,,140554194,of 242611200; 57.934 %
+6,PASS,finite Theta values on maskC==0 cells,0,0,
+6,PASS,NaN fraction over maskC==0 (land),,1.0,
+6,PASS,NaN fraction over maskC==1 (ocean),,0.0,
+6,FAIL,"ocean minimum (°C), this hour",-2.6,-3.39,must not be colder than the documented record min; freezing point ≈ -1.9 (S=35) to -2.6 (brine)
+6,PASS,"ocean maximum (°C), this hour",36.6,32.9,must not exceed the documented record max; a March hour will sit below it
+6,PASS,exact-zero ocean points (%),0.0025,0.0,
+6,PASS,faces_dataset_to_latlon stitches v2 Theta (repo routine),,0.569,ocean fraction of stitched image; visual check above
+7,PASS,get_llc_timestep_data opens a v2 hour,True,True,"needs storage_options=_llc_surf_storage_options(ENDPOINT, anon=True)"
+7,PASS,get_llc_timestep_data dims,"('face', 'j', 'i')","('face', 'j', 'i')",default chunks dict mentions k=51; harmless because v2 has no k
+7,PASS,dbof read == xarray read (sample block),True,True,
+7,FAIL,get_llc_depth_gridfile opens v2 grid.zarr,,"ValueError: grid store s3://llc4320-v2/SURFACE/grid.zarr is missing dimension 'j_g'; found ['face', 'i', 'j']",
+7,PASS,process_llc4320_grid + xgcm Grid(face_connections) on v2 grid,True,True,"after renaming ['DRC', 'DRF', 'RC', 'RF', 'hFacC_k0', 'hFacS_k0', 'hFacW_k0'] and relabelling staggered dims"
+7,PASS,native |∇Theta|² computes on v2 (face 4),,0.891,fraction of finite cells; land is NaN
+7,PASS,"v2 iteration ≠ dbof-calendar iteration (use timestamps, not iterations)",True,True,confirms the HOWTO caveat; date_iterations must NOT be used for v2
+7,INFO,iteration stride per hour,,300,144 ⇒ 25 s timestep as in the original run
+8,INFO,wrangler.ogcm.llc_v2_access importable,,ModuleNotFoundError,section skipped
+9,PASS,open 24 hourly stores lazily (s),,3.7,"0.15 s per hour → metadata cost scales with hours, not space"
+9,PASS,stored Theta chunk objects / possible,,366 / 468,fewer than 468 ⇒ all-land tiles are not written
+9,PASS,tiles with any ocean (from maskC),366,366,should equal the number of stored chunk objects
+10,INFO,"|ΔTheta| between consecutive hours, face 4: p50 / p99 / p99.99 (K)",,"[0.0438, 0.1336, 0.5809]",snapshot-to-snapshot change; INFO
+11,INFO,v2 levels,,173,vs 51 in original (repo keeps top 51)
+11,INFO,leading levels identical to original axis,,0,0 ⇒ v2 is a genuinely new vertical grid; the repo's k=51 cut and docs/Grid.md table will not apply
+11,INFO,v2 level index reaching the repo's 969 m cut,,89,replaces k=51 in llc_depth_timestep_chunks
